@@ -2,5 +2,11 @@
 name = "rust-bitcoin-tx-monitor"
 version = "0.1.0"
 edition = "2021"
+description = "Bitcoin Transaction monitor"
+keywords = ["bitcoin", "monitor"]
+homepage = "https://github.com/FairgateLabs/rust-bitcoin-tx-monitor"
+repository = "https://github.com/FairgateLabs/rust-bitcoin-tx-monitor"
+readme = "README.md"
+
 
 [dependencies]
