@@ -8,7 +8,7 @@ pub struct Args {
     #[arg(short, long)]
     pub bitcoin_indexer_db_url: String,
 
-    /// Instance Operation database URL
+    /// Bitvmx instances file path
     #[arg(short, long)]
-    pub operation_db_url: String,
+    pub bitvmx_file_path: String,
 }

@@ -1,40 +1,77 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use mockall::automock;
 
-use crate::stores::{bitcoin_store::BitcoinStore, operation_store::OperationStore};
+use crate::stores::{bitcoin_store::BitcoinApi, bitvmx_store::BitvmxStore};
 
-pub struct Monitor {
-    pub bitcoin_store: BitcoinStore,
-    pub operation_store: OperationStore,
+pub struct Monitor<B: BitcoinApi> {
+    pub bitcoin_store: B,
+    pub operation_store: BitvmxStore,
+}
+pub trait Runner {
+    fn run(&mut self) -> Result<()>;
 }
 
-impl Monitor {
-    pub fn new(bitcoin_indexer_db_url: String, operation_db_url: String) -> Result<Self> {
-        let bitcoin_store = BitcoinStore::new(bitcoin_indexer_db_url)?;
-        let operation_store = OperationStore::new(operation_db_url)?;
+#[automock]
+impl<B: BitcoinApi> Runner for Monitor<B> {
+    fn run(&mut self) -> Result<()> {
+        //Get current block from Bitcoin Indexer
+        // let current_height = self
+        //     .bitcoin_store
+        //     .get_block_count()
+        //     .context("Failed to retrieve current block")?;
 
-        Ok(Self {
-            bitcoin_store,
-            operation_store,
-        })
+        // // Get operations that have already started
+        // let operations = self
+        //     .operation_store
+        //     .get_operations(current_height)
+        //     .context("Failed to retrieve operations")?;
+
+        // // count existing operations get all thansaction that meet next rules:
+        // for operation in operations {
+        //     for tx in operation.txs {
+        //         if tx.tx_was_seen && tx.block_confirmations > 6 {
+        //             break;
+        //         }
+
+        //         let tx_exists = self.bitcoin_store.tx_exists(&tx.txid)?;
+
+        //         self.operation_store
+        //             .update_tx_operation(operation.id, tx.txid, tx_exists, current_height)
+        //             .with_context(|| {
+        //                 format!(
+        //                     "Fail updating operation id {} for tx id {}",
+        //                     operation.id, tx.txid
+        //                 )
+        //             })?;
+        //     }
+        // }
+
+        Ok(())
     }
+}
 
-    pub fn run(&mut self) -> Result<()> {
-        //Intantiate Monitor, passing it the db_url and call the monitor check txns
+#[cfg(test)]
+mod test {
+    use crate::stores::bitcoin_store::MockBitcoinStore;
 
-        // should check pending operations in database and update each of them.
+    use super::*;
 
-        // count existing operations get all thansaction that meet next rules:
-        // operation transaction should no ve confirmn and > 5.
-        // for the other trans we need to check:
-        // transaction were not seen then we need to get the current block from the bitcoin api.
+    #[test]
+    fn monitor_test() -> Result<(), anyhow::Error> {
+        let mut mock_bitcoin_store = MockBitcoinStore::new();
 
-        // Get operations
+        mock_bitcoin_store
+            .expect_get_block_count()
+            .returning(|| Ok(11));
 
-        //for each operation get all thansactions
+        // let mut operator = bitvmxStore::new(String::from(""));
 
-        //for each transaction do
-
-        // check if txn was seen, then update the operation transaction row.
+        // let mut monitor = Monitor {
+        //     bitcoin_store: mock_bitcoin_store,
+        //     operation_store: operator,
+        // };
+        // // assert_eq!(a, 11);
+        // monitor.run()?;
 
         Ok(())
     }
