@@ -13,9 +13,9 @@ pub trait BitcoinApi {
     fn get_block_count(&mut self) -> Result<u32>;
 
     //Return the tx data if exists otherwise None
-    fn tx_exists(&mut self, tx_id: &Txid) -> Result<bool>;
+    fn tx_exists(&mut self, tx_id: &String) -> Result<bool>;
 
-    fn get_tx(&mut self, tx_id: &Txid) -> Result<Option<TxData>>;
+    fn get_tx(&mut self, tx_id: &String) -> Result<Option<TxData>>;
 }
 
 impl BitcoinStore {
@@ -41,7 +41,7 @@ impl BitcoinApi for BitcoinStore {
     }
 
     //Return the tx data if exists otherwise None
-    fn tx_exists(&mut self, tx_id: &Txid) -> Result<bool> {
+    fn tx_exists(&mut self, tx_id: &String) -> Result<bool> {
         let row = self.client.query_one(
             "SELECT EXISTS(SELECT 1 as exists FROM tx WHERE hash_id = $1::BYTEA)",
             &[],
@@ -50,7 +50,7 @@ impl BitcoinApi for BitcoinStore {
         Ok(row.get("exists"))
     }
 
-    fn get_tx(&mut self, tx_id: &Txid) -> Result<Option<TxData>> {
+    fn get_tx(&mut self, tx_id: &String) -> Result<Option<TxData>> {
         let row = self.client.query(
             "SELECT EXISTS(SELECT 1 FROM tx WHERE hash_id = $1::BYTEA);",
             &[],

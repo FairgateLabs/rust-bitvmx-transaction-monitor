@@ -13,12 +13,12 @@ pub trait BitvmxApi {
     /// Return pending bitvmx instances
     fn get_pending_bitvmx_instances(&mut self, current_height: u32) -> Result<Vec<BitvmxInstance>>;
 
-    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: String, current_height: u32) -> Result<()>;
+    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &String, current_height: u32) -> Result<()>;
 
     fn update_bitvmx_tx_confirmations(
         &mut self,
         id: u32,
-        txid: String,
+        txid: &String,
         current_height: u32,
     ) -> Result<()>;
 }
@@ -68,7 +68,7 @@ impl BitvmxApi for BitvmxStore {
         Ok(bitvmx_instances)
     }
 
-    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: String, current_height: u32) -> Result<()> {
+    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &String, current_height: u32) -> Result<()> {
         let mut bitvmx_instances = self.get_data()?;
 
         let mut found = false;
@@ -105,7 +105,7 @@ impl BitvmxApi for BitvmxStore {
     fn update_bitvmx_tx_confirmations(
         &mut self,
         id: u32,
-        txid: String,
+        txid: &String,
         current_height: u32,
     ) -> Result<()> {
         let mut bitvmx_instances = self.get_data()?;
