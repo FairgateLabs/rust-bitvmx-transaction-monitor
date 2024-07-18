@@ -30,8 +30,10 @@ impl<B: BitcoinApi> Runner for Monitor<B> {
             .context("Failed to retrieve operations")?;
 
         // count existing operations get all thansaction that meet next rules:
-        for operation in operations {
-            for tx in operation.txs {
+        for instance in operations {
+            assert!(instance.finished, "Error double checking finished instance");
+
+            for tx in instance.txs {
                 if tx.tx_was_seen && tx.confirmations > 6 {
                     break;
                 }
@@ -40,13 +42,13 @@ impl<B: BitcoinApi> Runner for Monitor<B> {
 
                 if tx_exists {
                     self.operation_store.update_bitvmx_tx_confirmations(
-                        operation.id,
+                        instance.id,
                         &tx.txid,
                         current_height,
                     )?
                 } else {
                     self.operation_store.update_bitvmx_tx_seen(
-                        operation.id,
+                        instance.id,
                         &tx.txid,
                         current_height,
                     )?;
@@ -60,9 +62,8 @@ impl<B: BitcoinApi> Runner for Monitor<B> {
 
 #[cfg(test)]
 mod test {
-    use crate::stores::bitcoin_store::MockBitcoinStore;
-
     use super::*;
+    use crate::stores::bitcoin_store::MockBitcoinStore;
 
     #[test]
     fn monitor_test() -> Result<(), anyhow::Error> {

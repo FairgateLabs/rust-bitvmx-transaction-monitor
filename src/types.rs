@@ -27,7 +27,7 @@ pub struct BitvmxInstance {
     //First height to start searching the bitvmx instance in the blockchain
     pub start_height: BlockHeight,
 
-    //If all txs in the bitvmx intance were found and confirm, then finished is true.
+    //If all txs in the bitvmx instance were found and confirm, then finished is true.
     pub finished: bool,
 }
 

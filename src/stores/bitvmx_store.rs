@@ -92,7 +92,7 @@ impl BitvmxApi for BitvmxStore {
 
         if !found {
             warn!(
-                "Txn for the bitvmx intance {} txid {} was not found",
+                "Txn for the bitvmx instance {} txid {} was not found",
                 id, txid
             );
         }
@@ -138,14 +138,14 @@ impl BitvmxApi for BitvmxStore {
                     }
                 }
 
-                //Bitvmx intance is complete, means all txns were find and confirm.
+                //Bitvmx instance is complete, means all txns were find and confirm.
                 instance.finished = true;
             }
         }
 
         if !found {
             warn!(
-                "Txn for the bitvmx intance {} txid {} was not found",
+                "Txn for the bitvmx instance {} txid {} was not found",
                 id, txid
             );
         }
@@ -250,7 +250,7 @@ mod test {
         all_instances
     }
 
-    fn setup_bitvmx_intances(file_path: &String, instances: Vec<BitvmxInstance>) -> Result<()> {
+    fn setup_bitvmx_instances(file_path: &String, instances: Vec<BitvmxInstance>) -> Result<()> {
         let json_data = serde_json::to_string_pretty(&instances)?;
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
@@ -262,7 +262,7 @@ mod test {
     fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
         let file_path = String::from("test1.json");
         let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
-        setup_bitvmx_intances(&file_path, instances)?;
+        setup_bitvmx_instances(&file_path, instances)?;
 
         let mut bitvmx_store = BitvmxStore::new(&file_path)?;
         let data = bitvmx_store.get_pending_bitvmx_instances(0)?;
@@ -288,7 +288,7 @@ mod test {
 
         let tx_id_not_seen = "3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f";
         let block_300 = 300;
-        let intances = vec![BitvmxInstance {
+        let instances = vec![BitvmxInstance {
             id: 2,
             txs: vec![
                 BitvmxTxData {
@@ -309,7 +309,7 @@ mod test {
             finished: false,
         }];
 
-        setup_bitvmx_intances(&file_path, intances)?;
+        setup_bitvmx_instances(&file_path, instances)?;
 
         let mut bitvmx_store = BitvmxStore::new(&file_path)?;
 
@@ -319,7 +319,7 @@ mod test {
         assert_eq!(data.len(), 1);
 
         // Tx 2 was seen in block_300
-        bitvmx_store.update_bitvmx_tx_seen(data[0].id, tx_id_not_seen.to_string(), block_300)?;
+        bitvmx_store.update_bitvmx_tx_seen(data[0].id, &tx_id_not_seen.to_string(), block_300)?;
 
         let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
 
@@ -336,17 +336,17 @@ mod test {
         //Update again but in another block
         bitvmx_store.update_bitvmx_tx_confirmations(
             data[0].id,
-            tx_id_not_seen.to_string(),
+            &tx_id_not_seen.to_string(),
             block_400,
         )?;
 
         // This will return instances are not finished
         let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
 
-        // There is not pending intances.
+        // There is not pending instances.
         assert_eq!(data.len(), 0);
 
-        // Now get all the data, with the finished intances
+        // Now get all the data, with the finished instances
         let data = bitvmx_store.get_data()?;
 
         // First block seen should be block_300, never change
