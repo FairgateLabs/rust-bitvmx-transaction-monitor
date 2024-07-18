@@ -1,7 +1,7 @@
 // use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxTxData {
     pub txid: String,
 
@@ -16,7 +16,7 @@ pub struct BitvmxTxData {
     pub confirmations: u32,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxInstance {
     //bitvmx instance id
     pub id: u32,

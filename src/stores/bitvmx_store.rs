@@ -2,6 +2,7 @@ use crate::types::BitvmxInstance;
 use anyhow::Context;
 use anyhow::Result;
 use log::warn;
+use mockall::automock;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 
@@ -57,6 +58,7 @@ impl BitvmxStore {
     }
 }
 
+#[automock]
 impl BitvmxApi for BitvmxStore {
     fn get_pending_bitvmx_instances(&mut self, current_height: u32) -> Result<Vec<BitvmxInstance>> {
         // This method will return bitvmx instances excluding the onces are already seen and is finished
