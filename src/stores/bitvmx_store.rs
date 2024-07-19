@@ -31,7 +31,7 @@ impl BitvmxStore {
         })
     }
 
-    fn get_data(&mut self) -> Result<Vec<BitvmxInstance>> {
+    pub fn get_data(&mut self) -> Result<Vec<BitvmxInstance>> {
         let mut file = File::open(&self.file_path).context("Error opening file")?;
 
         let mut contents = String::new();
