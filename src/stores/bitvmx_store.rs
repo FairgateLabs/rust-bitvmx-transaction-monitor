@@ -1,6 +1,7 @@
 use crate::types::BitvmxInstance;
 use anyhow::Context;
 use anyhow::Result;
+use log::info;
 use log::warn;
 use mockall::automock;
 use std::fs::{File, OpenOptions};
@@ -127,7 +128,7 @@ impl BitvmxApi for BitvmxStore {
                         );
 
                         assert!(
-                            current_height > tx.fist_height_tx_seen.unwrap(),
+                            current_height >= tx.fist_height_tx_seen.unwrap(),
                             "Looks txn is been updated in a incorrect block"
                         );
 

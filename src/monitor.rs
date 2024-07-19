@@ -1,19 +1,14 @@
-use anyhow::{Context, Result};
-use mockall::automock;
-
 use crate::stores::{bitcoin_store::BitcoinApi, bitvmx_store::BitvmxApi};
+use anyhow::{Context, Result};
+use log::{info, trace};
 
 pub struct Monitor<B: BitcoinApi, V: BitvmxApi> {
     pub bitcoin_store: B,
     pub bitvmx_store: V,
 }
-pub trait Runner {
-    fn run(&mut self) -> Result<()>;
-}
 
-#[automock]
-impl<B: BitcoinApi, V: BitvmxApi> Runner for Monitor<B, V> {
-    fn run(&mut self) -> Result<()> {
+impl<B: BitcoinApi, V: BitvmxApi> Monitor<B, V> {
+    pub fn run(&mut self) -> Result<()> {
         //Get current block from Bitcoin Indexer
         let current_height = self
             .bitcoin_store
@@ -26,7 +21,7 @@ impl<B: BitcoinApi, V: BitvmxApi> Runner for Monitor<B, V> {
             .get_pending_bitvmx_instances(current_height)
             .context("Failed to retrieve operations")?;
 
-        // count existing operations get all thansaction that meet next rules:
+        // Count existing operations get all thansaction that meet next rules:
         for instance in operations {
             assert!(
                 !instance.finished,
@@ -37,25 +32,38 @@ impl<B: BitcoinApi, V: BitvmxApi> Runner for Monitor<B, V> {
                 if tx.tx_was_seen && tx.confirmations > 6 {
                     continue;
                 }
-
                 // Tx exist means was found
                 let tx_exists = self.bitcoin_store.tx_exists(&tx.txid)?;
 
                 if tx_exists {
-                    if tx.tx_was_seen {
+                    if tx.tx_was_seen && current_height > tx.fist_height_tx_seen.unwrap() {
                         self.bitvmx_store.update_bitvmx_tx_confirmations(
                             instance.id,
                             &tx.txid,
                             current_height,
                         )?;
 
+                        info!(
+                            "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {}",
+                            instance.id,
+                            tx.txid,
+                            current_height
+                        );
+
                         continue;
-                    } else {
+                    }
+
+                    if !tx.tx_was_seen {
                         self.bitvmx_store.update_bitvmx_tx_seen(
                             instance.id,
                             &tx.txid,
                             current_height,
                         )?;
+
+                        info!(
+                            "Found bitvmx intance: {} | tx_id: {} | at height: {}",
+                            instance.id, tx.txid, current_height
+                        );
                     }
                 }
             }
@@ -217,14 +225,12 @@ mod test {
             .times(1)
             .returning(|_| Ok(true));
 
-        // Increase confirmations given this tx was seen block before
+        // Do no Increase confirmations given the block is the same were was found
         mock_bitvmx_store
             .expect_update_bitvmx_tx_confirmations()
-            .with(eq(intance_id), eq(tx_to_seen.to_string()), eq(block_201))
-            .times(1)
-            .returning(|_, _, _| Ok(()));
+            .times(0);
 
-        // Then update_bitvmx_tx_seen is not call
+        // Also the update_bitvmx_tx_seen is not call
         mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
 
         let mut monitor = Monitor {

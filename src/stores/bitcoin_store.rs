@@ -1,6 +1,5 @@
 use crate::types::TxData;
 use anyhow::{Ok, Result};
-use bitcoin::Txid;
 use mockall::{automock, predicate::*};
 use postgres::{Client, NoTls};
 
@@ -19,8 +18,8 @@ pub trait BitcoinApi {
 }
 
 impl BitcoinStore {
-    pub fn new(bitcoin_indexer_db_url: String) -> Result<Self> {
-        let client = Client::connect(&bitcoin_indexer_db_url, NoTls)?;
+    pub fn new(bitcoin_indexer_db_url: &String) -> Result<Self> {
+        let client = Client::connect(bitcoin_indexer_db_url, NoTls)?;
 
         Ok(BitcoinStore { client })
     }
@@ -34,7 +33,6 @@ impl BitcoinApi for BitcoinStore {
             .client
             .query_one("SELECT MAX(height) as height from block", &[])?;
 
-        println!("{:?}", row);
         // In database is an integer, that is way we have to manage i32 here.
         let result: i32 = row.get("height");
         Ok(result as u32)
@@ -44,17 +42,35 @@ impl BitcoinApi for BitcoinStore {
     fn tx_exists(&mut self, tx_id: &String) -> Result<bool> {
         let row = self.client.query_one(
             "SELECT EXISTS(SELECT 1 as exists FROM tx WHERE hash_id = $1::BYTEA)",
-            &[],
+            &[&tx_id.as_bytes()],
         )?;
 
         Ok(row.get("exists"))
     }
 
     fn get_tx(&mut self, tx_id: &String) -> Result<Option<TxData>> {
-        let row = self.client.query(
-            "SELECT EXISTS(SELECT 1 FROM tx WHERE hash_id = $1::BYTEA);",
-            &[],
+        let row = self.client.query_one(
+            "SELECT * FROM tx WHERE hash_id = $1::BYTEA;",
+            &[&tx_id.as_bytes()],
         )?;
+
+        // // let mempool_ts: NaiveDateTime = row.get("mempool_ts"); // Timestamp
+        // let fee: i64 = row.get("fee"); // Int8 (i64)
+        // let locktime: i64 = row.get("locktime"); // Int8 (i64)
+        // let current_height: i32 = row.get("current_height"); // Int4
+        // let weight: i32 = row.get("weight"); // Int4
+        // let coinbase: bool = row.get("coinbase"); // Bool
+        // let hash_id: Vec<u8> = row.get("hash_id"); // Bytea
+        // let hash_rest: Vec<u8> = row.get("hash_rest"); // Bytea
+
+        // // println!("mempool_ts: {:?}", mempool_ts);
+        // println!("fee: {}", fee);
+        // println!("locktime: {}", locktime);
+        // println!("current_height: {}", current_height);
+        // println!("weight: {}", weight);
+        // println!("coinbase: {}", coinbase);
+        // println!("hash_id: {:?}", hash_id);
+        // println!("hash_rest: {:?}", hash_rest);
 
         let txData = TxData {};
         Ok(Some(txData))
@@ -67,13 +83,45 @@ mod test {
     use super::*;
 
     #[test]
-    fn get_block_count_test() -> Result<(), anyhow::Error> {
+    #[ignore]
+
+    fn get_block_count() -> Result<(), anyhow::Error> {
         let database_url = String::from("postgres://postgres:admin@localhost:5433/bitcoin-indexer");
-        let mut bitcoin_store = BitcoinStore::new(database_url)?;
+        let mut bitcoin_store = BitcoinStore::new(&database_url)?;
         let count = bitcoin_store.get_block_count()?;
 
         assert_eq!(count, 10400);
 
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+
+    fn exist_tx() -> Result<(), anyhow::Error> {
+        let database_url = String::from("postgres://postgres:admin@localhost:5433/bitcoin-indexer");
+        let mut bitcoin_store = BitcoinStore::new(&database_url)?;
+
+        let tx_id =
+            String::from("6fe2aef3426a6b9d4b9a774b58dafe7b736e7a67998ab54b53cf6e82df1a28b8");
+        let exists_tx = bitcoin_store.tx_exists(&tx_id)?;
+
+        println!("??? {:#?}", exists_tx);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+
+    fn get_tx() -> Result<(), anyhow::Error> {
+        let database_url = String::from("postgres://postgres:admin@localhost:5433/bitcoin-indexer");
+        let mut bitcoin_store = BitcoinStore::new(&database_url)?;
+
+        let tx_id =
+            String::from("6fe2aef3426a6b9d4b9a774b58dafe7b736e7a67998ab54b53cf6e82df1a28b8");
+        let tx = bitcoin_store.get_tx(&tx_id)?;
+
+        // println!("{:#?}", tx);
         Ok(())
     }
 }

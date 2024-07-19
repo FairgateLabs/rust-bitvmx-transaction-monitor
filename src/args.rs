@@ -5,10 +5,10 @@ use clap::{command, Parser};
 
 pub struct Args {
     /// Bitcoin indexer database URL
-    #[arg(short, long)]
-    pub bitcoin_indexer_db_url: String,
+    #[arg(long, short = 'v')]
+    pub bitcoin_indexer_db_url: Option<String>,
 
     /// Bitvmx instances file path
-    #[arg(short, long)]
-    pub bitvmx_file_path: String,
+    #[arg(long, short = 'f')]
+    pub bitvmx_file_path: Option<String>,
 }
