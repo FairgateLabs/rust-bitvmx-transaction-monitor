@@ -1,6 +1,6 @@
 use crate::stores::{bitcoin_store::BitcoinApi, bitvmx_store::BitvmxApi};
 use anyhow::{Context, Result};
-use log::{info, trace};
+use log::info;
 
 pub struct Monitor<B: BitcoinApi, V: BitvmxApi> {
     pub bitcoin_store: B,

@@ -1,7 +1,6 @@
 use crate::types::BitvmxInstance;
 use anyhow::Context;
 use anyhow::Result;
-use log::info;
 use log::warn;
 use mockall::automock;
 use std::fs::{File, OpenOptions};
@@ -15,20 +14,20 @@ pub trait BitvmxApi {
     /// Return pending bitvmx instances
     fn get_pending_bitvmx_instances(&mut self, current_height: u32) -> Result<Vec<BitvmxInstance>>;
 
-    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &String, current_height: u32) -> Result<()>;
+    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &str, current_height: u32) -> Result<()>;
 
     fn update_bitvmx_tx_confirmations(
         &mut self,
         id: u32,
-        txid: &String,
+        txid: &str,
         current_height: u32,
     ) -> Result<()>;
 }
 
 impl BitvmxStore {
-    pub fn new(file_path: &String) -> Result<Self> {
+    pub fn new(file_path: &str) -> Result<Self> {
         Ok(Self {
-            file_path: file_path.clone(),
+            file_path: file_path.to_string(),
         })
     }
 
@@ -71,7 +70,7 @@ impl BitvmxApi for BitvmxStore {
         Ok(bitvmx_instances)
     }
 
-    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &String, current_height: u32) -> Result<()> {
+    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &str, current_height: u32) -> Result<()> {
         let mut bitvmx_instances = self.get_data()?;
 
         let mut found = false;
@@ -79,7 +78,7 @@ impl BitvmxApi for BitvmxStore {
         for instance in bitvmx_instances.iter_mut() {
             if instance.id == id {
                 for tx in instance.txs.iter_mut() {
-                    if tx.txid == txid.to_string() {
+                    if tx.txid == *txid {
                         if tx.tx_was_seen {
                             warn!("Txn already seen, looks this methods is being calling more than what should be")
                         }
@@ -108,7 +107,7 @@ impl BitvmxApi for BitvmxStore {
     fn update_bitvmx_tx_confirmations(
         &mut self,
         id: u32,
-        txid: &String,
+        txid: &str,
         current_height: u32,
     ) -> Result<()> {
         let mut bitvmx_instances = self.get_data()?;
@@ -121,7 +120,7 @@ impl BitvmxApi for BitvmxStore {
                 for tx in instance.txs.iter_mut() {
                     all_txs_confirm = all_txs_confirm && tx.confirmations >= 6;
 
-                    if tx.txid == txid.to_string() {
+                    if tx.txid == *txid {
                         assert!(
                             tx.tx_was_seen,
                             "Txn already seen, looks this methods is being calling more than what should be"
@@ -253,7 +252,7 @@ mod test {
         all_instances
     }
 
-    fn setup_bitvmx_instances(file_path: &String, instances: Vec<BitvmxInstance>) -> Result<()> {
+    fn setup_bitvmx_instances(file_path: &str, instances: Vec<BitvmxInstance>) -> Result<()> {
         let json_data = serde_json::to_string_pretty(&instances)?;
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;

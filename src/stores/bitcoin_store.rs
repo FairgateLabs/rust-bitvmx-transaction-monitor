@@ -12,13 +12,13 @@ pub trait BitcoinApi {
     fn get_block_count(&mut self) -> Result<u32>;
 
     //Return the tx data if exists otherwise None
-    fn tx_exists(&mut self, tx_id: &String) -> Result<bool>;
+    fn tx_exists(&mut self, tx_id: &str) -> Result<bool>;
 
-    fn get_tx(&mut self, tx_id: &String) -> Result<Option<TxData>>;
+    fn get_tx(&mut self, tx_id: &str) -> Result<Option<TxData>>;
 }
 
 impl BitcoinStore {
-    pub fn new(bitcoin_indexer_db_url: &String) -> Result<Self> {
+    pub fn new(bitcoin_indexer_db_url: &str) -> Result<Self> {
         let client = Client::connect(bitcoin_indexer_db_url, NoTls)?;
 
         Ok(BitcoinStore { client })
@@ -39,7 +39,7 @@ impl BitcoinApi for BitcoinStore {
     }
 
     //Return the tx data if exists otherwise None
-    fn tx_exists(&mut self, tx_id: &String) -> Result<bool> {
+    fn tx_exists(&mut self, tx_id: &str) -> Result<bool> {
         let row = self.client.query_one(
             "SELECT EXISTS(SELECT 1 as exists FROM tx WHERE hash_id = $1::BYTEA)",
             &[&tx_id.as_bytes()],
@@ -48,7 +48,7 @@ impl BitcoinApi for BitcoinStore {
         Ok(row.get("exists"))
     }
 
-    fn get_tx(&mut self, tx_id: &String) -> Result<Option<TxData>> {
+    fn get_tx(&mut self, tx_id: &str) -> Result<Option<TxData>> {
         let row = self.client.query_one(
             "SELECT * FROM tx WHERE hash_id = $1::BYTEA;",
             &[&tx_id.as_bytes()],
@@ -60,8 +60,8 @@ impl BitcoinApi for BitcoinStore {
         // let current_height: i32 = row.get("current_height"); // Int4
         // let weight: i32 = row.get("weight"); // Int4
         // let coinbase: bool = row.get("coinbase"); // Bool
-        // let hash_id: Vec<u8> = row.get("hash_id"); // Bytea
-        // let hash_rest: Vec<u8> = row.get("hash_rest"); // Bytea
+        let hash_id: Vec<u8> = row.get("hash_id"); // Bytea
+                                                   // let hash_rest: Vec<u8> = row.get("hash_rest"); // Bytea
 
         // // println!("mempool_ts: {:?}", mempool_ts);
         // println!("fee: {}", fee);
@@ -69,11 +69,11 @@ impl BitcoinApi for BitcoinStore {
         // println!("current_height: {}", current_height);
         // println!("weight: {}", weight);
         // println!("coinbase: {}", coinbase);
-        // println!("hash_id: {:?}", hash_id);
+        println!("hash_id: {:?}", hash_id);
         // println!("hash_rest: {:?}", hash_rest);
 
-        let txData = TxData {};
-        Ok(Some(txData))
+        let tx_data = TxData {};
+        Ok(Some(tx_data))
     }
 }
 
@@ -119,9 +119,8 @@ mod test {
 
         let tx_id =
             String::from("6fe2aef3426a6b9d4b9a774b58dafe7b736e7a67998ab54b53cf6e82df1a28b8");
-        let tx = bitcoin_store.get_tx(&tx_id)?;
+        let _ = bitcoin_store.get_tx(&tx_id)?;
 
-        // println!("{:#?}", tx);
         Ok(())
     }
 }

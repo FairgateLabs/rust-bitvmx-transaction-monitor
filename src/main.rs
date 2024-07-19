@@ -1,6 +1,5 @@
 use anyhow::{Context, Ok, Result};
 use clap::Parser;
-use log::info;
 use rust_bitcoin_tx_monitor::{
     args::Args,
     monitor::Monitor,
