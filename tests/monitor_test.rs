@@ -34,6 +34,7 @@ fn no_instances() -> Result<(), anyhow::Error> {
     let mut monitor = Monitor {
         bitcoin_store: mock_bitcoin_store,
         bitvmx_store: mock_bitvmx_store,
+        ..Monitor::default()
     };
 
     monitor.run()?;
@@ -103,6 +104,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     let mut monitor = Monitor {
         bitcoin_store: mock_bitcoin_store,
         bitvmx_store: mock_bitvmx_store,
+        ..Monitor::default()
     };
 
     monitor.run()?;
@@ -159,9 +161,10 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     let mut monitor = Monitor {
         bitcoin_store: mock_bitcoin_store,
         bitvmx_store: mock_bitvmx_store,
+        ..Monitor::default()
     };
 
-    monitor.run()?;
+    let _ = monitor.run();
 
     Ok(())
 }

@@ -1,11 +1,15 @@
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use clap::Parser;
+use log::info;
 use rust_bitcoin_tx_monitor::{
     args::Args,
     monitor::Monitor,
-    stores::{bitcoin_store::BitcoinStore, bitvmx_store::BitvmxStore},
+    stores::{
+        bitcoin_store::{BitcoinApi, BitcoinStore},
+        bitvmx_store::BitvmxStore,
+    },
 };
-use std::env;
+use std::{env, thread, time::Duration};
 
 fn main() -> Result<()> {
     dotenv::dotenv().context("There was an error loading .env file")?;
@@ -29,8 +33,25 @@ fn main() -> Result<()> {
     let mut monitor = Monitor {
         bitcoin_store,
         bitvmx_store,
+        is_running: false,
     };
 
-    monitor.run()?;
-    Ok(())
+    let mut prev_height = 0;
+    let mut bitcoin_store = BitcoinStore::new(&bitcoin_indexer_db_url)?;
+
+    loop {
+        let current_height = bitcoin_store
+            .get_block_count()
+            .context("Failed to retrieve current block")?;
+
+        if prev_height == current_height {
+            info!("Waitting for a new block");
+            thread::sleep(Duration::from_secs(1));
+        } else {
+            info!("New block found height: {}", current_height);
+            prev_height = current_height;
+        }
+
+        monitor.run()?;
+    }
 }

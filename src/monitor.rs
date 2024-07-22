@@ -1,10 +1,12 @@
 use crate::stores::{bitcoin_store::BitcoinApi, bitvmx_store::BitvmxApi};
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
 use log::info;
 
+#[derive(Default)]
 pub struct Monitor<B: BitcoinApi, V: BitvmxApi> {
     pub bitcoin_store: B,
     pub bitvmx_store: V,
+    pub is_running: bool,
 }
 
 impl<B: BitcoinApi, V: BitvmxApi> Monitor<B, V> {
