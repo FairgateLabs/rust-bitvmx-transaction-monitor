@@ -1,20 +1,23 @@
+use bitcoin::Txid;
 use mockall::predicate::*;
+use rust_bitcoin_indexer::indexer::MockIndexerApi;
 use rust_bitcoin_tx_monitor::{
+    bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
-    stores::{bitcoin_store::MockBitcoinStore, bitvmx_store::MockBitvmxStore},
     types::{BitvmxInstance, BitvmxTxData},
 };
+use std::{str::FromStr, sync::Arc};
 
 #[test]
 fn no_instances() -> Result<(), anyhow::Error> {
-    let mut mock_bitcoin_store = MockBitcoinStore::new();
+    let mut mock_indexer = MockIndexerApi::new();
     let mut mock_bitvmx_store = MockBitvmxStore::new();
 
     let block_100 = 100;
 
-    mock_bitcoin_store
-        .expect_get_block_count()
-        .returning(move || Ok(block_100));
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(block_100)));
 
     // Return an empty bitvmx array
     mock_bitvmx_store
@@ -31,40 +34,45 @@ fn no_instances() -> Result<(), anyhow::Error> {
     // Then we never call update_bitvmx_tx_seen
     mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
 
-    let mut monitor = Monitor {
-        bitcoin_store: mock_bitcoin_store,
-        bitvmx_store: mock_bitvmx_store,
-        ..Monitor::default()
+    let monitor = Monitor {
+        indexer_api: Arc::new(mock_indexer),
+        bitvmx_store: Arc::new(mock_bitvmx_store),
     };
 
-    monitor.run()?;
+    monitor.detect_instances()?;
 
     Ok(())
 }
 
 #[test]
 fn instance_tx_detected() -> Result<(), anyhow::Error> {
-    let mut mock_bitcoin_store = MockBitcoinStore::new();
+    let mut mock_indexer = MockIndexerApi::new();
     let mut mock_bitvmx_store = MockBitvmxStore::new();
 
     let block_200 = 200;
     let intance_id = 2;
-    let tx_to_seen = "3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f";
+
+    let tx_to_seen =
+        Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+            .unwrap();
+    let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
+        .unwrap();
 
     let instances = vec![BitvmxInstance {
         id: intance_id,
         txs: vec![
             BitvmxTxData {
-                txid: "e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b"
-                    .to_string(),
+                txid: txid,
+                tx_hex: None,
                 tx_was_seen: true,
-                fist_height_tx_seen: Some(190),
+                height_tx_seen: Some(190),
                 confirmations: 10,
             },
             BitvmxTxData {
-                txid: tx_to_seen.to_string().clone(),
+                txid: tx_to_seen.clone(),
+                tx_hex: None,
                 tx_was_seen: false,
-                fist_height_tx_seen: None,
+                height_tx_seen: None,
                 confirmations: 0,
             },
         ],
@@ -72,9 +80,14 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         finished: false,
     }];
 
-    mock_bitcoin_store
-        .expect_get_block_count()
-        .returning(move || Ok(block_200));
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(block_200)));
+
+    mock_indexer
+        .expect_get_tx()
+        .times(1)
+        .returning(move |_| Ok("".to_string()));
 
     mock_bitvmx_store
         .expect_get_pending_bitvmx_instances()
@@ -83,9 +96,9 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .returning(move |_| Ok(instances.clone()));
 
     // Tx was found by the indexer and is already in the blockchain.
-    mock_bitcoin_store
+    mock_indexer
         .expect_tx_exists()
-        .with(eq(tx_to_seen.to_string().clone()))
+        .with(eq(tx_to_seen.clone()))
         .times(1)
         .returning(|_| Ok(true));
 
@@ -97,45 +110,49 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     // Then call update_bitvmx_tx_seen for the first time
     mock_bitvmx_store
         .expect_update_bitvmx_tx_seen()
-        .with(eq(intance_id), eq(tx_to_seen.to_string()), eq(block_200))
+        .with(eq(intance_id), eq(tx_to_seen), eq(block_200), eq(""))
         .times(1)
-        .returning(|_, _, _| Ok(()));
+        .returning(|_, _, _, _| Ok(()));
 
-    let mut monitor = Monitor {
-        bitcoin_store: mock_bitcoin_store,
-        bitvmx_store: mock_bitvmx_store,
-        ..Monitor::default()
+    let monitor = Monitor {
+        indexer_api: Arc::new(mock_indexer),
+        bitvmx_store: Arc::new(mock_bitvmx_store),
     };
 
-    monitor.run()?;
+    monitor.detect_instances()?;
 
     Ok(())
 }
 
 #[test]
 fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Error> {
-    let mut mock_bitcoin_store = MockBitcoinStore::new();
+    let mut mock_indexer = MockIndexerApi::new();
     let mut mock_bitvmx_store = MockBitvmxStore::new();
 
     let block_201 = 200;
     let intance_id = 2;
-    let tx_to_seen = "3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f";
+
+    let tx_to_seen =
+        Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+            .unwrap();
+
     let confirmations = 1;
     let instances = vec![BitvmxInstance {
         id: intance_id,
         txs: vec![BitvmxTxData {
-            txid: tx_to_seen.to_string().clone(),
+            txid: tx_to_seen.clone(),
+            tx_hex: None,
             tx_was_seen: true,
-            fist_height_tx_seen: Some(200),
+            height_tx_seen: Some(200),
             confirmations,
         }],
         start_height: 180,
         finished: false,
     }];
 
-    mock_bitcoin_store
-        .expect_get_block_count()
-        .returning(move || Ok(block_201));
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(block_201)));
 
     mock_bitvmx_store
         .expect_get_pending_bitvmx_instances()
@@ -144,9 +161,9 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .returning(move |_| Ok(instances.clone()));
 
     // Tx was found by the indexer and is already in the blockchain.
-    mock_bitcoin_store
+    mock_indexer
         .expect_tx_exists()
-        .with(eq(tx_to_seen.to_string().clone()))
+        .with(eq(tx_to_seen.clone()))
         .times(1)
         .returning(|_| Ok(true));
 
@@ -158,13 +175,12 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     // Also the update_bitvmx_tx_seen is not call
     mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
 
-    let mut monitor = Monitor {
-        bitcoin_store: mock_bitcoin_store,
-        bitvmx_store: mock_bitvmx_store,
-        ..Monitor::default()
+    let monitor = Monitor {
+        indexer_api: Arc::new(mock_indexer),
+        bitvmx_store: Arc::new(mock_bitvmx_store),
     };
 
-    let _ = monitor.run();
+    let _ = monitor.detect_instances();
 
     Ok(())
 }

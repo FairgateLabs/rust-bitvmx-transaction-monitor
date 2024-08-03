@@ -1,6 +1,7 @@
 use crate::types::BitvmxInstance;
 use anyhow::Context;
 use anyhow::Result;
+use bitcoin::Txid;
 use log::warn;
 use mockall::automock;
 use std::fs::{File, OpenOptions};
@@ -12,14 +13,20 @@ pub struct BitvmxStore {
 
 pub trait BitvmxApi {
     /// Return pending bitvmx instances
-    fn get_pending_bitvmx_instances(&mut self, current_height: u32) -> Result<Vec<BitvmxInstance>>;
+    fn get_pending_bitvmx_instances(&self, current_height: u32) -> Result<Vec<BitvmxInstance>>;
 
-    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &str, current_height: u32) -> Result<()>;
+    fn update_bitvmx_tx_seen(
+        &self,
+        id: u32,
+        txid: &Txid,
+        current_height: u32,
+        tx_hex: &str,
+    ) -> Result<()>;
 
     fn update_bitvmx_tx_confirmations(
-        &mut self,
+        &self,
         id: u32,
-        txid: &str,
+        txid: &Txid,
         current_height: u32,
     ) -> Result<()>;
 }
@@ -31,7 +38,7 @@ impl BitvmxStore {
         })
     }
 
-    pub fn get_data(&mut self) -> Result<Vec<BitvmxInstance>> {
+    pub fn get_data(&self) -> Result<Vec<BitvmxInstance>> {
         let mut file = File::open(&self.file_path).context("Error opening file")?;
 
         let mut contents = String::new();
@@ -56,27 +63,57 @@ impl BitvmxStore {
 
         Ok(())
     }
+
+    fn check_finish_instances(
+        &self,
+        intance_id: u32,
+        bitvmx_instances: &mut Vec<BitvmxInstance>,
+    ) -> Result<()> {
+        //Check if all txs are confirmed
+        for instance in bitvmx_instances.iter_mut() {
+            if instance.id == intance_id {
+                let mut all_txs_confirm = true;
+
+                for tx in instance.txs.iter_mut() {
+                    // Iterate through all txs to check if all are confirmed
+                    all_txs_confirm = all_txs_confirm && tx.confirmations >= 6;
+                }
+
+                //Bitvmx instance is complete, means all txns were find and confirm.
+                instance.finished = all_txs_confirm;
+                break;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[automock]
 impl BitvmxApi for BitvmxStore {
-    fn get_pending_bitvmx_instances(&mut self, current_height: u32) -> Result<Vec<BitvmxInstance>> {
+    fn get_pending_bitvmx_instances(&self, current_height: u32) -> Result<Vec<BitvmxInstance>> {
         // This method will return bitvmx instances excluding the onces are already seen and is finished
 
         let mut bitvmx_instances = self.get_data()?;
 
-        bitvmx_instances.retain(|i| i.start_height <= current_height && !i.finished);
+        bitvmx_instances.retain(|i| (i.start_height <= current_height && !i.finished));
 
         Ok(bitvmx_instances)
     }
 
-    fn update_bitvmx_tx_seen(&mut self, id: u32, txid: &str, current_height: u32) -> Result<()> {
+    fn update_bitvmx_tx_seen(
+        &self,
+        intance_id: u32,
+        txid: &Txid,
+        current_height: u32,
+        tx_hex: &str,
+    ) -> Result<()> {
         let mut bitvmx_instances = self.get_data()?;
 
         let mut found = false;
 
         for instance in bitvmx_instances.iter_mut() {
-            if instance.id == id {
+            if instance.id == intance_id {
                 for tx in instance.txs.iter_mut() {
                     if tx.txid == *txid {
                         if tx.tx_was_seen {
@@ -84,7 +121,8 @@ impl BitvmxApi for BitvmxStore {
                         }
                         tx.tx_was_seen = true;
                         tx.confirmations = 1;
-                        tx.fist_height_tx_seen = Some(current_height);
+                        tx.height_tx_seen = Some(current_height);
+                        tx.tx_hex = Some(tx_hex.to_string());
                         found = true;
                         break;
                     }
@@ -95,9 +133,11 @@ impl BitvmxApi for BitvmxStore {
         if !found {
             warn!(
                 "Txn for the bitvmx instance {} txid {} was not found",
-                id, txid
+                intance_id, txid
             );
         }
+
+        let _ = self.check_finish_instances(intance_id, &mut bitvmx_instances);
 
         self.write_data(bitvmx_instances)?;
 
@@ -105,9 +145,9 @@ impl BitvmxApi for BitvmxStore {
     }
 
     fn update_bitvmx_tx_confirmations(
-        &mut self,
-        id: u32,
-        txid: &str,
+        &self,
+        intance_id: u32,
+        txid: &Txid,
         current_height: u32,
     ) -> Result<()> {
         let mut bitvmx_instances = self.get_data()?;
@@ -115,11 +155,9 @@ impl BitvmxApi for BitvmxStore {
         let mut found = false;
 
         for instance in bitvmx_instances.iter_mut() {
-            if instance.id == id {
-                let mut all_txs_confirm = true;
+            if instance.id == intance_id {
                 for tx in instance.txs.iter_mut() {
-                    all_txs_confirm = all_txs_confirm && tx.confirmations >= 6;
-
+                    // Iterate through all txs to check if all are confirmed
                     if tx.txid == *txid {
                         assert!(
                             tx.tx_was_seen,
@@ -127,30 +165,27 @@ impl BitvmxApi for BitvmxStore {
                         );
 
                         assert!(
-                            current_height >= tx.fist_height_tx_seen.unwrap(),
+                            current_height >= tx.height_tx_seen.unwrap(),
                             "Looks txn is been updated in a incorrect block"
                         );
 
-                        tx.confirmations = current_height - tx.fist_height_tx_seen.unwrap();
-                        found = true
-                    }
-
-                    if !all_txs_confirm {
-                        break;
+                        tx.confirmations = current_height - tx.height_tx_seen.unwrap();
+                        found = true;
                     }
                 }
-
-                //Bitvmx instance is complete, means all txns were find and confirm.
-                instance.finished = true;
             }
         }
 
         if !found {
             warn!(
                 "Txn for the bitvmx instance {} txid {} was not found",
-                id, txid
+                intance_id, txid
             );
+
+            return Ok(());
         }
+
+        let _ = self.check_finish_instances(intance_id, &mut bitvmx_instances);
 
         self.write_data(bitvmx_instances)?;
 
