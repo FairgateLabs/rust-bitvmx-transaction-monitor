@@ -87,7 +87,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     mock_indexer
         .expect_get_tx()
         .times(1)
-        .returning(move |_| Ok("".to_string()));
+        .returning(move |_| Ok("0x123".to_string()));
 
     mock_bitvmx_store
         .expect_get_pending_bitvmx_instances()
@@ -100,7 +100,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .expect_tx_exists()
         .with(eq(tx_to_seen.clone()))
         .times(1)
-        .returning(|_| Ok(true));
+        .returning(|_| Ok((true, Some(150))));
 
     // The first time was seen the tx should not call update_bitvmx_tx_confirmations
     mock_bitvmx_store
@@ -110,7 +110,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     // Then call update_bitvmx_tx_seen for the first time
     mock_bitvmx_store
         .expect_update_bitvmx_tx_seen()
-        .with(eq(intance_id), eq(tx_to_seen), eq(block_200), eq(""))
+        .with(eq(intance_id), eq(tx_to_seen), eq(150), eq("0x123"))
         .times(1)
         .returning(|_, _, _, _| Ok(()));
 
@@ -165,7 +165,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .expect_tx_exists()
         .with(eq(tx_to_seen.clone()))
         .times(1)
-        .returning(|_| Ok(true));
+        .returning(|_| Ok((true, Some(0))));
 
     // Do no Increase confirmations given the block is the same were was found
     mock_bitvmx_store
