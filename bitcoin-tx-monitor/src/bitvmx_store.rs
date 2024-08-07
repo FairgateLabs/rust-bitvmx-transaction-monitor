@@ -67,7 +67,7 @@ impl BitvmxStore {
     fn check_finish_instances(
         &self,
         intance_id: u32,
-        bitvmx_instances: &mut Vec<BitvmxInstance>,
+        bitvmx_instances: &mut [BitvmxInstance],
     ) -> Result<()> {
         //Check if all txs are confirmed
         for instance in bitvmx_instances.iter_mut() {
