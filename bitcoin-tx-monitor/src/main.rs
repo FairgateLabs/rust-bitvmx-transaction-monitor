@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
-use bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
-use clap::Parser;
-use log::{info, warn};
-use rust_bitcoin_indexer::{
+use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
     indexer::Indexer,
     store::{Store, StoreClient},
     types::BlockHeight,
 };
+use bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
+use clap::Parser;
+use log::{info, warn};
 use std::{env, sync::Arc, thread, time::Duration};
 fn main() -> Result<()> {
     let loaded = dotenv::dotenv();

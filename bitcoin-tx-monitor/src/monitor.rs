@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::bitvmx_store::BitvmxApi;
 use anyhow::{Context, Ok, Result};
+use bitcoin_indexer::indexer::IndexerApi;
 use log::info;
-use rust_bitcoin_indexer::indexer::IndexerApi;
 
 pub struct Monitor {
     pub indexer_api: Arc<dyn IndexerApi>,

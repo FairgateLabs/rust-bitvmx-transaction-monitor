@@ -1,11 +1,11 @@
 use bitcoin::Txid;
-use mockall::predicate::*;
-use rust_bitcoin_indexer::indexer::MockIndexerApi;
-use rust_bitcoin_tx_monitor::{
+use bitcoin_indexer::indexer::MockIndexerApi;
+use bitcoin_tx_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
     types::{BitvmxInstance, BitvmxTxData},
 };
+use mockall::predicate::*;
 use std::{str::FromStr, sync::Arc};
 
 #[test]

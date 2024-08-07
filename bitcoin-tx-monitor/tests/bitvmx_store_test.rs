@@ -1,5 +1,5 @@
 use bitcoin::Txid;
-use rust_bitcoin_tx_monitor::{
+use bitcoin_tx_monitor::{
     bitvmx_store::{BitvmxApi, BitvmxStore},
     types::{BitvmxInstance, BitvmxTxData},
 };
