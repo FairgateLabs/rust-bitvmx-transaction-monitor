@@ -9,9 +9,6 @@ This process checks all BitVMX instances in a file and verifies them against a B
 
 To run the monitor, you need to create a **.env** file. You can use the **.env.example** file as a reference.
 
-### Bitcoin Indexer Data
-To use Bitcoin data, you need to set the BITCOIN_INDEXER_DB_URL environment variable to the correct URL for the Bitcoin index database. You can find the Bitcoin indexer code [here](https://github.com/FairgateLabs/rust-bitcoin-indexer).
-
 ### Bitvmx Instances Data
 
 You can use bitvmx_data_example.json as a reference. Copy and paste this file, then rename it. Remember to use the same name for the file as you have declared in your data configuration under BITVMX_FILE_PATH.
