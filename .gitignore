@@ -1,3 +1,5 @@
 /target
+bitcoin-tx-monitor/target
 .env
 bitvmx_data.json
+Cargo.lock
