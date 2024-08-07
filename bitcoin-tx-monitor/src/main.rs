@@ -74,7 +74,7 @@ fn main() -> Result<()> {
 
     loop {
         if rx.try_recv().is_ok() {
-            info!("Stop Bitcoin transaction onitor");
+            info!("Stop Bitcoin transaction Monitor");
             break;
         }
 
