@@ -11,9 +11,9 @@ use clap::Parser;
 use log::{info, warn};
 use std::{env, sync::Arc, thread, time::Duration};
 fn main() -> Result<()> {
-    let loaded = dotenv::dotenv();
+    let envs = dotenv::dotenv();
 
-    if loaded.is_err() {
+    if envs.is_err() {
         warn!("No .env file found");
     }
 
