@@ -11,7 +11,12 @@ use rust_bitcoin_indexer::{
 use rust_bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
 use std::{env, sync::Arc, thread, time::Duration};
 fn main() -> Result<()> {
-    dotenv::dotenv().context("There was an error loading .env file")?;
+    let loaded = dotenv::dotenv();
+
+    if loaded.is_err() {
+        warn!("No .env file found");
+    }
+
     env_logger::init();
 
     let args = Args::parse();
