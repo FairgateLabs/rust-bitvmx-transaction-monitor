@@ -26,3 +26,4 @@ mockall = "0.12.1"
 postgres = "0.19.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ctrlc = "3.4"

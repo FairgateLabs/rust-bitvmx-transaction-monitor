@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
@@ -9,8 +9,18 @@ use bitcoin_indexer::{
 use bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
 use clap::Parser;
 use log::{info, warn};
-use std::{env, sync::Arc, thread, time::Duration};
+use std::{
+    env,
+    sync::{mpsc::channel, Arc},
+    thread,
+    time::Duration,
+};
 fn main() -> Result<()> {
+    let (tx, rx) = channel();
+
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
+
     let envs = dotenv::dotenv();
 
     if envs.is_err() {
@@ -63,6 +73,11 @@ fn main() -> Result<()> {
     let mut prev_height = 0;
 
     loop {
+        if rx.try_recv().is_ok() {
+            info!("Stop Bitcoin transaction onitor");
+            break;
+        }
+
         height_to_sync = indexer.index_height(&height_to_sync)?;
 
         if prev_height == height_to_sync {
@@ -74,21 +89,23 @@ fn main() -> Result<()> {
 
         monitor.detect_instances()?;
     }
+
+    Ok(())
 }
 
-fn get_checkpoint() -> Result<Option<u32>, anyhow::Error> {
+fn get_checkpoint() -> Result<Option<u32>> {
     let checkpoint = env::var("CHECKPOINT_HEIGHT");
-    let mut checkpoint_height = None;
 
     if checkpoint.is_ok() {
-        checkpoint_height = match checkpoint?.parse::<BlockHeight>() {
-            Ok(checkpoint_height) => Some(checkpoint_height),
-            Err(_) => {
-                warn!("Checkpoint height must be a positive integer");
-                None
-            }
-        };
+        let checkpoint_height = checkpoint?.parse::<BlockHeight>();
+
+        if checkpoint_height.is_err() {
+            warn!("Checkpoint height must be a positive integer");
+            return Ok(None);
+        }
+
+        return Ok(Some(checkpoint_height?));
     }
 
-    Ok(checkpoint_height)
+    return Ok(None);
 }
