@@ -39,7 +39,8 @@ impl BitvmxStore {
     }
 
     pub fn get_data(&self) -> Result<Vec<BitvmxInstance>> {
-        let mut file = File::open(&self.file_path).context("Error opening file")?;
+        let mut file = File::open(&self.file_path)
+            .with_context(|| format!("Error opening file {}", &self.file_path))?;
 
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
@@ -55,7 +56,7 @@ impl BitvmxStore {
             .write(true)
             .truncate(true) // Truncate the file (clear existing content)
             .open(&self.file_path)
-            .context("Error opening file")?;
+            .with_context(|| format!("Error writing file {}", &self.file_path))?;
 
         let json_data = serde_json::to_string_pretty(&instances)?;
 
