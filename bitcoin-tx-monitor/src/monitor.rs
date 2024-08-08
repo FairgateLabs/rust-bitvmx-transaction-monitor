@@ -1,25 +1,32 @@
-use std::sync::Arc;
-
 use crate::bitvmx_store::BitvmxApi;
 use anyhow::{Context, Ok, Result};
-use bitcoin_indexer::indexer::IndexerApi;
+use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
 
 pub struct Monitor {
-    pub indexer_api: Arc<dyn IndexerApi>,
-    pub bitvmx_store: Arc<dyn BitvmxApi>,
+    pub indexer: Box<dyn IndexerApi>,
+    pub bitvmx_store: Box<dyn BitvmxApi>,
 }
 
 impl Monitor {
-    pub fn detect_instances(&self) -> Result<()> {
+    pub fn new(indexer: Box<dyn IndexerApi>, bitvmx_store: Box<dyn BitvmxApi>) -> Self {
+        Self {
+            indexer,
+            bitvmx_store,
+        }
+    }
+
+    pub fn detect_instances_at_height(&self, height_to_sync: BlockHeight) -> Result<BlockHeight> {
+        let new_height = self.indexer.index_height(&height_to_sync)?;
+
         //Get current block from Bitcoin Indexer
         let current_height = self
-            .indexer_api
+            .indexer
             .get_best_block()
             .context("Failed to retrieve current block")?;
 
         if current_height.is_none() {
-            return Ok(());
+            return Ok(new_height);
         }
 
         let current_height = current_height.unwrap();
@@ -43,7 +50,7 @@ impl Monitor {
                     continue;
                 }
                 // Tx exist means was found
-                let tx_exists_height = self.indexer_api.tx_exists(&tx.txid)?;
+                let tx_exists_height = self.indexer.tx_exists(&tx.txid)?;
 
                 if tx_exists_height.0 {
                     if tx.tx_was_seen && current_height > tx.height_tx_seen.unwrap() {
@@ -64,7 +71,7 @@ impl Monitor {
                     }
 
                     if !tx.tx_was_seen {
-                        let tx_hex = self.indexer_api.get_tx(&tx.txid)?;
+                        let tx_hex = self.indexer.get_tx(&tx.txid)?;
 
                         self.bitvmx_store.update_bitvmx_tx_seen(
                             instance.id,
@@ -82,6 +89,6 @@ impl Monitor {
             }
         }
 
-        Ok(())
+        Ok(new_height)
     }
 }

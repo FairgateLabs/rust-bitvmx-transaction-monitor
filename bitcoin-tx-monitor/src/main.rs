@@ -9,12 +9,7 @@ use bitcoin_indexer::{
 use bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
 use clap::Parser;
 use log::{info, warn};
-use std::{
-    env,
-    sync::{mpsc::channel, Arc},
-    thread,
-    time::Duration,
-};
+use std::{env, sync::mpsc::channel, thread, time::Duration};
 fn main() -> Result<()> {
     let (tx, rx) = channel();
 
@@ -48,7 +43,7 @@ fn main() -> Result<()> {
 
     let checkpoint_height: Option<u32> = get_checkpoint()?;
 
-    let bitcoin_client = Arc::new(BitcoinClient::new(&node_rpc_url)?);
+    let bitcoin_client = BitcoinClient::new(&node_rpc_url)?;
     let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
     let network = bitcoin_client.get_blockchain_info()?;
 
@@ -61,14 +56,9 @@ fn main() -> Result<()> {
         define_height_to_sync(checkpoint_height, blockchain_height, indexed_height)?;
     info!("Start synchronizing from {}H", height_to_sync);
 
-    let indexer = Arc::new(Indexer::new(bitcoin_client, Arc::new(store))?);
-
-    let bitvmx_store = Arc::new(BitvmxStore::new(&bitvmx_file_path)?);
-
-    let monitor = Monitor {
-        indexer_api: indexer.clone(),
-        bitvmx_store,
-    };
+    let indexer = Indexer::new(Box::new(bitcoin_client), Box::new(store))?;
+    let bitvmx_store = BitvmxStore::new(&bitvmx_file_path)?;
+    let monitor = Monitor::new(Box::new(indexer), Box::new(bitvmx_store));
 
     let mut prev_height = 0;
 
@@ -78,16 +68,16 @@ fn main() -> Result<()> {
             break;
         }
 
-        height_to_sync = indexer.index_height(&height_to_sync)?;
-
         if prev_height == height_to_sync {
             info!("Waitting for a new block...");
-            thread::sleep(Duration::from_secs(10));
+            thread::sleep(Duration::from_secs(1));
         } else {
             prev_height = height_to_sync;
         }
 
-        monitor.detect_instances()?;
+        height_to_sync = monitor
+            .detect_instances_at_height(height_to_sync)
+            .context("Fail to detect instances")?;
     }
 
     Ok(())
@@ -107,5 +97,5 @@ fn get_checkpoint() -> Result<Option<u32>> {
         return Ok(Some(checkpoint_height?));
     }
 
-    return Ok(None);
+    Ok(None)
 }
