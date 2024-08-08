@@ -3,13 +3,21 @@ use anyhow::{Context, Ok, Result};
 use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
 
-pub struct Monitor {
-    pub indexer: Box<dyn IndexerApi>,
-    pub bitvmx_store: Box<dyn BitvmxApi>,
+pub struct Monitor<I, B>
+where
+    I: IndexerApi,
+    B: BitvmxApi,
+{
+    pub indexer: I,
+    pub bitvmx_store: B,
 }
 
-impl Monitor {
-    pub fn new(indexer: Box<dyn IndexerApi>, bitvmx_store: Box<dyn BitvmxApi>) -> Self {
+impl<I, B> Monitor<I, B>
+where
+    I: IndexerApi,
+    B: BitvmxApi,
+{
+    pub fn new(indexer: I, bitvmx_store: B) -> Self {
         Self {
             indexer,
             bitvmx_store,
