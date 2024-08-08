@@ -1,29 +1,37 @@
-use rust_bitcoin_tx_monitor::{
-    stores::bitvmx_store::{BitvmxApi, BitvmxStore},
+use bitcoin::Txid;
+use bitcoin_tx_monitor::{
+    bitvmx_store::{BitvmxApi, BitvmxStore},
     types::{BitvmxInstance, BitvmxTxData},
 };
 
 use std::{
     fs::{self, File},
     io::Write,
+    str::FromStr,
 };
 
 fn get_mock_bitvmx_instances_finished() -> Vec<BitvmxInstance> {
+    let txid = Txid::from_str(&"4b8e07b98e23ab6a7e8ff2d2a4846c607d97ab3e51d6a6896a1eeb0d0b1fc63a")
+        .unwrap();
+
+    let txid2 = Txid::from_str(&"4a5e1e4baab89f3a32518a88b87bedd5a19d2b260bba7e560f7a28a4a6a6e4f4")
+        .unwrap();
+
     let instances = vec![BitvmxInstance {
         id: 1,
         txs: vec![
             BitvmxTxData {
-                txid: "4b8e07b98e23ab6a7e8ff2d2a4846c607d97ab3e51d6a6896a1eeb0d0b1fc63a"
-                    .to_string(),
+                txid: txid,
+                tx_hex: None,
                 tx_was_seen: true,
-                fist_height_tx_seen: Some(95),
+                height_tx_seen: Some(95),
                 confirmations: 10,
             },
             BitvmxTxData {
-                txid: "4a5e1e4baab89f3a32518a88b87bedd5a19d2b260bba7e560f7a28a4a6a6e4f4"
-                    .to_string(),
+                txid: txid2,
+                tx_hex: None,
                 tx_was_seen: true,
-                fist_height_tx_seen: Some(100),
+                height_tx_seen: Some(100),
                 confirmations: 10,
             },
         ],
@@ -35,21 +43,27 @@ fn get_mock_bitvmx_instances_finished() -> Vec<BitvmxInstance> {
 }
 
 fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
+    let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
+        .unwrap();
+
+    let txid2 = Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+        .unwrap();
+
     let instances = vec![BitvmxInstance {
         id: 2,
         txs: vec![
             BitvmxTxData {
-                txid: "e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b"
-                    .to_string(),
+                txid: txid,
+                tx_hex: None,
                 tx_was_seen: true,
-                fist_height_tx_seen: Some(190),
+                height_tx_seen: Some(190),
                 confirmations: 10,
             },
             BitvmxTxData {
-                txid: "3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f"
-                    .to_string(),
+                txid: txid2,
+                tx_hex: None,
                 tx_was_seen: false,
-                fist_height_tx_seen: None,
+                height_tx_seen: None,
                 confirmations: 0,
             },
         ],
@@ -61,21 +75,27 @@ fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
 }
 
 fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
+    let txid = Txid::from_str(&"6fe2aef3426a6b9d4b9a774b58dafe7b736e7a67998ab54b53cf6e82df1a28b8")
+        .unwrap();
+
+    let txid2 = Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+        .unwrap();
+
     let instances = vec![BitvmxInstance {
         id: 3,
         txs: vec![
             BitvmxTxData {
-                txid: "6fe2aef3426a6b9d4b9a774b58dafe7b736e7a67998ab54b53cf6e82df1a28b8"
-                    .to_string(),
+                txid: txid,
+                tx_hex: None,
                 tx_was_seen: false,
-                fist_height_tx_seen: None,
+                height_tx_seen: None,
                 confirmations: 0,
             },
             BitvmxTxData {
-                txid: "5a675f5d26b09cf9a41d93f5a12d2e5730c8e4cdbb1fbb7e20c4c7881a8e1f9d"
-                    .to_string(),
+                txid: txid2,
+                tx_hex: None,
                 tx_was_seen: false,
-                fist_height_tx_seen: None,
+                height_tx_seen: None,
                 confirmations: 0,
             },
         ],
@@ -113,7 +133,7 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
     let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
     setup_bitvmx_instances(&file_path, instances)?;
 
-    let mut bitvmx_store = BitvmxStore::new(&file_path)?;
+    let bitvmx_store = BitvmxStore::new(&file_path)?;
     let data = bitvmx_store.get_pending_bitvmx_instances(0)?;
 
     assert_eq!(data.len(), 0);
@@ -135,22 +155,30 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
 fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     let file_path = String::from("test2.json");
 
-    let tx_id_not_seen = "3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f";
     let block_300 = 300;
+
+    let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
+        .unwrap();
+
+    let tx_id_not_seen =
+        Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+            .unwrap();
+
     let instances = vec![BitvmxInstance {
         id: 2,
         txs: vec![
             BitvmxTxData {
-                txid: "e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b"
-                    .to_string(),
+                txid: txid,
+                tx_hex: None,
                 tx_was_seen: true,
-                fist_height_tx_seen: Some(190),
+                height_tx_seen: Some(190),
                 confirmations: 10,
             },
             BitvmxTxData {
-                txid: tx_id_not_seen.to_string(),
+                txid: tx_id_not_seen,
+                tx_hex: None,
                 tx_was_seen: false,
-                fist_height_tx_seen: None,
+                height_tx_seen: None,
                 confirmations: 0,
             },
         ],
@@ -160,7 +188,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
 
     setup_bitvmx_instances(&file_path, instances)?;
 
-    let mut bitvmx_store = BitvmxStore::new(&file_path)?;
+    let bitvmx_store = BitvmxStore::new(&file_path)?;
 
     // Getting from a block in the future
     let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
@@ -168,7 +196,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     assert_eq!(data.len(), 1);
 
     // Tx 2 was seen in block_300
-    bitvmx_store.update_bitvmx_tx_seen(data[0].id, &tx_id_not_seen.to_string(), block_300)?;
+    bitvmx_store.update_bitvmx_tx_seen(data[0].id, &tx_id_not_seen, block_300, "")?;
 
     let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
 
@@ -179,15 +207,11 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     assert_eq!(data[0].txs[1].confirmations, 1);
 
     // First block seen should be block_300
-    assert_eq!(data[0].txs[1].fist_height_tx_seen, Some(block_300));
+    assert_eq!(data[0].txs[1].height_tx_seen, Some(block_300));
 
     let block_400 = 400;
     //Update again but in another block
-    bitvmx_store.update_bitvmx_tx_confirmations(
-        data[0].id,
-        &tx_id_not_seen.to_string(),
-        block_400,
-    )?;
+    bitvmx_store.update_bitvmx_tx_confirmations(data[0].id, &tx_id_not_seen, block_400)?;
 
     // This will return instances are not finished
     let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
@@ -199,7 +223,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     let data = bitvmx_store.get_data()?;
 
     // First block seen should be block_300, never change
-    assert_eq!(data[0].txs[1].fist_height_tx_seen, Some(block_300));
+    assert_eq!(data[0].txs[1].height_tx_seen, Some(block_300));
 
     // Once a transaction is seen in a block, the number of confirmations is last_block_height - firt_height_seen.
     assert_eq!(data[0].txs[1].confirmations, block_400 - block_300);

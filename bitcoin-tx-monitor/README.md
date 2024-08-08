@@ -1,4 +1,5 @@
-# Bitcoin transaction monitor
+# Bitvmx Instance Monitor
+
 
 This process checks all BitVMX instances in a file and verifies them against a Bitcoin indexer to ensure that the transactions associated with the BitVMX instances are found in the blockchain.
 
