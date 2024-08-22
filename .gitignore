@@ -1,1 +1,7 @@
 /target
+target
+bitvmx_instances.json
+.env
+bitvmx_data.json
+Cargo.lock
+blocks.json
