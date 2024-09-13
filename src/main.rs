@@ -6,7 +6,7 @@ use bitcoin_indexer::{
     store::{Store, StoreClient},
     types::BlockHeight,
 };
-use bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
+use bitvmx_transaction_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
 use clap::Parser;
 use log::{info, warn};
 use std::{env, sync::mpsc::channel, thread, time::Duration};

@@ -1,7 +1,5 @@
 /target
-target
-bitvmx_instances.json
 .env
-bitvmx_data.json
+data
 Cargo.lock
-blocks.json
+bitvmx_instances

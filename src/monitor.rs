@@ -42,17 +42,12 @@ where
         // Get operations that have already started
         let operations = self
             .bitvmx_store
-            .get_pending_bitvmx_instances(current_height)
+            .get_pending_instances(current_height)
             .context("Failed to retrieve operations")?;
 
         // Count existing operations get all thansaction that meet next rules:
 
         for instance in operations {
-            assert!(
-                !instance.finished,
-                "Error double checking finished instance"
-            );
-
             for tx in instance.txs {
                 if tx.tx_was_seen && tx.confirmations >= 6 {
                     continue;
@@ -62,7 +57,7 @@ where
 
                 if tx_exists_height.0 {
                     if tx.tx_was_seen && current_height > tx.height_tx_seen.unwrap() {
-                        self.bitvmx_store.update_bitvmx_tx_confirmations(
+                        self.bitvmx_store.update_instance_tx_confirmations(
                             instance.id,
                             &tx.txid,
                             current_height,
@@ -81,7 +76,7 @@ where
                     if !tx.tx_was_seen {
                         let tx_hex = self.indexer.get_tx(&tx.txid)?;
 
-                        self.bitvmx_store.update_bitvmx_tx_seen(
+                        self.bitvmx_store.update_instance_tx_seen(
                             instance.id,
                             &tx.txid,
                             tx_exists_height.1.unwrap(),

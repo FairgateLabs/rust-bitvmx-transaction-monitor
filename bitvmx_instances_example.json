@@ -15,8 +15,7 @@
         "confirmations": 0
       }
     ],
-    "start_height": 1,
-    "finished": false
+    "start_height": 1
   },
   {
     "id": 2,
@@ -34,8 +33,7 @@
         "confirmations": 0
       }
     ],
-    "start_height": 180,
-    "finished": false
+    "start_height": 180
   },
   {
     "id": 3,
@@ -53,7 +51,6 @@
         "confirmations": 0
       }
     ],
-    "start_height": 1000,
-    "finished": false
+    "start_height": 1000
   }
 ]

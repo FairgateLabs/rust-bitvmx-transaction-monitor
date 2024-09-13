@@ -1,6 +1,6 @@
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::MockIndexerApi;
-use bitcoin_tx_monitor::{
+use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
     types::{BitvmxInstance, BitvmxTxData},
@@ -80,7 +80,6 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
             },
         ],
         start_height: 180,
-        finished: false,
     }];
 
     mock_indexer
@@ -153,7 +152,6 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
             confirmations,
         }],
         start_height: 180,
-        finished: false,
     }];
 
     mock_indexer

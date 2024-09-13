@@ -1,0 +1,4 @@
+[submodule "indexer"]
+	path = indexer
+	url = git@github.com:FairgateLabs/rust-bitcoin-indexer.git
+	branch = integration

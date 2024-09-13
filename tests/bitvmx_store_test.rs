@@ -1,5 +1,5 @@
 use bitcoin::Txid;
-use bitcoin_tx_monitor::{
+use bitvmx_transaction_monitor::{
     bitvmx_store::{BitvmxApi, BitvmxStore},
     types::{BitvmxInstance, BitvmxTxData},
 };
@@ -9,38 +9,6 @@ use std::{
     io::Write,
     str::FromStr,
 };
-
-fn get_mock_bitvmx_instances_finished() -> Vec<BitvmxInstance> {
-    let txid = Txid::from_str(&"4b8e07b98e23ab6a7e8ff2d2a4846c607d97ab3e51d6a6896a1eeb0d0b1fc63a")
-        .unwrap();
-
-    let txid2 = Txid::from_str(&"4a5e1e4baab89f3a32518a88b87bedd5a19d2b260bba7e560f7a28a4a6a6e4f4")
-        .unwrap();
-
-    let instances = vec![BitvmxInstance {
-        id: 1,
-        txs: vec![
-            BitvmxTxData {
-                txid: txid,
-                tx_hex: None,
-                tx_was_seen: true,
-                height_tx_seen: Some(95),
-                confirmations: 10,
-            },
-            BitvmxTxData {
-                txid: txid2,
-                tx_hex: None,
-                tx_was_seen: true,
-                height_tx_seen: Some(100),
-                confirmations: 10,
-            },
-        ],
-        start_height: 40,
-        finished: true,
-    }];
-
-    instances
-}
 
 fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
     let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
@@ -68,7 +36,6 @@ fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
             },
         ],
         start_height: 180,
-        finished: false,
     }];
 
     instances
@@ -100,7 +67,6 @@ fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
             },
         ],
         start_height: 1000,
-        finished: false,
     }];
 
     instances
@@ -109,7 +75,6 @@ fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
 fn get_all_mock_bitvmx_instances() -> Vec<BitvmxInstance> {
     let mut all_instances = Vec::new();
 
-    all_instances.extend(get_mock_bitvmx_instances_finished());
     all_instances.extend(get_mock_bitvmx_instances_already_stated());
     all_instances.extend(get_mock_bitvmx_instances_no_started());
 
@@ -134,17 +99,17 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
     setup_bitvmx_instances(&file_path, instances)?;
 
     let bitvmx_store = BitvmxStore::new(&file_path)?;
-    let data = bitvmx_store.get_pending_bitvmx_instances(0)?;
+    let data = bitvmx_store.get_pending_instances(0)?;
 
     assert_eq!(data.len(), 0);
 
-    let data = bitvmx_store.get_pending_bitvmx_instances(50)?;
+    let data = bitvmx_store.get_pending_instances(50)?;
     assert_eq!(data.len(), 0);
 
-    let data = bitvmx_store.get_pending_bitvmx_instances(200)?;
+    let data = bitvmx_store.get_pending_instances(200)?;
     assert_eq!(data.len(), 1);
 
-    let data = bitvmx_store.get_pending_bitvmx_instances(2000)?;
+    let data = bitvmx_store.get_pending_instances(2000)?;
     assert_eq!(data.len(), 2);
 
     fs::remove_file(file_path)?;
@@ -183,7 +148,6 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
             },
         ],
         start_height: 180,
-        finished: false,
     }];
 
     setup_bitvmx_instances(&file_path, instances)?;
@@ -191,17 +155,14 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     let bitvmx_store = BitvmxStore::new(&file_path)?;
 
     // Getting from a block in the future
-    let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
+    let data = bitvmx_store.get_pending_instances(100000)?;
 
     assert_eq!(data.len(), 1);
 
     // Tx 2 was seen in block_300
-    bitvmx_store.update_bitvmx_tx_seen(data[0].id, &tx_id_not_seen, block_300, "")?;
+    bitvmx_store.update_instance_tx_seen(data[0].id, &tx_id_not_seen, block_300, "")?;
 
-    let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
-
-    //All txns were seen but are not confirm with more than 6 blocks
-    assert_eq!(data[0].finished, false);
+    let data = bitvmx_store.get_pending_instances(100000)?;
 
     // Once a transaction is seen in a block, the number of confirmations is 1 at that point.
     assert_eq!(data[0].txs[1].confirmations, 1);
@@ -211,10 +172,10 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
 
     let block_400 = 400;
     //Update again but in another block
-    bitvmx_store.update_bitvmx_tx_confirmations(data[0].id, &tx_id_not_seen, block_400)?;
+    bitvmx_store.update_instance_tx_confirmations(data[0].id, &tx_id_not_seen, block_400)?;
 
-    // This will return instances are not finished
-    let data = bitvmx_store.get_pending_bitvmx_instances(100000)?;
+    // This will return instances are not confirmed > 6
+    let data = bitvmx_store.get_pending_instances(100000)?;
 
     // There is not pending instances.
     assert_eq!(data.len(), 0);
@@ -227,9 +188,6 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
 
     // Once a transaction is seen in a block, the number of confirmations is last_block_height - firt_height_seen.
     assert_eq!(data[0].txs[1].confirmations, block_400 - block_300);
-
-    //All txns were seen and confirmed with more than 6 blocks
-    assert_eq!(data[0].finished, true);
 
     fs::remove_file(file_path)?;
 
