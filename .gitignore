@@ -3,3 +3,4 @@
 data
 Cargo.lock
 bitvmx_instances
+test_outputs

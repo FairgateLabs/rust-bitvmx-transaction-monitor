@@ -33,12 +33,12 @@ pub trait BitvmxApi {
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
 
     /// Save a vector of bitvmx instances
-    fn save_instances(&self, instances: Vec<BitvmxInstance>) -> Result<()>;
+    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()>;
 }
 
 impl BitvmxStore {
-    pub fn new(file_path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(file_path))?;
+    pub fn new(path: &str) -> Result<Self> {
+        let store = Storage::new_with_path(&PathBuf::from(path))?;
         Ok(Self { db: store })
     }
 
@@ -69,19 +69,46 @@ impl BitvmxStore {
 
     pub fn save_instance_tx(&self, instance_id: u32, tx: &BitvmxTxData) -> Result<()> {
         let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx.txid);
-        let tx = self
-            .db
+        self.db
             .set::<&str, BitvmxTxData>(&instance_tx_key, tx.clone())
             .context(format!("There was an error getting {}", instance_tx_key))
             .unwrap();
 
-        Ok(tx)
+        let instance_key = format!("instance/{}", instance_id);
+        let instance = self
+            .db
+            .get::<&str, BitvmxInstance>(&instance_key)
+            .context(format!("There was an error getting {}", instance_key))
+            .unwrap();
+
+        match instance {
+            Some(mut _instance) =>
+            // Find the index of the transaction you want to replace
+            {
+                if let Some(pos) = _instance
+                    .txs
+                    .iter()
+                    .position(|tx_old| tx_old.txid == tx.txid)
+                {
+                    // Replace the old transaction with the new one
+                    _instance.txs[pos] = tx.clone();
+
+                    self.db.set(instance_key, _instance)?;
+                }
+            }
+            None => bail!(
+                "There was an error trying to save instance {}",
+                instance_key
+            ),
+        }
+
+        Ok(())
     }
 
     pub fn get_instances(&self) -> Result<Vec<BitvmxInstance>> {
         let mut instances = Vec::<BitvmxInstance>::new();
 
-        let instances_key = "instances_list";
+        let instances_key = "instance/list";
         let all_instance_ids = self
             .db
             .get::<_, Vec<u32>>(instances_key)?
@@ -114,7 +141,7 @@ impl BitvmxApi for BitvmxStore {
         &self,
         instance_id: u32,
         txid: &Txid,
-        current_height: u32,
+        height_tx_was_seen: u32,
         tx_hex: &str,
     ) -> Result<()> {
         let tx_instance = self.get_instance_tx(instance_id, txid)?;
@@ -126,7 +153,7 @@ impl BitvmxApi for BitvmxStore {
                 }
                 tx.tx_was_seen = true;
                 tx.confirmations = 1;
-                tx.height_tx_seen = Some(current_height);
+                tx.height_tx_seen = Some(height_tx_was_seen);
                 tx.tx_hex = Some(tx_hex.to_string());
                 self.save_instance_tx(instance_id, &tx.clone())?;
             }
@@ -141,55 +168,29 @@ impl BitvmxApi for BitvmxStore {
 
     fn update_instance_tx_confirmations(
         &self,
-        intance_id: u32,
+        instance_id: u32,
         txid: &Txid,
         current_height: u32,
     ) -> Result<()> {
-        let mut bitvmx_instances = self
-            .db
-            .get::<&str, Vec<BitvmxInstance>>("instances")?
-            .unwrap();
+        let tx_instance = self.get_instance_tx(instance_id, txid)?;
 
-        let mut found = false;
-
-        for instance in bitvmx_instances.iter_mut() {
-            if instance.id == intance_id {
-                for tx in instance.txs.iter_mut() {
-                    if tx.txid == *txid {
-                        assert!(
-                            tx.tx_was_seen,
-                            "Txn already seen, looks this methods is being calling more than what should be"
-                        );
-
-                        assert!(
-                            current_height >= tx.height_tx_seen.unwrap(),
-                            "Looks txn is been updated in a incorrect block"
-                        );
-
-                        tx.confirmations = current_height - tx.height_tx_seen.unwrap();
-                        found = true;
-                    }
-                }
+        match tx_instance {
+            Some(mut tx) => {
+                tx.confirmations = current_height - tx.height_tx_seen.unwrap();
+                self.save_instance_tx(instance_id, &tx)?;
             }
-        }
-
-        if !found {
-            warn!(
+            None => warn!(
                 "Txn for the bitvmx instance {} txid {} was not found",
-                intance_id, txid
-            );
-
-            return Ok(());
+                instance_id, txid
+            ),
         }
-
-        self.db.set("instances", bitvmx_instances)?;
 
         Ok(())
     }
 
-    fn save_instances(&self, instances: Vec<BitvmxInstance>) -> Result<()> {
+    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()> {
         for instance in instances {
-            self.save_instance(&instance)?;
+            self.save_instance(instance)?;
         }
         Ok(())
     }
@@ -198,15 +199,15 @@ impl BitvmxApi for BitvmxStore {
         let instance_key = format!("instance/{}", instance.id);
 
         // Store the instance under its ID
-        self.db.set(&instance_key, &instance).context(format!(
+        self.db.set(&instance_key, instance).context(format!(
             "Failed to store instance under key {}",
             instance_key
         ))?;
 
         // Index each transaction instance by its txid
         for tx in &instance.txs {
-            let tx_key = format!("instance/{}/txid/{}", instance.id, tx.txid);
-            self.db.set(&tx_key, &tx).context(format!(
+            let tx_key = format!("instance/{}/tx/{}", instance.id, tx.txid);
+            self.db.set(&tx_key, tx).context(format!(
                 "Failed to store txid {} under key {}",
                 tx.txid, tx_key
             ))?;

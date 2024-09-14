@@ -25,18 +25,18 @@ fn no_instances() -> Result<(), anyhow::Error> {
 
     // Return an empty bitvmx array
     mock_bitvmx_store
-        .expect_get_pending_bitvmx_instances()
+        .expect_get_pending_instances()
         .with(eq(block_100))
         .times(1)
         .returning(|_| Ok(vec![]));
 
     // Then we never call update_bitvmx_tx_confirmations
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_confirmations()
+        .expect_update_instance_tx_confirmations()
         .times(0);
 
     // Then we never call update_bitvmx_tx_seen
-    mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
+    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
     let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
 
@@ -96,7 +96,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .returning(move |_| Ok("0x123".to_string()));
 
     mock_bitvmx_store
-        .expect_get_pending_bitvmx_instances()
+        .expect_get_pending_instances()
         .with(eq(block_200))
         .times(1)
         .returning(move |_| Ok(instances.clone()));
@@ -110,12 +110,12 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     // The first time was seen the tx should not call update_bitvmx_tx_confirmations
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_confirmations()
+        .expect_update_instance_tx_confirmations()
         .times(0);
 
     // Then call update_bitvmx_tx_seen for the first time
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_seen()
+        .expect_update_instance_tx_seen()
         .with(eq(intance_id), eq(tx_to_seen), eq(150), eq("0x123"))
         .times(1)
         .returning(|_, _, _, _| Ok(()));
@@ -170,18 +170,18 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .returning(|_| Ok((true, Some(0))));
 
     mock_bitvmx_store
-        .expect_get_pending_bitvmx_instances()
+        .expect_get_pending_instances()
         .with(eq(block_200))
         .times(1)
         .returning(move |_| Ok(instances.clone()));
 
     // Do no Increase confirmations given the block is the same were was found
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_confirmations()
+        .expect_update_instance_tx_confirmations()
         .times(0);
 
     // Also the update_bitvmx_tx_seen is not call
-    mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
+    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
     let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
     println!("block_200: {}", block_200);
