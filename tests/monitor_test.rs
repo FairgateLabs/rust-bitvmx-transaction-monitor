@@ -38,11 +38,11 @@ fn no_instances() -> Result<(), anyhow::Error> {
     // Then we never call update_bitvmx_tx_seen
     mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_100));
 
-    let new_height = monitor.detect_instances_at_height(block_100)?;
+    monitor.detect_instances()?;
 
-    assert_eq!(new_height, block_100 + 1);
+    assert_eq!(monitor.get_current_height(), block_100 + 1);
 
     Ok(())
 }
@@ -120,11 +120,11 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(|_, _, _, _| Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
 
-    let new_height = monitor.detect_instances_at_height(block_200)?;
+    monitor.detect_instances()?;
 
-    assert_eq!(new_height, block_200 + 1);
+    assert_eq!(monitor.get_current_height(), block_200 + 1);
 
     Ok(())
 }
@@ -183,11 +183,11 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     // Also the update_bitvmx_tx_seen is not call
     mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
     println!("block_200: {}", block_200);
-    let new_height = monitor.detect_instances_at_height(block_200)?;
+    monitor.detect_instances()?;
 
-    assert_eq!(new_height, 201);
+    assert_eq!(monitor.get_current_height(), 201);
 
     Ok(())
 }

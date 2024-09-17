@@ -1,5 +1,11 @@
-use crate::bitvmx_store::BitvmxApi;
+use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
 use anyhow::{Context, Ok, Result};
+use bitcoin_indexer::{
+    bitcoin_client::{BitcoinClient, BitcoinClientApi},
+    helper::define_height_to_sync,
+    indexer::Indexer,
+    store::{Store, StoreClient},
+};
 use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
 
@@ -10,6 +16,26 @@ where
 {
     pub indexer: I,
     pub bitvmx_store: B,
+    current_height: BlockHeight,
+}
+
+impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
+    pub fn new_with_paths(
+        node_rpc_url: &str,
+        db_file_path: &str,
+        checkpoint: Option<BlockHeight>,
+    ) -> Result<Self> {
+        let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
+        let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
+        let store = Store::new(db_file_path)?;
+        let indexed_height = store.get_best_block_height()?;
+        let indexer = Indexer::new(bitcoin_client, store)?;
+        let bitvmx_store = BitvmxStore::new(db_file_path)?;
+        let current_height = define_height_to_sync(checkpoint, blockchain_height, indexed_height)?;
+        let monitor = Monitor::new(indexer, bitvmx_store, Some(current_height));
+
+        Ok(monitor)
+    }
 }
 
 impl<I, B> Monitor<I, B>
@@ -17,15 +43,25 @@ where
     I: IndexerApi,
     B: BitvmxApi,
 {
-    pub fn new(indexer: I, bitvmx_store: B) -> Self {
+    pub fn new(indexer: I, bitvmx_store: B, current_height: Option<BlockHeight>) -> Self {
+        let current_height = match current_height {
+            Some(height) => height,
+            None => 0,
+        };
+
         Self {
             indexer,
             bitvmx_store,
+            current_height,
         }
     }
 
-    pub fn detect_instances_at_height(&self, height_to_sync: BlockHeight) -> Result<BlockHeight> {
-        let new_height = self.indexer.index_height(&height_to_sync)?;
+    pub fn get_current_height(&self) -> BlockHeight {
+        self.current_height
+    }
+
+    pub fn detect_instances(&mut self) -> Result<()> {
+        let new_height = self.indexer.index_height(&self.current_height)?;
 
         //Get current block from Bitcoin Indexer
         let current_height = self
@@ -34,7 +70,7 @@ where
             .context("Failed to retrieve current block")?;
 
         if current_height.is_none() {
-            return Ok(new_height);
+            return Ok(());
         }
 
         let current_height = current_height.unwrap();
@@ -92,6 +128,8 @@ where
             }
         }
 
-        Ok(new_height)
+        self.current_height = new_height;
+
+        Ok(())
     }
 }
