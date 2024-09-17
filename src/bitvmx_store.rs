@@ -3,8 +3,8 @@ use anyhow::{bail, Context, Ok, Result};
 use bitcoin::Txid;
 use log::warn;
 use mockall::automock;
-use rust_bitvmx_storage_backend::storage::{KeyValueStore, Storage};
 use std::path::PathBuf;
+use storage_backend::storage::{KeyValueStore, Storage};
 
 pub struct BitvmxStore {
     db: Storage,
