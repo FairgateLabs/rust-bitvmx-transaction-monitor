@@ -32,5 +32,3 @@ pub struct BitvmxInstance {
 }
 
 pub type BlockHeight = u32;
-
-pub struct TxData {}

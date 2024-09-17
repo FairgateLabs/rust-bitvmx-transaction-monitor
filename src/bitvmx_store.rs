@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use storage_backend::storage::{KeyValueStore, Storage};
 
 pub struct BitvmxStore {
-    db: Storage,
+    store: Storage,
 }
 
 pub trait BitvmxApi {
@@ -37,15 +37,19 @@ pub trait BitvmxApi {
 }
 
 impl BitvmxStore {
-    pub fn new(path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(path))?;
-        Ok(Self { db: store })
+    pub fn new_with_path(store_path: &str) -> Result<Self> {
+        let store = Storage::new_with_path(&PathBuf::from(store_path))?;
+        Ok(Self { store })
+    }
+
+    pub fn new(store: Storage) -> Result<Self> {
+        Ok(Self { store })
     }
 
     pub fn get_instance(&self, id: u32) -> Result<Option<BitvmxInstance>> {
         let instance_key = format!("instance/{}", id);
         let instance = self
-            .db
+            .store
             .get::<&str, BitvmxInstance>(&instance_key)
             .context(format!(
                 "There was an error getting an instance {}",
@@ -59,7 +63,7 @@ impl BitvmxStore {
     pub fn get_instance_tx(&self, instance_id: u32, tx_id: &Txid) -> Result<Option<BitvmxTxData>> {
         let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx_id);
         let tx = self
-            .db
+            .store
             .get::<&str, BitvmxTxData>(&instance_tx_key)
             .context(format!("There was an error getting {}", instance_tx_key))
             .unwrap();
@@ -69,14 +73,14 @@ impl BitvmxStore {
 
     pub fn save_instance_tx(&self, instance_id: u32, tx: &BitvmxTxData) -> Result<()> {
         let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx.txid);
-        self.db
+        self.store
             .set::<&str, BitvmxTxData>(&instance_tx_key, tx.clone())
             .context(format!("There was an error getting {}", instance_tx_key))
             .unwrap();
 
         let instance_key = format!("instance/{}", instance_id);
         let instance = self
-            .db
+            .store
             .get::<&str, BitvmxInstance>(&instance_key)
             .context(format!("There was an error getting {}", instance_key))
             .unwrap();
@@ -93,7 +97,7 @@ impl BitvmxStore {
                     // Replace the old transaction with the new one
                     _instance.txs[pos] = tx.clone();
 
-                    self.db.set(instance_key, _instance)?;
+                    self.store.set(instance_key, _instance)?;
                 }
             }
             None => bail!(
@@ -110,7 +114,7 @@ impl BitvmxStore {
 
         let instances_key = "instance/list";
         let all_instance_ids = self
-            .db
+            .store
             .get::<_, Vec<u32>>(instances_key)?
             .unwrap_or_default();
 
@@ -199,7 +203,7 @@ impl BitvmxApi for BitvmxStore {
         let instance_key = format!("instance/{}", instance.id);
 
         // Store the instance under its ID
-        self.db.set(&instance_key, instance).context(format!(
+        self.store.set(&instance_key, instance).context(format!(
             "Failed to store instance under key {}",
             instance_key
         ))?;
@@ -207,7 +211,7 @@ impl BitvmxApi for BitvmxStore {
         // Index each transaction instance by its txid
         for tx in &instance.txs {
             let tx_key = format!("instance/{}/tx/{}", instance.id, tx.txid);
-            self.db.set(&tx_key, tx).context(format!(
+            self.store.set(&tx_key, tx).context(format!(
                 "Failed to store txid {} under key {}",
                 tx.txid, tx_key
             ))?;
@@ -216,14 +220,14 @@ impl BitvmxApi for BitvmxStore {
         // Maintain a list of all instances
         let instances_key = "instance/list";
         let mut all_instances = self
-            .db
+            .store
             .get::<_, Vec<u32>>(instances_key)
             .unwrap_or_default()
             .unwrap_or_default();
 
         if !all_instances.contains(&instance.id) {
             all_instances.push(instance.id);
-            self.db
+            self.store
                 .set(instances_key, &all_instances)
                 .context("Failed to update instances list")?;
         }

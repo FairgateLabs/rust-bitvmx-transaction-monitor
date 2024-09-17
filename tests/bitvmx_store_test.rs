@@ -80,7 +80,7 @@ fn get_all_mock_bitvmx_instances() -> Vec<BitvmxInstance> {
 #[test]
 fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
     let file_path = String::from("test_outputs/test_one");
-    let bitvmx_store = BitvmxStore::new(&file_path)?;
+    let bitvmx_store = BitvmxStore::new_with_path(&file_path)?;
 
     let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
 
@@ -132,7 +132,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
         start_height: 180,
     }];
 
-    let bitvmx_store = BitvmxStore::new("test_outputs/test_two")?;
+    let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_two")?;
     bitvmx_store.save_instances(&instances)?;
 
     // Getting from a block in the future

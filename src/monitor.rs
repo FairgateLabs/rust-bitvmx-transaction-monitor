@@ -1,10 +1,11 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
+use crate::types::BitvmxInstance;
 use anyhow::{Context, Ok, Result};
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
     indexer::Indexer,
-    store::{Store, StoreClient},
+    store::Store,
 };
 use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
@@ -27,10 +28,9 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     ) -> Result<Self> {
         let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
-        let store = Store::new(db_file_path)?;
-        let indexed_height = store.get_best_block_height()?;
-        let indexer = Indexer::new(bitcoin_client, store)?;
-        let bitvmx_store = BitvmxStore::new(db_file_path)?;
+        let indexer = Indexer::new_with_path(bitcoin_client, db_file_path)?;
+        let indexed_height = indexer.get_best_block()?;
+        let bitvmx_store = BitvmxStore::new_with_path(db_file_path)?;
         let current_height = define_height_to_sync(checkpoint, blockchain_height, indexed_height)?;
         let monitor = Monitor::new(indexer, bitvmx_store, Some(current_height));
 
@@ -44,16 +44,18 @@ where
     B: BitvmxApi,
 {
     pub fn new(indexer: I, bitvmx_store: B, current_height: Option<BlockHeight>) -> Self {
-        let current_height = match current_height {
-            Some(height) => height,
-            None => 0,
-        };
+        let current_height = current_height.unwrap_or(0);
 
         Self {
             indexer,
             bitvmx_store,
             current_height,
         }
+    }
+
+    pub fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()> {
+        self.bitvmx_store.save_instances(&instances)?;
+        Ok(())
     }
 
     pub fn get_current_height(&self) -> BlockHeight {
