@@ -3,7 +3,9 @@ use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     types::BlockHeight,
 };
-use bitvmx_transaction_monitor::{args::Args, monitor::Monitor};
+use bitvmx_transaction_monitor::{
+    args::Args, bitvmx_instances_example::get_bitvmx_instances_example, monitor::Monitor,
+};
 use clap::Parser;
 use log::{info, warn};
 use std::{env, sync::mpsc::channel, thread, time::Duration};
@@ -45,6 +47,9 @@ fn main() -> Result<()> {
 
     let mut monitor = Monitor::new_with_paths(&node_rpc_url, &db_file_path, checkpoint_height)?;
 
+    let bitvmx_instances = get_bitvmx_instances_example();
+    monitor.save_instances_for_tracking(bitvmx_instances)?;
+
     let mut prev_height = 0;
 
     loop {
@@ -53,9 +58,9 @@ fn main() -> Result<()> {
             break;
         }
 
-        if prev_height == monitor.get_current_height() {
+        if prev_height == monitor.get_current_height() && prev_height > 0 {
             info!("Waitting for a new block...");
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(10));
         } else {
             prev_height = monitor.get_current_height();
         }

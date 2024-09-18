@@ -55,7 +55,12 @@ where
 
     pub fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()> {
         self.bitvmx_store.save_instances(&instances)?;
+
         Ok(())
+    }
+
+    pub fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
+        self.bitvmx_store.get_instances_for_tracking()
     }
 
     pub fn get_current_height(&self) -> BlockHeight {
@@ -78,14 +83,14 @@ where
         let current_height = current_height.unwrap();
 
         // Get operations that have already started
-        let operations = self
+        let instances = self
             .bitvmx_store
             .get_pending_instances(current_height)
             .context("Failed to retrieve operations")?;
 
         // Count existing operations get all thansaction that meet next rules:
 
-        for instance in operations {
+        for instance in instances {
             for tx in instance.txs {
                 if tx.tx_was_seen && tx.confirmations >= 6 {
                     continue;

@@ -11,6 +11,7 @@ pub struct BitvmxStore {
 }
 
 pub trait BitvmxApi {
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
     /// Return pending bitvmx instances
     fn get_pending_instances(&self, current_height: u32) -> Result<Vec<BitvmxInstance>>;
 
@@ -38,7 +39,7 @@ pub trait BitvmxApi {
 
 impl BitvmxStore {
     pub fn new_with_path(store_path: &str) -> Result<Self> {
-        let store = Storage::new_with_path(&PathBuf::from(store_path))?;
+        let store = Storage::new_with_path(&PathBuf::from(format!("{}/monitor", store_path)))?;
         Ok(Self { store })
     }
 
@@ -133,6 +134,10 @@ impl BitvmxStore {
 
 #[automock]
 impl BitvmxApi for BitvmxStore {
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
+        self.get_instances()
+    }
+
     fn get_pending_instances(&self, current_height: u32) -> Result<Vec<BitvmxInstance>> {
         // This method will return bitvmx instances excluding the onces are already seen
         let mut bitvmx_instances = self.get_instances()?;

@@ -167,7 +167,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .expect_tx_exists()
         .with(eq(tx_to_seen.clone()))
         .times(1)
-        .returning(|_| Ok((true, Some(0))));
+        .returning(|_| Ok((true, Some(100))));
 
     mock_bitvmx_store
         .expect_get_pending_instances()
@@ -184,7 +184,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
     let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
-    println!("block_200: {}", block_200);
+
     monitor.detect_instances()?;
 
     assert_eq!(monitor.get_current_height(), 201);

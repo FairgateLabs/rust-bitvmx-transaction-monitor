@@ -171,3 +171,39 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
 
     Ok(())
 }
+
+#[test]
+fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
+    let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
+        .unwrap();
+
+    let instances = vec![BitvmxInstance {
+        id: 2,
+        txs: vec![BitvmxTxData {
+            txid: txid,
+            tx_hex: None,
+            tx_was_seen: true,
+            height_tx_seen: Some(190),
+            confirmations: 1,
+        }],
+        start_height: 180,
+    }];
+
+    let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_three")?;
+    bitvmx_store.save_instances(&instances)?;
+
+    let instances = bitvmx_store.get_pending_instances(100000)?;
+
+    // Tx 2 was seen in block_300
+    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &txid, 1000)?;
+
+    let instance = bitvmx_store.get_instance(instances[0].id)?;
+
+    assert_eq!(instance.unwrap().txs[0].confirmations, 1000 - 190);
+
+    let instances = bitvmx_store.get_pending_instances(100000)?;
+
+    assert_eq!(instances.unwrap().txs[0].confirmations, 1000 - 190);
+
+    Ok(())
+}
