@@ -203,7 +203,7 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
 
     let instances = bitvmx_store.get_pending_instances(100000)?;
 
-    assert_eq!(instances.unwrap().txs[0].confirmations, 1000 - 190);
+    assert_eq!(instances[0].txs[0].confirmations, 1000 - 190);
 
     Ok(())
 }
