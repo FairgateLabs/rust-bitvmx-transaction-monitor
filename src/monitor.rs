@@ -1,6 +1,7 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
 use crate::types::BitvmxInstance;
 use anyhow::{Context, Ok, Result};
+use bitcoin::Txid;
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
@@ -9,7 +10,6 @@ use bitcoin_indexer::{
 };
 use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
-
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -59,6 +59,11 @@ where
         Ok(())
     }
 
+    pub fn save_transaction_for_tracking(&self, instance_id: u32, tx_id: Txid) -> Result<()> {
+        self.bitvmx_store.save_transaction(instance_id, tx_id)?;
+        Ok(())
+    }
+
     pub fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
         self.bitvmx_store.get_instances_for_tracking()
     }
@@ -96,20 +101,20 @@ where
                     continue;
                 }
                 // Tx exist means was found
-                let tx_exists_height = self.indexer.tx_exists(&tx.txid)?;
+                let tx_exists_height = self.indexer.tx_exists(&tx.tx_id)?;
 
                 if tx_exists_height.0 {
                     if tx.tx_was_seen && current_height > tx.height_tx_seen.unwrap() {
                         self.bitvmx_store.update_instance_tx_confirmations(
                             instance.id,
-                            &tx.txid,
+                            &tx.tx_id,
                             current_height,
                         )?;
 
                         info!(
                             "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {}",
                             instance.id,
-                            tx.txid,
+                            tx.tx_id,
                             current_height
                         );
 
@@ -117,18 +122,18 @@ where
                     }
 
                     if !tx.tx_was_seen {
-                        let tx_hex = self.indexer.get_tx(&tx.txid)?;
+                        let tx_hex = self.indexer.get_tx(&tx.tx_id)?;
 
                         self.bitvmx_store.update_instance_tx_seen(
                             instance.id,
-                            &tx.txid,
+                            &tx.tx_id,
                             tx_exists_height.1.unwrap(),
                             &tx_hex,
                         )?;
 
                         info!(
                             "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                            instance.id, tx.txid, current_height
+                            instance.id, tx.tx_id, current_height
                         );
                     }
                 }

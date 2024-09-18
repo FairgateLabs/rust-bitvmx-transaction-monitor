@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxTxData {
-    pub txid: Txid,
+    pub tx_id: Txid,
 
     pub tx_hex: Option<String>,
 
@@ -24,7 +24,7 @@ pub struct BitvmxInstance {
     //bitvmx instance id
     pub id: u32,
 
-    //bitvmx linked transactions data
+    //bitvmx linked transactions data + speed up transactions data
     pub txs: Vec<BitvmxTxData>,
 
     //First height to start searching the bitvmx instance in the blockchain

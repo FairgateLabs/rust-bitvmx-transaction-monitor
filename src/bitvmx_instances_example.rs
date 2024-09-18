@@ -8,7 +8,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
             id: 1,
             txs: vec![
                 BitvmxTxData {
-                    txid: Txid::from_str(
+                    tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115be1",
                     )
                     .unwrap(),
@@ -18,7 +18,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     confirmations: 0,
                 },
                 BitvmxTxData {
-                    txid: Txid::from_str(
+                    tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bea",
                     )
                     .unwrap(),
@@ -34,7 +34,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
             id: 2,
             txs: vec![
                 BitvmxTxData {
-                    txid: Txid::from_str(
+                    tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bed",
                     )
                     .unwrap(),
@@ -44,7 +44,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     confirmations: 0,
                 },
                 BitvmxTxData {
-                    txid: Txid::from_str(
+                    tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec",
                     )
                     .unwrap(),
@@ -60,7 +60,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
             id: 3,
             txs: vec![
                 BitvmxTxData {
-                    txid: Txid::from_str(
+                    tx_id: Txid::from_str(
                         "3c2d0b8d3052af2423f7c93450473aeacfb47e7aa3f0b0ae63f3e240a15496b1",
                     )
                     .unwrap(),
@@ -70,7 +70,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     confirmations: 0,
                 },
                 BitvmxTxData {
-                    txid: Txid::from_str(
+                    tx_id: Txid::from_str(
                         "3c2d0b8d3052af2423f7c93450473aeacfb47e7aa3f0b0ae63f3e240a15496b2",
                     )
                     .unwrap(),

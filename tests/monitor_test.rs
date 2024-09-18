@@ -65,14 +65,14 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         id: intance_id,
         txs: vec![
             BitvmxTxData {
-                txid: txid,
+                tx_id: txid,
                 tx_hex: None,
                 tx_was_seen: true,
                 height_tx_seen: Some(190),
                 confirmations: 10,
             },
             BitvmxTxData {
-                txid: tx_to_seen.clone(),
+                tx_id: tx_to_seen.clone(),
                 tx_hex: None,
                 tx_was_seen: false,
                 height_tx_seen: None,
@@ -145,7 +145,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     let instances = vec![BitvmxInstance {
         id: intance_id,
         txs: vec![BitvmxTxData {
-            txid: tx_to_seen.clone(),
+            tx_id: tx_to_seen.clone(),
             tx_hex: None,
             tx_was_seen: true,
             height_tx_seen: Some(200),

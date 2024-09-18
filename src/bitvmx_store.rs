@@ -30,11 +30,9 @@ pub trait BitvmxApi {
         current_height: u32,
     ) -> Result<()>;
 
-    /// Save a single bitvmx instance
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
-
-    /// Save a vector of bitvmx instances
     fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()>;
+    fn save_transaction(&self, instance_id: u32, tx: Txid) -> Result<()>;
 }
 
 impl BitvmxStore {
@@ -47,7 +45,7 @@ impl BitvmxStore {
         Ok(Self { store })
     }
 
-    pub fn get_instance(&self, id: u32) -> Result<Option<BitvmxInstance>> {
+    fn get_instance(&self, id: u32) -> Result<Option<BitvmxInstance>> {
         let instance_key = format!("instance/{}", id);
         let instance = self
             .store
@@ -61,7 +59,7 @@ impl BitvmxStore {
         Ok(instance)
     }
 
-    pub fn get_instance_tx(&self, instance_id: u32, tx_id: &Txid) -> Result<Option<BitvmxTxData>> {
+    fn get_instance_tx(&self, instance_id: u32, tx_id: &Txid) -> Result<Option<BitvmxTxData>> {
         let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx_id);
         let tx = self
             .store
@@ -72,8 +70,8 @@ impl BitvmxStore {
         Ok(tx)
     }
 
-    pub fn save_instance_tx(&self, instance_id: u32, tx: &BitvmxTxData) -> Result<()> {
-        let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx.txid);
+    fn save_instance_tx(&self, instance_id: u32, tx: &BitvmxTxData) -> Result<()> {
+        let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx.tx_id);
         self.store
             .set::<&str, BitvmxTxData>(&instance_tx_key, tx.clone())
             .context(format!("There was an error getting {}", instance_tx_key))
@@ -93,13 +91,14 @@ impl BitvmxStore {
                 if let Some(pos) = _instance
                     .txs
                     .iter()
-                    .position(|tx_old| tx_old.txid == tx.txid)
+                    .position(|tx_old| tx_old.tx_id == tx.tx_id)
                 {
                     // Replace the old transaction with the new one
                     _instance.txs[pos] = tx.clone();
-
-                    self.store.set(instance_key, _instance)?;
+                } else {
+                    _instance.txs.push(tx.clone());
                 }
+                self.store.set(instance_key, _instance)?;
             }
             None => bail!(
                 "There was an error trying to save instance {}",
@@ -110,7 +109,7 @@ impl BitvmxStore {
         Ok(())
     }
 
-    pub fn get_instances(&self) -> Result<Vec<BitvmxInstance>> {
+    fn get_instances(&self) -> Result<Vec<BitvmxInstance>> {
         let mut instances = Vec::<BitvmxInstance>::new();
 
         let instances_key = "instance/list";
@@ -215,10 +214,10 @@ impl BitvmxApi for BitvmxStore {
 
         // Index each transaction instance by its txid
         for tx in &instance.txs {
-            let tx_key = format!("instance/{}/tx/{}", instance.id, tx.txid);
+            let tx_key = format!("instance/{}/tx/{}", instance.id, tx.tx_id);
             self.store.set(&tx_key, tx).context(format!(
                 "Failed to store txid {} under key {}",
-                tx.txid, tx_key
+                tx.tx_id, tx_key
             ))?;
         }
 
@@ -236,6 +235,20 @@ impl BitvmxApi for BitvmxStore {
                 .set(instances_key, &all_instances)
                 .context("Failed to update instances list")?;
         }
+
+        Ok(())
+    }
+
+    fn save_transaction(&self, instance_id: u32, tx_id: Txid) -> Result<()> {
+        let tx_data = BitvmxTxData {
+            tx_id: tx_id,
+            tx_hex: None,
+            tx_was_seen: false,
+            height_tx_seen: None,
+            confirmations: 0,
+        };
+
+        self.save_instance_tx(instance_id, &tx_data)?;
 
         Ok(())
     }
