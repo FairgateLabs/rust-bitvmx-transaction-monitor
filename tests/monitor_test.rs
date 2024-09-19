@@ -1,6 +1,6 @@
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::MockIndexerApi;
-use bitcoin_tx_monitor::{
+use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
     types::{BitvmxInstance, BitvmxTxData},
@@ -25,24 +25,24 @@ fn no_instances() -> Result<(), anyhow::Error> {
 
     // Return an empty bitvmx array
     mock_bitvmx_store
-        .expect_get_pending_bitvmx_instances()
+        .expect_get_pending_instances()
         .with(eq(block_100))
         .times(1)
         .returning(|_| Ok(vec![]));
 
     // Then we never call update_bitvmx_tx_confirmations
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_confirmations()
+        .expect_update_instance_tx_confirmations()
         .times(0);
 
     // Then we never call update_bitvmx_tx_seen
-    mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
+    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_100));
 
-    let new_height = monitor.detect_instances_at_height(block_100)?;
+    monitor.detect_instances()?;
 
-    assert_eq!(new_height, block_100 + 1);
+    assert_eq!(monitor.get_current_height(), block_100 + 1);
 
     Ok(())
 }
@@ -65,14 +65,14 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         id: intance_id,
         txs: vec![
             BitvmxTxData {
-                txid: txid,
+                tx_id: txid,
                 tx_hex: None,
                 tx_was_seen: true,
                 height_tx_seen: Some(190),
                 confirmations: 10,
             },
             BitvmxTxData {
-                txid: tx_to_seen.clone(),
+                tx_id: tx_to_seen.clone(),
                 tx_hex: None,
                 tx_was_seen: false,
                 height_tx_seen: None,
@@ -80,7 +80,6 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
             },
         ],
         start_height: 180,
-        finished: false,
     }];
 
     mock_indexer
@@ -97,7 +96,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .returning(move |_| Ok("0x123".to_string()));
 
     mock_bitvmx_store
-        .expect_get_pending_bitvmx_instances()
+        .expect_get_pending_instances()
         .with(eq(block_200))
         .times(1)
         .returning(move |_| Ok(instances.clone()));
@@ -111,21 +110,21 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     // The first time was seen the tx should not call update_bitvmx_tx_confirmations
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_confirmations()
+        .expect_update_instance_tx_confirmations()
         .times(0);
 
     // Then call update_bitvmx_tx_seen for the first time
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_seen()
+        .expect_update_instance_tx_seen()
         .with(eq(intance_id), eq(tx_to_seen), eq(150), eq("0x123"))
         .times(1)
         .returning(|_, _, _, _| Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
 
-    let new_height = monitor.detect_instances_at_height(block_200)?;
+    monitor.detect_instances()?;
 
-    assert_eq!(new_height, block_200 + 1);
+    assert_eq!(monitor.get_current_height(), block_200 + 1);
 
     Ok(())
 }
@@ -146,14 +145,13 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     let instances = vec![BitvmxInstance {
         id: intance_id,
         txs: vec![BitvmxTxData {
-            txid: tx_to_seen.clone(),
+            tx_id: tx_to_seen.clone(),
             tx_hex: None,
             tx_was_seen: true,
             height_tx_seen: Some(200),
             confirmations,
         }],
         start_height: 180,
-        finished: false,
     }];
 
     mock_indexer
@@ -169,27 +167,27 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .expect_tx_exists()
         .with(eq(tx_to_seen.clone()))
         .times(1)
-        .returning(|_| Ok((true, Some(0))));
+        .returning(|_| Ok((true, Some(100))));
 
     mock_bitvmx_store
-        .expect_get_pending_bitvmx_instances()
+        .expect_get_pending_instances()
         .with(eq(block_200))
         .times(1)
         .returning(move |_| Ok(instances.clone()));
 
     // Do no Increase confirmations given the block is the same were was found
     mock_bitvmx_store
-        .expect_update_bitvmx_tx_confirmations()
+        .expect_update_instance_tx_confirmations()
         .times(0);
 
     // Also the update_bitvmx_tx_seen is not call
-    mock_bitvmx_store.expect_update_bitvmx_tx_seen().times(0);
+    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store);
-    println!("block_200: {}", block_200);
-    let new_height = monitor.detect_instances_at_height(block_200)?;
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
 
-    assert_eq!(new_height, 201);
+    monitor.detect_instances()?;
+
+    assert_eq!(monitor.get_current_height(), 201);
 
     Ok(())
 }

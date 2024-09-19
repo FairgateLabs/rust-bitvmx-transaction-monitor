@@ -1,15 +1,15 @@
 use anyhow::{Context, Ok, Result};
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
-    helper::define_height_to_sync,
-    indexer::Indexer,
-    store::{Store, StoreClient},
     types::BlockHeight,
 };
-use bitcoin_tx_monitor::{args::Args, bitvmx_store::BitvmxStore, monitor::Monitor};
+use bitvmx_transaction_monitor::{
+    args::Args, bitvmx_instances_example::get_bitvmx_instances_example, monitor::Monitor,
+};
 use clap::Parser;
 use log::{info, warn};
 use std::{env, sync::mpsc::channel, thread, time::Duration};
+
 fn main() -> Result<()> {
     let (tx, rx) = channel();
 
@@ -25,11 +25,6 @@ fn main() -> Result<()> {
     env_logger::init();
 
     let args = Args::parse();
-
-    let bitvmx_file_path = args
-        .bitvmx_file_path
-        .or_else(|| env::var("BITVMX_FILE_PATH").ok())
-        .context("No Bitvmx file path provided")?;
 
     let db_file_path: String = args
         .db_file_path
@@ -50,15 +45,10 @@ fn main() -> Result<()> {
     info!("Connected to chain {}", network);
     info!("Chain best block at {}H", blockchain_height);
 
-    let store = Store::new(&db_file_path)?;
-    let indexed_height = store.get_best_block_height()?;
-    let mut height_to_sync =
-        define_height_to_sync(checkpoint_height, blockchain_height, indexed_height)?;
-    info!("Start synchronizing from {}H", height_to_sync);
+    let mut monitor = Monitor::new_with_paths(&node_rpc_url, &db_file_path, checkpoint_height)?;
 
-    let indexer = Indexer::new(bitcoin_client, store)?;
-    let bitvmx_store = BitvmxStore::new(&bitvmx_file_path)?;
-    let monitor = Monitor::new(indexer, bitvmx_store);
+    let bitvmx_instances = get_bitvmx_instances_example();
+    monitor.save_instances_for_tracking(bitvmx_instances)?;
 
     let mut prev_height = 0;
 
@@ -68,15 +58,15 @@ fn main() -> Result<()> {
             break;
         }
 
-        if prev_height == height_to_sync {
+        if prev_height == monitor.get_current_height() && prev_height > 0 {
             info!("Waitting for a new block...");
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(10));
         } else {
-            prev_height = height_to_sync;
+            prev_height = monitor.get_current_height();
         }
 
-        height_to_sync = monitor
-            .detect_instances_at_height(height_to_sync)
+        monitor
+            .detect_instances()
             .context("Fail to detect instances")?;
     }
 
