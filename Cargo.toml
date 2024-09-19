@@ -10,7 +10,7 @@ readme = "README.md"
 
 
 [dependencies]
-bitcoin-indexer = { git = "https://github.com/FairgateLabs/rust-bitcoin-indexer", branch = "integration" }
+bitcoin-indexer = { git = "https://github.com/FairgateLabs/rust-bitcoin-indexer", branch = "main" }
 rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend", branch = "integration" }
 bitcoin = "0.32.2"
 bitcoincore-rpc = "0.19"
