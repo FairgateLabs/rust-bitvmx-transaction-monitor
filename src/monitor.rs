@@ -38,6 +38,32 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     }
 }
 
+pub trait MonitorApi {
+    fn detect_instances(&mut self) -> Result<()>;
+    fn get_current_height(&self) -> BlockHeight;
+    fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()>;
+    fn save_transaction_for_tracking(&self, instance_id: u32, tx_id: Txid) -> Result<()>;
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
+}
+
+impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
+    fn detect_instances(&mut self) -> Result<()> {
+        self.detect_instances()
+    }
+    fn get_current_height(&self) -> BlockHeight {
+        self.get_current_height()
+    }
+    fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()> {
+        self.save_instances_for_tracking(instances)
+    }
+    fn save_transaction_for_tracking(&self, instance_id: u32, tx_id: Txid) -> Result<()> {
+        self.save_transaction_for_tracking(instance_id, tx_id)
+    }
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
+        self.get_instances_for_tracking()
+    }
+}
+
 impl<I, B> Monitor<I, B>
 where
     I: IndexerApi,
