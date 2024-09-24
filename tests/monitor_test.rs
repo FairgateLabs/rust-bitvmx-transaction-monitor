@@ -3,7 +3,7 @@ use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
-    types::{BitvmxInstance, BitvmxTxData},
+    types::{BitvmxInstance, TxStatus},
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -25,7 +25,7 @@ fn no_instances() -> Result<(), anyhow::Error> {
 
     // Return an empty bitvmx array
     mock_bitvmx_store
-        .expect_get_pending_instances()
+        .expect_get_instances_ready_to_track()
         .with(eq(block_100))
         .times(1)
         .returning(|_| Ok(vec![]));
@@ -64,14 +64,14 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     let instances = vec![BitvmxInstance {
         id: intance_id,
         txs: vec![
-            BitvmxTxData {
+            TxStatus {
                 tx_id: txid,
                 tx_hex: None,
                 tx_was_seen: true,
                 height_tx_seen: Some(190),
                 confirmations: 10,
             },
-            BitvmxTxData {
+            TxStatus {
                 tx_id: tx_to_seen.clone(),
                 tx_hex: None,
                 tx_was_seen: false,
@@ -96,7 +96,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .returning(move |_| Ok("0x123".to_string()));
 
     mock_bitvmx_store
-        .expect_get_pending_instances()
+        .expect_get_instances_ready_to_track()
         .with(eq(block_200))
         .times(1)
         .returning(move |_| Ok(instances.clone()));
@@ -144,7 +144,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     let confirmations = 1;
     let instances = vec![BitvmxInstance {
         id: intance_id,
-        txs: vec![BitvmxTxData {
+        txs: vec![TxStatus {
             tx_id: tx_to_seen.clone(),
             tx_hex: None,
             tx_was_seen: true,
@@ -170,7 +170,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .returning(|_| Ok((true, Some(100))));
 
     mock_bitvmx_store
-        .expect_get_pending_instances()
+        .expect_get_instances_ready_to_track()
         .with(eq(block_200))
         .times(1)
         .returning(move |_| Ok(instances.clone()));

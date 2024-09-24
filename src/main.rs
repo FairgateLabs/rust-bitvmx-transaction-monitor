@@ -36,7 +36,7 @@ fn main() -> Result<()> {
         .or_else(|| env::var("NODE_RPC_URL").ok())
         .context("No Bitcoin rpc url provided")?;
 
-    let checkpoint_height: Option<u32> = get_checkpoint()?;
+    let checkpoint_height: Option<BlockHeight> = get_checkpoint()?;
 
     let bitcoin_client = BitcoinClient::new(&node_rpc_url)?;
     let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn get_checkpoint() -> Result<Option<u32>> {
+fn get_checkpoint() -> Result<Option<BlockHeight>> {
     let checkpoint = env::var("CHECKPOINT_HEIGHT");
 
     if checkpoint.is_ok() {
