@@ -46,6 +46,7 @@ pub trait BitvmxApi {
 
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
     fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()>;
+    fn get_tx_status(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<TxStatus>>;
 }
 
 impl BitvmxStore {
@@ -183,6 +184,11 @@ impl BitvmxStore {
 impl BitvmxApi for BitvmxStore {
     fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
         self.get_instances()
+    }
+
+    fn get_tx_status(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<TxStatus>> {
+        let instance = self.get_instance_tx(instance_id, tx_id)?;
+        Ok(instance)
     }
 
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {

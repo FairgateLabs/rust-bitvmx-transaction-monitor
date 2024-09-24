@@ -1,5 +1,5 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
-use crate::types::{BitvmxInstance, InstanceId};
+use crate::types::{BitvmxInstance, InstanceId, TxStatus};
 use anyhow::{Context, Ok, Result};
 use bitcoin::Txid;
 use bitcoin_indexer::{
@@ -57,6 +57,8 @@ pub trait MonitorApi {
     /// Acknowledges or marks a intance id as processed, effectively
     /// removing it from the list of pending changes.
     fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()>;
+
+    fn get_tx_status(&self, instance_id: InstanceId, tx_id: Txid) -> Result<Option<TxStatus>>;
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
@@ -82,6 +84,10 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
 
     fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()> {
         self.acknowledge_instance_news(instance_id)
+    }
+
+    fn get_tx_status(&self, instance_id: InstanceId, tx_id: Txid) -> Result<Option<TxStatus>> {
+        self.get_tx_status(instance_id, tx_id)
     }
 }
 
@@ -205,5 +211,11 @@ where
     pub fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()> {
         self.bitvmx_store.acknowledge_instance_news(instance_id)?;
         Ok(())
+    }
+
+    pub fn get_tx_status(&self, instance_id: InstanceId, tx_id: Txid) -> Result<Option<TxStatus>> {
+        let tx_status = self.bitvmx_store.get_tx_status(instance_id, &tx_id)?;
+
+        Ok(tx_status)
     }
 }
