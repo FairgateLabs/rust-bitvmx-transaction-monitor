@@ -1,6 +1,7 @@
-use crate::types::{BitvmxInstance, BitvmxTxData};
+use crate::types::{BitvmxInstance, InstanceId, TxStatus};
 use anyhow::{bail, Context, Ok, Result};
 use bitcoin::Txid;
+use bitcoin_indexer::types::BlockHeight;
 use log::warn;
 use mockall::automock;
 use std::path::PathBuf;
@@ -9,33 +10,56 @@ use storage_backend::storage::{KeyValueStore, Storage};
 pub struct BitvmxStore {
     store: Storage,
 }
+enum InstanceKey<'a> {
+    Instance(InstanceId),
+    InstanceTx(InstanceId, &'a Txid),
+    InstanceList,
+    InstanceNews,
+}
 
 pub trait BitvmxApi {
-    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
-    /// Return pending bitvmx instances
-    fn get_pending_instances(&self, current_height: u32) -> Result<Vec<BitvmxInstance>>;
+    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
+
+    fn get_instances_ready_to_track(
+        &self,
+        current_height: BlockHeight,
+    ) -> Result<Vec<BitvmxInstance>>;
 
     fn update_instance_tx_seen(
         &self,
-        id: u32,
+        instance_id: InstanceId,
         txid: &Txid,
-        current_height: u32,
+        current_height: BlockHeight,
         tx_hex: &str,
     ) -> Result<()>;
 
     fn update_instance_tx_confirmations(
         &self,
-        id: u32,
+        instance_id: InstanceId,
         txid: &Txid,
-        current_height: u32,
+        current_height: BlockHeight,
     ) -> Result<()>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
     fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()>;
-    fn save_transaction(&self, instance_id: u32, tx: Txid) -> Result<()>;
+    fn save_transaction(&self, instance_id: InstanceId, tx: Txid) -> Result<()>;
+
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
+    fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()>;
 }
 
 impl BitvmxStore {
+    fn get_instance_key(&self, key: InstanceKey) -> String {
+        match key {
+            InstanceKey::Instance(instance_id) => format!("instance/{}", instance_id),
+            InstanceKey::InstanceTx(instance_id, tx_id) => {
+                format!("instance/{}/tx/{}", instance_id, tx_id)
+            }
+            InstanceKey::InstanceList => "instance/list".to_string(),
+            InstanceKey::InstanceNews => "instance/news".to_string(),
+        }
+    }
+
     pub fn new_with_path(store_path: &str) -> Result<Self> {
         let store = Storage::new_with_path(&PathBuf::from(format!("{}/monitor", store_path)))?;
         Ok(Self { store })
@@ -45,8 +69,8 @@ impl BitvmxStore {
         Ok(Self { store })
     }
 
-    fn get_instance(&self, id: u32) -> Result<Option<BitvmxInstance>> {
-        let instance_key = format!("instance/{}", id);
+    fn get_instance(&self, instance_id: InstanceId) -> Result<Option<BitvmxInstance>> {
+        let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
         let instance = self
             .store
             .get::<&str, BitvmxInstance>(&instance_key)
@@ -59,25 +83,26 @@ impl BitvmxStore {
         Ok(instance)
     }
 
-    fn get_instance_tx(&self, instance_id: u32, tx_id: &Txid) -> Result<Option<BitvmxTxData>> {
-        let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx_id);
+    fn get_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<TxStatus>> {
+        let instance_tx_key = self.get_instance_key(InstanceKey::InstanceTx(instance_id, tx_id));
         let tx = self
             .store
-            .get::<&str, BitvmxTxData>(&instance_tx_key)
+            .get::<&str, TxStatus>(&instance_tx_key)
             .context(format!("There was an error getting {}", instance_tx_key))
             .unwrap();
 
         Ok(tx)
     }
 
-    fn save_instance_tx(&self, instance_id: u32, tx: &BitvmxTxData) -> Result<()> {
-        let instance_tx_key = format!("instance/{}/tx/{}", instance_id, tx.tx_id);
+    fn save_instance_tx(&self, instance_id: InstanceId, tx: &TxStatus) -> Result<()> {
+        let instance_tx_key =
+            self.get_instance_key(InstanceKey::InstanceTx(instance_id, &tx.tx_id));
         self.store
-            .set::<&str, BitvmxTxData>(&instance_tx_key, tx.clone())
+            .set::<&str, TxStatus>(&instance_tx_key, tx.clone())
             .context(format!("There was an error getting {}", instance_tx_key))
             .unwrap();
 
-        let instance_key = format!("instance/{}", instance_id);
+        let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
         let instance = self
             .store
             .get::<&str, BitvmxInstance>(&instance_key)
@@ -112,10 +137,10 @@ impl BitvmxStore {
     fn get_instances(&self) -> Result<Vec<BitvmxInstance>> {
         let mut instances = Vec::<BitvmxInstance>::new();
 
-        let instances_key = "instance/list";
+        let instances_key = self.get_instance_key(InstanceKey::InstanceList);
         let all_instance_ids = self
             .store
-            .get::<_, Vec<u32>>(instances_key)?
+            .get::<_, Vec<InstanceId>>(instances_key)?
             .unwrap_or_default();
 
         for id in all_instance_ids {
@@ -129,16 +154,72 @@ impl BitvmxStore {
 
         Ok(instances)
     }
+
+    fn update_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()> {
+        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
+        let mut instance_news = self
+            .store
+            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .unwrap_or_default();
+
+        // Find the index of the instance in the news
+        if let Some(index) = instance_news.iter().position(|(id, _)| *id == instance_id) {
+            // If the instance exists, update its transactions
+            if !instance_news[index].1.contains(&txid) {
+                instance_news[index].1.push(txid);
+            }
+        } else {
+            // If the instance doesn't exist, add it with the new transaction
+            instance_news.push((instance_id, vec![txid]));
+        }
+
+        self.store.set(&instance_news_key, &instance_news)?;
+
+        Ok(())
+    }
 }
 
 #[automock]
 impl BitvmxApi for BitvmxStore {
-    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
+    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
         self.get_instances()
     }
 
-    fn get_pending_instances(&self, current_height: u32) -> Result<Vec<BitvmxInstance>> {
-        // This method will return bitvmx instances excluding the onces are already seen
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
+        let instance_news = self
+            .store
+            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)
+            .unwrap_or_default();
+
+        match instance_news {
+            Some(news) => Ok(news),
+            None => Ok(vec![]),
+        }
+    }
+
+    fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()> {
+        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
+        let instance_news = self
+            .store
+            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .unwrap_or_default();
+
+        let instance_news_filtered = instance_news
+            .into_iter()
+            .filter(|(id, _)| id != &instance_id)
+            .collect::<Vec<(InstanceId, Vec<Txid>)>>();
+
+        self.store.set(&instance_news_key, instance_news_filtered)?;
+
+        Ok(())
+    }
+
+    fn get_instances_ready_to_track(
+        &self,
+        current_height: BlockHeight,
+    ) -> Result<Vec<BitvmxInstance>> {
+        // This method will return bitvmx instances excluding the onces are not ready to track
         let mut bitvmx_instances = self.get_instances()?;
         bitvmx_instances.retain(|i| (i.start_height <= current_height));
 
@@ -147,9 +228,9 @@ impl BitvmxApi for BitvmxStore {
 
     fn update_instance_tx_seen(
         &self,
-        instance_id: u32,
+        instance_id: InstanceId,
         txid: &Txid,
-        height_tx_was_seen: u32,
+        height_tx_was_seen: BlockHeight,
         tx_hex: &str,
     ) -> Result<()> {
         let tx_instance = self.get_instance_tx(instance_id, txid)?;
@@ -163,7 +244,7 @@ impl BitvmxApi for BitvmxStore {
                 tx.confirmations = 1;
                 tx.height_tx_seen = Some(height_tx_was_seen);
                 tx.tx_hex = Some(tx_hex.to_string());
-                self.save_instance_tx(instance_id, &tx.clone())?;
+                self.save_instance_tx(instance_id, &tx)?;
             }
             None => warn!(
                 "Txn for the bitvmx instance {} txid {} was not found",
@@ -171,14 +252,16 @@ impl BitvmxApi for BitvmxStore {
             ),
         }
 
+        self.update_news(instance_id, *txid)?;
+
         Ok(())
     }
 
     fn update_instance_tx_confirmations(
         &self,
-        instance_id: u32,
+        instance_id: InstanceId,
         txid: &Txid,
-        current_height: u32,
+        current_height: BlockHeight,
     ) -> Result<()> {
         let tx_instance = self.get_instance_tx(instance_id, txid)?;
 
@@ -193,6 +276,8 @@ impl BitvmxApi for BitvmxStore {
             ),
         }
 
+        self.update_news(instance_id, *txid)?;
+
         Ok(())
     }
 
@@ -204,7 +289,7 @@ impl BitvmxApi for BitvmxStore {
     }
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()> {
-        let instance_key = format!("instance/{}", instance.id);
+        let instance_key = self.get_instance_key(InstanceKey::Instance(instance.id));
 
         // Store the instance under its ID
         self.store.set(&instance_key, instance).context(format!(
@@ -214,7 +299,7 @@ impl BitvmxApi for BitvmxStore {
 
         // Index each transaction instance by its txid
         for tx in &instance.txs {
-            let tx_key = format!("instance/{}/tx/{}", instance.id, tx.tx_id);
+            let tx_key = self.get_instance_key(InstanceKey::InstanceTx(instance.id, &tx.tx_id));
             self.store.set(&tx_key, tx).context(format!(
                 "Failed to store txid {} under key {}",
                 tx.tx_id, tx_key
@@ -222,10 +307,10 @@ impl BitvmxApi for BitvmxStore {
         }
 
         // Maintain a list of all instances
-        let instances_key = "instance/list";
+        let instances_key = self.get_instance_key(InstanceKey::InstanceList);
         let mut all_instances = self
             .store
-            .get::<_, Vec<u32>>(instances_key)
+            .get::<_, Vec<InstanceId>>(&instances_key)
             .unwrap_or_default()
             .unwrap_or_default();
 
@@ -239,9 +324,9 @@ impl BitvmxApi for BitvmxStore {
         Ok(())
     }
 
-    fn save_transaction(&self, instance_id: u32, tx_id: Txid) -> Result<()> {
-        let tx_data = BitvmxTxData {
-            tx_id: tx_id,
+    fn save_transaction(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        let tx_data = TxStatus {
+            tx_id,
             tx_hex: None,
             tx_was_seen: false,
             height_tx_seen: None,

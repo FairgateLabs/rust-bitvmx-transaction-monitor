@@ -1,4 +1,4 @@
-use crate::types::{BitvmxInstance, BitvmxTxData};
+use crate::types::{BitvmxInstance, TxStatus};
 use bitcoin::Txid;
 use std::str::FromStr;
 
@@ -7,7 +7,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
         BitvmxInstance {
             id: 1,
             txs: vec![
-                BitvmxTxData {
+                TxStatus {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115be1",
                     )
@@ -17,7 +17,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     height_tx_seen: None,
                     confirmations: 0,
                 },
-                BitvmxTxData {
+                TxStatus {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bea",
                     )
@@ -33,7 +33,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
         BitvmxInstance {
             id: 2,
             txs: vec![
-                BitvmxTxData {
+                TxStatus {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bed",
                     )
@@ -43,7 +43,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     height_tx_seen: None,
                     confirmations: 0,
                 },
-                BitvmxTxData {
+                TxStatus {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec",
                     )
@@ -59,7 +59,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
         BitvmxInstance {
             id: 3,
             txs: vec![
-                BitvmxTxData {
+                TxStatus {
                     tx_id: Txid::from_str(
                         "3c2d0b8d3052af2423f7c93450473aeacfb47e7aa3f0b0ae63f3e240a15496b1",
                     )
@@ -69,7 +69,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     height_tx_seen: None,
                     confirmations: 0,
                 },
-                BitvmxTxData {
+                TxStatus {
                     tx_id: Txid::from_str(
                         "3c2d0b8d3052af2423f7c93450473aeacfb47e7aa3f0b0ae63f3e240a15496b2",
                     )

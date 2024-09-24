@@ -3,7 +3,7 @@ use bitcoin::Txid;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct BitvmxTxData {
+pub struct TxStatus {
     pub tx_id: Txid,
 
     pub tx_hex: Option<String>,
@@ -22,13 +22,14 @@ pub struct BitvmxTxData {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BitvmxInstance {
     //bitvmx instance id
-    pub id: u32,
+    pub id: InstanceId,
 
     //bitvmx linked transactions data + speed up transactions data
-    pub txs: Vec<BitvmxTxData>,
+    pub txs: Vec<TxStatus>,
 
     //First height to start searching the bitvmx instance in the blockchain
     pub start_height: BlockHeight,
 }
 
 pub type BlockHeight = u32;
+pub type InstanceId = u32;

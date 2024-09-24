@@ -1,5 +1,5 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
-use crate::types::BitvmxInstance;
+use crate::types::{BitvmxInstance, InstanceId};
 use anyhow::{Context, Ok, Result};
 use bitcoin::Txid;
 use bitcoin_indexer::{
@@ -38,6 +38,53 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     }
 }
 
+pub trait MonitorApi {
+    fn detect_instances(&mut self) -> Result<()>;
+    fn get_current_height(&self) -> BlockHeight;
+    fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()>;
+    fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
+
+    /// Notifies about changes in the status of every transaction (tx) that belongs
+    /// to a BitVMX instance.
+    ///
+    /// # Returns
+    /// - `Ok(Vec<(InstanceId, TxStatus>)>`: A vector of tuples where each tuple contains:
+    ///   - `InstanceId`: The Bitvmx instance id
+    ///   - `TxStatus`: The current status of the transaction.
+    fn get_instances_updates(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
+
+    /// Acknowledges or marks a intance id as processed, effectively
+    /// removing it from the list of pending changes.
+    fn acknowledge_instance_update(&self, instance_id: InstanceId) -> Result<()>;
+}
+
+impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
+    fn detect_instances(&mut self) -> Result<()> {
+        self.detect_instances()
+    }
+    fn get_current_height(&self) -> BlockHeight {
+        self.get_current_height()
+    }
+    fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()> {
+        self.save_instances_for_tracking(instances)
+    }
+    fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        self.save_transaction_for_tracking(instance_id, tx_id)
+    }
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
+        self.get_instances_for_tracking()
+    }
+
+    fn get_instances_updates(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+        self.get_instance_news()
+    }
+
+    fn acknowledge_instance_update(&self, instance_id: InstanceId) -> Result<()> {
+        self.acknowledge_instance_news(instance_id)
+    }
+}
+
 impl<I, B> Monitor<I, B>
 where
     I: IndexerApi,
@@ -59,13 +106,17 @@ where
         Ok(())
     }
 
-    pub fn save_transaction_for_tracking(&self, instance_id: u32, tx_id: Txid) -> Result<()> {
+    pub fn save_transaction_for_tracking(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<()> {
         self.bitvmx_store.save_transaction(instance_id, tx_id)?;
         Ok(())
     }
 
     pub fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
-        self.bitvmx_store.get_instances_for_tracking()
+        self.bitvmx_store.get_all_instances_for_tracking()
     }
 
     pub fn get_current_height(&self) -> BlockHeight {
@@ -90,7 +141,7 @@ where
         // Get operations that have already started
         let instances = self
             .bitvmx_store
-            .get_pending_instances(current_height)
+            .get_instances_ready_to_track(current_height)
             .context("Failed to retrieve operations")?;
 
         // Count existing operations get all thansaction that meet next rules:
@@ -142,6 +193,17 @@ where
 
         self.current_height = new_height;
 
+        Ok(())
+    }
+
+    pub fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+        let instances = self.bitvmx_store.get_instance_news()?;
+
+        Ok(instances)
+    }
+
+    pub fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()> {
+        self.bitvmx_store.acknowledge_instance_news(instance_id)?;
         Ok(())
     }
 }

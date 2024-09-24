@@ -1,3 +1,4 @@
+use bitcoin_indexer::types::BlockHeight;
 use clap::{command, Parser};
 
 #[derive(Parser, Debug)]
@@ -21,5 +22,5 @@ pub struct Args {
 
     /// Bitcoin height to start indexing from
     #[arg(long, short = 'c')]
-    pub checkpoint_height: Option<u32>,
+    pub checkpoint_height: Option<BlockHeight>,
 }
