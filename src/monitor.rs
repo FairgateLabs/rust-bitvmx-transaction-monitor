@@ -52,11 +52,11 @@ pub trait MonitorApi {
     /// - `Ok(Vec<(InstanceId, TxStatus>)>`: A vector of tuples where each tuple contains:
     ///   - `InstanceId`: The Bitvmx instance id
     ///   - `TxStatus`: The current status of the transaction.
-    fn get_instances_updates(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
 
     /// Acknowledges or marks a intance id as processed, effectively
     /// removing it from the list of pending changes.
-    fn acknowledge_instance_update(&self, instance_id: InstanceId) -> Result<()>;
+    fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()>;
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
@@ -76,11 +76,11 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         self.get_instances_for_tracking()
     }
 
-    fn get_instances_updates(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
         self.get_instance_news()
     }
 
-    fn acknowledge_instance_update(&self, instance_id: InstanceId) -> Result<()> {
+    fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()> {
         self.acknowledge_instance_news(instance_id)
     }
 }
