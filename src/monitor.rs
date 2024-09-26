@@ -54,11 +54,15 @@ pub trait MonitorApi {
     ///   - `TxStatus`: The current status of the transaction.
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
 
-    /// Acknowledges or marks a intance id as processed, effectively
+    /// Acknowledges or marks an instance id and tx processed, effectively
     /// removing it from the list of pending changes.
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
 
-    fn get_tx_status(&self, instance_id: InstanceId, tx_id: Txid) -> Result<Option<TxStatus>>;
+    fn get_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<Option<TxStatus>>;
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
@@ -86,8 +90,12 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         self.acknowledge_instance_tx_news(instance_id, tx_id)
     }
 
-    fn get_tx_status(&self, instance_id: InstanceId, tx_id: Txid) -> Result<Option<TxStatus>> {
-        self.get_tx_status(instance_id, tx_id)
+    fn get_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<Option<TxStatus>> {
+        self.get_instance_tx_status(instance_id, tx_id)
     }
 }
 
@@ -214,8 +222,14 @@ where
         Ok(())
     }
 
-    pub fn get_tx_status(&self, instance_id: InstanceId, tx_id: Txid) -> Result<Option<TxStatus>> {
-        let tx_status = self.bitvmx_store.get_tx_status(instance_id, &tx_id)?;
+    pub fn get_instance_tx_status(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<Option<TxStatus>> {
+        let tx_status = self
+            .bitvmx_store
+            .get_instance_tx_status(instance_id, &tx_id)?;
 
         Ok(tx_status)
     }
