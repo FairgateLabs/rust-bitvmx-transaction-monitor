@@ -254,16 +254,17 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
 #[test]
 fn get_instance_news() -> Result<(), anyhow::Error> {
     let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_five")?;
+    let tx_id = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
+        .unwrap();
+
     //remove all the news
-    bitvmx_store.acknowledge_instance_news(2)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, tx_id)?;
 
     let instance_news = bitvmx_store.get_instance_news()?;
 
     //assert There is no news
     assert_eq!(instance_news.len(), 0);
 
-    let tx_id = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
-        .unwrap();
     // Add a new instance with one tx
     let instances = vec![BitvmxInstance {
         id: 2,
@@ -304,7 +305,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     //assert!(instance_news[0].1[0], &tx_id);
 
     //remove news
-    bitvmx_store.acknowledge_instance_news(2)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, tx_id)?;
 
     let instance_news = bitvmx_store.get_instance_news()?;
     assert_eq!(instance_news.len(), 0);
@@ -326,11 +327,6 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
 #[test]
 fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_multiple_instances")?;
-
-    //remove all the news
-    bitvmx_store.acknowledge_instance_news(1)?;
-    bitvmx_store.acknowledge_instance_news(2)?;
-
     // Create two instances with one transaction each
     let tx_id_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")?;
@@ -338,6 +334,11 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
         Txid::from_str("8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec")?;
     let tx_id_3 =
         Txid::from_str("8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec")?;
+
+    //remove all the news
+    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_1)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_3)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, tx_id_2)?;
 
     let instances = vec![
         BitvmxInstance {
@@ -394,7 +395,7 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 2);
 
     // Acknowledge news for instance 1
-    bitvmx_store.acknowledge_instance_news(2)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, tx_id_2)?;
 
     // Verify only news for instance 2 remains
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -406,7 +407,8 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     assert!(instance_news[0].1.contains(&tx_id_3));
 
     // Acknowledge news for instance 2
-    bitvmx_store.acknowledge_instance_news(1)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_1)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_3)?;
 
     // Verify no news remains
     let instance_news = bitvmx_store.get_instance_news()?;

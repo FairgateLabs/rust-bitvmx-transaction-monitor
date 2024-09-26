@@ -45,7 +45,7 @@ pub trait BitvmxApi {
     fn save_transaction(&self, instance_id: InstanceId, tx: Txid) -> Result<()>;
 
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
-    fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()>;
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: Txid) -> Result<()>;
     fn get_tx_status(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<Option<TxStatus>>;
 }
 
@@ -204,19 +204,28 @@ impl BitvmxApi for BitvmxStore {
         }
     }
 
-    fn acknowledge_instance_news(&self, instance_id: InstanceId) -> Result<()> {
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
-        let instance_news = self
+
+        let mut instances_news = self
             .store
             .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
             .unwrap_or_default();
 
-        let instance_news_filtered = instance_news
-            .into_iter()
-            .filter(|(id, _)| id != &instance_id)
-            .collect::<Vec<(InstanceId, Vec<Txid>)>>();
+        if let Some(index) = instances_news.iter().position(|(id, _)| *id == instance_id) {
+            let (_, txs) = &mut instances_news[index];
+            txs.retain(|tx| tx != &tx_id);
 
-        self.store.set(&instance_news_key, instance_news_filtered)?;
+            // If all transactions for this instance have been acknowledged, remove the instance
+            if txs.is_empty() {
+                instances_news.remove(index);
+            }
+
+            self.store.set(&instance_news_key, &instances_news)?;
+        } else {
+            // If the instance is not found in the news, we can either ignore it or log a warning
+            warn!("No news found for instance {}", instance_id);
+        }
 
         Ok(())
     }
