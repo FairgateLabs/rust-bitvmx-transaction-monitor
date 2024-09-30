@@ -39,6 +39,7 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
 }
 
 pub trait MonitorApi {
+    fn is_ready(&mut self) -> Result<bool>;
     fn detect_instances(&mut self) -> Result<()>;
     fn get_current_height(&self) -> BlockHeight;
     fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()>;
@@ -96,6 +97,13 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         tx_id: Txid,
     ) -> Result<Option<TxStatus>> {
         self.get_instance_tx_status(instance_id, tx_id)
+    }
+
+    fn is_ready(&mut self) -> Result<bool> {
+        let current_height = self.get_current_height();
+        let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
+
+        Ok(current_height >= blockchain_height)
     }
 }
 
