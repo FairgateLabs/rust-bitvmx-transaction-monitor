@@ -57,7 +57,7 @@ pub trait MonitorApi {
 
     /// Acknowledges or marks an instance id and tx processed, effectively
     /// removing it from the list of pending changes.
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
     fn get_instance_tx_status(
         &self,
@@ -87,7 +87,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         self.get_instance_news()
     }
 
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         self.acknowledge_instance_tx_news(instance_id, tx_id)
     }
 
@@ -224,7 +224,11 @@ where
         Ok(instances)
     }
 
-    pub fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+    pub fn acknowledge_instance_tx_news(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<()> {
         self.bitvmx_store
             .acknowledge_instance_tx_news(instance_id, tx_id)?;
         Ok(())

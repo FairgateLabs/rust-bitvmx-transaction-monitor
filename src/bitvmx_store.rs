@@ -45,7 +45,7 @@ pub trait BitvmxApi {
     fn save_transaction(&self, instance_id: InstanceId, tx: Txid) -> Result<()>;
 
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: Txid) -> Result<()>;
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
     fn get_instance_tx_status(
         &self,
         instance_id: InstanceId,
@@ -212,7 +212,7 @@ impl BitvmxApi for BitvmxStore {
         }
     }
 
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
 
         let mut instances_news = self
@@ -222,7 +222,7 @@ impl BitvmxApi for BitvmxStore {
 
         if let Some(index) = instances_news.iter().position(|(id, _)| *id == instance_id) {
             let (_, txs) = &mut instances_news[index];
-            txs.retain(|tx| tx != &tx_id);
+            txs.retain(|tx| tx != tx_id);
 
             // If all transactions for this instance have been acknowledged, remove the instance
             if txs.is_empty() {
