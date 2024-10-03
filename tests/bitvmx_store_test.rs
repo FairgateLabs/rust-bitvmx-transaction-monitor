@@ -258,7 +258,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
         .unwrap();
 
     //remove all the news
-    bitvmx_store.acknowledge_instance_tx_news(2, tx_id)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, &tx_id)?;
 
     let instance_news = bitvmx_store.get_instance_news()?;
 
@@ -305,7 +305,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     //assert!(instance_news[0].1[0], &tx_id);
 
     //remove news
-    bitvmx_store.acknowledge_instance_tx_news(2, tx_id)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, &tx_id)?;
 
     let instance_news = bitvmx_store.get_instance_news()?;
     assert_eq!(instance_news.len(), 0);
@@ -336,9 +336,9 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
         Txid::from_str("8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec")?;
 
     //remove all the news
-    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_1)?;
-    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_3)?;
-    bitvmx_store.acknowledge_instance_tx_news(2, tx_id_2)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, &tx_id_1)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, &tx_id_3)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, &tx_id_2)?;
 
     let instances = vec![
         BitvmxInstance {
@@ -395,7 +395,7 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 2);
 
     // Acknowledge news for instance 1
-    bitvmx_store.acknowledge_instance_tx_news(2, tx_id_2)?;
+    bitvmx_store.acknowledge_instance_tx_news(2, &tx_id_2)?;
 
     // Verify only news for instance 2 remains
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -407,8 +407,8 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     assert!(instance_news[0].1.contains(&tx_id_3));
 
     // Acknowledge news for instance 2
-    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_1)?;
-    bitvmx_store.acknowledge_instance_tx_news(1, tx_id_3)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, &tx_id_1)?;
+    bitvmx_store.acknowledge_instance_tx_news(1, &tx_id_3)?;
 
     // Verify no news remains
     let instance_news = bitvmx_store.get_instance_news()?;

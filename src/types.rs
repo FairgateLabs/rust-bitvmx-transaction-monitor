@@ -30,6 +30,14 @@ pub struct BitvmxInstance {
     //First height to start searching the bitvmx instance in the blockchain
     pub start_height: BlockHeight,
 }
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct InstanceData {
+    //bitvmx instance id
+    pub id: InstanceId,
+
+    //bitvmx linked transactions data + speed up transactions data
+    pub txs: Vec<Txid>,
+}
 
 pub type BlockHeight = u32;
 pub type InstanceId = u32;

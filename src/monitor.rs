@@ -1,5 +1,5 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
-use crate::types::{BitvmxInstance, InstanceId, TxStatus};
+use crate::types::{BitvmxInstance, InstanceData, InstanceId, TxStatus};
 use anyhow::{Context, Ok, Result};
 use bitcoin::Txid;
 use bitcoin_indexer::{
@@ -42,7 +42,7 @@ pub trait MonitorApi {
     fn is_ready(&mut self) -> Result<bool>;
     fn detect_instances(&mut self) -> Result<()>;
     fn get_current_height(&self) -> BlockHeight;
-    fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()>;
+    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
     fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
 
@@ -70,11 +70,35 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     fn detect_instances(&mut self) -> Result<()> {
         self.detect_instances()
     }
+
     fn get_current_height(&self) -> BlockHeight {
         self.get_current_height()
     }
-    fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<()> {
-        self.save_instances_for_tracking(instances)
+
+    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()> {
+        let bitvmx_instances: Vec<BitvmxInstance> = instances
+            .into_iter()
+            .map(|instance_data| {
+                let txs = instance_data
+                    .txs
+                    .into_iter()
+                    .map(|tx_id| TxStatus {
+                        tx_id,
+                        tx_hex: None,
+                        tx_was_seen: false,
+                        height_tx_seen: None,
+                        confirmations: 0,
+                    })
+                    .collect();
+                BitvmxInstance {
+                    id: instance_data.id,
+                    txs,
+                    start_height: self.current_height,
+                }
+            })
+            .collect();
+
+        self.save_instances_for_tracking(bitvmx_instances)
     }
     fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
         self.save_transaction_for_tracking(instance_id, tx_id)
