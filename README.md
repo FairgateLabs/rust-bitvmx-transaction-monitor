@@ -3,8 +3,6 @@
 
 This process checks all BitVMX instances in a file and verifies them against a Bitcoin indexer to ensure that the transactions associated with the BitVMX instances are found in the blockchain.
 
-![Explanation](draw.png)
-
 ## Installation
 Clone the repository and initialize the submodules:
 ```bash
