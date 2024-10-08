@@ -42,7 +42,8 @@ pub trait BitvmxApi {
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
     fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()>;
-    fn save_transaction(&self, instance_id: InstanceId, tx: Txid) -> Result<()>;
+    fn save_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
+    fn remove_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
 
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
@@ -134,6 +135,44 @@ impl BitvmxStore {
                 "There was an error trying to save instance {}",
                 instance_key
             ),
+        }
+
+        Ok(())
+    }
+
+    fn remove_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+        let instance_tx_key = self.get_instance_key(InstanceKey::InstanceTx(instance_id, tx_id));
+
+        // Remove the transaction from the store
+        self.store
+            .delete(&instance_tx_key)
+            .context(format!("There was an error removing {}", instance_tx_key))?;
+
+        // Retrieve the instance using the instance_id
+        let instance = self.get_instance(instance_id)?;
+
+        match instance {
+            Some(mut _instance) => {
+                // Find the index of the transaction to remove from the instance's txs list
+                if let Some(pos) = _instance
+                    .txs
+                    .iter()
+                    .position(|tx_old| tx_old.tx_id == *tx_id)
+                {
+                    // Remove the transaction from the list of transactions
+                    _instance.txs.remove(pos);
+
+                    // Update the instance in the store after removal
+                    self.save_instance(&_instance)?;
+                } else {
+                    bail!(
+                        "Transaction with id {} not found in instance {}",
+                        tx_id,
+                        instance_id
+                    );
+                }
+            }
+            None => bail!("Instance not found: {}", instance_id),
         }
 
         Ok(())
@@ -347,9 +386,9 @@ impl BitvmxApi for BitvmxStore {
         Ok(())
     }
 
-    fn save_transaction(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+    fn save_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         let tx_data = TxStatus {
-            tx_id,
+            tx_id: *tx_id,
             tx_hex: None,
             tx_was_seen: false,
             height_tx_seen: None,
@@ -359,5 +398,9 @@ impl BitvmxApi for BitvmxStore {
         self.save_instance_tx(instance_id, &tx_data)?;
 
         Ok(())
+    }
+
+    fn remove_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+        self.remove_instance_tx(instance_id, tx_id)
     }
 }

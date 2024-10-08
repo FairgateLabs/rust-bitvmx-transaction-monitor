@@ -44,6 +44,7 @@ pub trait MonitorApi {
     fn get_current_height(&self) -> BlockHeight;
     fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
     fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
 
     /// Notifies about changes in the status of every transaction (tx) that belongs
@@ -103,6 +104,11 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
         self.save_transaction_for_tracking(instance_id, tx_id)
     }
+
+    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        self.remove_transaction_for_tracking(instance_id, tx_id)
+    }
+
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
         self.get_instances_for_tracking()
     }
@@ -157,8 +163,12 @@ where
         instance_id: InstanceId,
         tx_id: Txid,
     ) -> Result<()> {
-        self.bitvmx_store.save_transaction(instance_id, tx_id)?;
+        self.bitvmx_store.save_transaction(instance_id, &tx_id)?;
         Ok(())
+    }
+
+    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()> {
+        self.bitvmx_store.remove_transaction(instance_id, &tx_id)
     }
 
     pub fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {

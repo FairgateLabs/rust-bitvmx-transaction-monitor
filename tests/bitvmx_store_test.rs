@@ -231,7 +231,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
 
     let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_four")?;
     bitvmx_store.save_instances(&instances)?;
-    bitvmx_store.save_transaction(instances[0].id, tx_id_to_add)?;
+    bitvmx_store.save_transaction(instances[0].id, &tx_id_to_add)?;
 
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
 
@@ -413,6 +413,42 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     // Verify no news remains
     let instance_news = bitvmx_store.get_instance_news()?;
     assert_eq!(instance_news.len(), 0);
+
+    Ok(())
+}
+
+#[test]
+fn remove_instance() -> Result<(), anyhow::Error> {
+    let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_remove_instances")?;
+    // Create two instances with one transaction each
+    let tx_id_1 =
+        Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")?;
+    let tx_id_2 =
+        Txid::from_str("8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec")?;
+
+    let instances = vec![BitvmxInstance {
+        id: 1,
+        txs: vec![
+            TxStatus {
+                tx_id: tx_id_1,
+                tx_hex: None,
+                tx_was_seen: false,
+                height_tx_seen: None,
+                confirmations: 0,
+            },
+            TxStatus {
+                tx_id: tx_id_2,
+                tx_hex: None,
+                tx_was_seen: false,
+                height_tx_seen: None,
+                confirmations: 0,
+            },
+        ],
+        start_height: 100,
+    }];
+
+    // Save instances
+    bitvmx_store.save_instances(&instances)?;
 
     Ok(())
 }
