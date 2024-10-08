@@ -66,7 +66,7 @@ fn main() -> Result<()> {
         }
 
         monitor
-            .detect_instances()
+            .detect_instance_changes()
             .context("Fail to detect instances")?;
     }
 

@@ -39,8 +39,13 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
 }
 
 pub trait MonitorApi {
+    // Determines if the monitor is ready and fully synced.
     fn is_ready(&mut self) -> Result<bool>;
-    fn detect_instances(&mut self) -> Result<()>;
+
+    // This method is used to detect changes in the stored instances.
+    // It checks if the indexer has a new block and if so, it detects if any of the transactions of each instance have been confirm.
+    fn detect_instance_changes(&mut self) -> Result<()>;
+
     fn get_current_height(&self) -> BlockHeight;
     fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
     fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
@@ -68,8 +73,8 @@ pub trait MonitorApi {
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
-    fn detect_instances(&mut self) -> Result<()> {
-        self.detect_instances()
+    fn detect_instance_changes(&mut self) -> Result<()> {
+        self.detect_instance_changes()
     }
 
     fn get_current_height(&self) -> BlockHeight {
@@ -179,7 +184,7 @@ where
         self.current_height
     }
 
-    pub fn detect_instances(&mut self) -> Result<()> {
+    pub fn detect_instance_changes(&mut self) -> Result<()> {
         let new_height = self.indexer.index_height(&self.current_height)?;
 
         //Get current block from Bitcoin Indexer
