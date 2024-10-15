@@ -68,12 +68,12 @@ jobs:
       uses: actions-rs/tarpaulin@v0.1
       with:
         version: '0.15.0'
-        args: '--out Xml --output-dir resources --no-fail-fast'
+        args: '--out Xml --output-dir resources --exclude-files src/tests/* src/main.rs src/lib.rs --no-fail-fast'
 
     - name: Code Coverage Summary Report
       uses: irongut/CodeCoverageSummary@v1.3.0
       with:
-        filename: 'resources/cobertura.xml'
+        filename: coverage.cobertura.xml
         badge: true
-        format: 'markdown'
-        output: 'both'
+        format: markdown
+        output: both
