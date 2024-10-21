@@ -208,44 +208,47 @@ where
         // Count existing operations get all thansaction that meet next rules:
 
         for instance in instances {
-            for tx in instance.txs {
-                if tx.tx_was_seen && tx.confirmations >= 6 {
+            for tx_instance in instance.txs {
+                if tx_instance.tx_was_seen && tx_instance.confirmations >= 6 {
                     continue;
                 }
-                // Tx exist means was found
-                let tx_exists_height = self.indexer.tx_exists(&tx.tx_id)?;
 
-                if tx_exists_height.0 {
-                    if tx.tx_was_seen && current_height > tx.height_tx_seen.unwrap() {
+                // if Trasanction is None, means it was not mined or is in some orphan block.
+                let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
+
+                if tx_info.is_some() {
+                    if tx_instance.tx_was_seen
+                        && current_height > tx_instance.height_tx_seen.unwrap()
+                    {
                         self.bitvmx_store.update_instance_tx_confirmations(
                             instance.id,
-                            &tx.tx_id,
+                            &tx_instance.tx_id,
                             current_height,
                         )?;
 
                         info!(
                             "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {}",
                             instance.id,
-                            tx.tx_id,
+                            tx_instance.tx_id,
                             current_height
                         );
 
                         continue;
                     }
 
-                    if !tx.tx_was_seen {
-                        let tx_hex = self.indexer.get_tx(&tx.tx_id)?;
+                    if !tx_instance.tx_was_seen {
+                        let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
 
                         self.bitvmx_store.update_instance_tx_seen(
                             instance.id,
-                            &tx.tx_id,
-                            tx_exists_height.1.unwrap(),
+                            &tx_instance.tx_id,
+                            tx_info.unwrap().block_height,
                             &tx_hex,
                         )?;
 
                         info!(
                             "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                            instance.id, tx.tx_id, current_height
+                            instance.id, tx_instance.tx_id, current_height
                         );
                     }
                 }

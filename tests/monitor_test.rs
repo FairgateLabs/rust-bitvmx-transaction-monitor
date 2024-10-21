@@ -1,5 +1,5 @@
-use bitcoin::Txid;
-use bitcoin_indexer::indexer::MockIndexerApi;
+use bitcoin::{BlockHash, Txid};
+use bitcoin_indexer::{indexer::MockIndexerApi, types::TransactionInfo};
 use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
@@ -101,12 +101,22 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(move |_| Ok(instances.clone()));
 
+    let hash_150 =
+        BlockHash::from_str("12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+
+    let tx_info = TransactionInfo {
+        tx_id: tx_to_seen,
+        block_hash: hash_150,
+        orphan: false,
+        block_height: 150,
+    };
+
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
-        .expect_tx_exists()
+        .expect_get_tx_info()
         .with(eq(tx_to_seen.clone()))
         .times(1)
-        .returning(|_| Ok((true, Some(150))));
+        .returning(move |_| Ok(Some(tx_info.clone())));
 
     // The first time was seen the tx should not call update_bitvmx_tx_confirmations
     mock_bitvmx_store
@@ -162,12 +172,21 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .expect_get_best_block()
         .returning(move || Ok(Some(block_200)));
 
+    let hash_100 =
+        BlockHash::from_str("12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+
+    let tx_info = TransactionInfo {
+        tx_id: tx_to_seen,
+        block_hash: hash_100,
+        orphan: false,
+        block_height: 100,
+    };
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
-        .expect_tx_exists()
+        .expect_get_tx_info()
         .with(eq(tx_to_seen.clone()))
         .times(1)
-        .returning(|_| Ok((true, Some(100))));
+        .returning(move |_| Ok(Some(tx_info.clone())));
 
     mock_bitvmx_store
         .expect_get_instances_ready_to_track()
