@@ -167,7 +167,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     assert_eq!(instances[0].txs[1].height_tx_seen, Some(block_300));
 
     // Once a transaction is seen in a block, the number of confirmations is last_block_height - firt_height_seen.
-    assert_eq!(instances[0].txs[1].confirmations, block_400 - block_300);
+    assert_eq!(instances[0].txs[1].confirmations, block_400 - block_300 + 1);
 
     Ok(())
 }
@@ -203,7 +203,7 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
 
     // Check the confirmations
     let instances = bitvmx_store.get_all_instances_for_tracking()?;
-    assert_eq!(instances[0].txs[0].confirmations, 1000 - 190);
+    assert_eq!(instances[0].txs[0].confirmations, 1000 - 189);
 
     Ok(())
 }

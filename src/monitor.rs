@@ -137,8 +137,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     fn is_ready(&mut self) -> Result<bool> {
         let current_height = self.get_current_height();
         let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
-
-        Ok(current_height >= blockchain_height)
+        info!("Monitor is ready? {}", current_height == blockchain_height);
+        Ok(current_height == blockchain_height)
     }
 }
 
@@ -187,7 +187,6 @@ where
     pub fn detect_instance_changes(&mut self) -> Result<()> {
         let new_height = self.indexer.index_height(&self.current_height)?;
 
-        //Get current block from Bitcoin Indexer
         let current_height = self
             .indexer
             .get_best_block()
@@ -209,7 +208,10 @@ where
 
         for instance in instances {
             for tx_instance in instance.txs {
-                if tx_instance.tx_was_seen && tx_instance.confirmations >= 6 {
+                //TODO: This should change, for now, we are gonna update transaction until 10 confirmations.
+                // Updates are no needed. It can be calculated based on
+                // the current block and the block that tx was mined.
+                if tx_instance.tx_was_seen && tx_instance.confirmations >= 10 {
                     continue;
                 }
 
@@ -227,10 +229,11 @@ where
                         )?;
 
                         info!(
-                            "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {}",
+                            "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
                             instance.id,
                             tx_instance.tx_id,
-                            current_height
+                            current_height,
+                            tx_instance.confirmations + 1,
                         );
 
                         continue;

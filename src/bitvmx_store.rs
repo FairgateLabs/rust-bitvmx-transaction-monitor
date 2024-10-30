@@ -71,9 +71,9 @@ impl BitvmxStore {
         Ok(Self { store })
     }
 
-    pub fn new(store: Storage) -> Result<Self> {
-        Ok(Self { store })
-    }
+    // pub fn new(store: Storage) -> Result<Self> {
+    //     Ok(Self { store })
+    // }
 
     fn get_instance(&self, instance_id: InstanceId) -> Result<Option<BitvmxInstance>> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
@@ -329,7 +329,7 @@ impl BitvmxApi for BitvmxStore {
 
         match tx_instance {
             Some(mut tx) => {
-                tx.confirmations = current_height - tx.height_tx_seen.unwrap();
+                tx.confirmations = current_height - tx.height_tx_seen.unwrap() + 1;
                 self.save_instance_tx(instance_id, &tx)?;
             }
             None => warn!(
