@@ -10,6 +10,7 @@ use bitcoin_indexer::{
 };
 use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
+use mockall::automock;
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -38,13 +39,14 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     }
 }
 
+#[automock]
 pub trait MonitorApi {
     // Determines if the monitor is ready and fully synced.
     fn is_ready(&mut self) -> Result<bool>;
 
-    // This method is used to detect changes in the stored instances.
-    // It checks if the indexer has a new block and if so, it detects if any of the transactions of each instance have been confirm.
-    fn detect_instance_changes(&mut self) -> Result<()>;
+    // The `tick` method is responsible for monitoring the status of transactions associated with stored instances. It checks if any of these transactions have been confirmed.
+    // Additionally, it triggers the indexer to continue its indexing process if it is not yet fully synchronized with the blockchain.
+    fn tick(&mut self) -> Result<()>;
 
     fn get_current_height(&self) -> BlockHeight;
     fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
@@ -73,8 +75,8 @@ pub trait MonitorApi {
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
-    fn detect_instance_changes(&mut self) -> Result<()> {
-        self.detect_instance_changes()
+    fn tick(&mut self) -> Result<()> {
+        self.tick()
     }
 
     fn get_current_height(&self) -> BlockHeight {
@@ -97,7 +99,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
                     })
                     .collect();
                 BitvmxInstance {
-                    id: instance_data.id,
+                    id: instance_data.instance_id,
                     txs,
                     start_height: self.current_height,
                 }
@@ -184,7 +186,7 @@ where
         self.current_height
     }
 
-    pub fn detect_instance_changes(&mut self) -> Result<()> {
+    pub fn tick(&mut self) -> Result<()> {
         let new_height = self.indexer.index_height(&self.current_height)?;
 
         let current_height = self
@@ -211,7 +213,7 @@ where
                 //TODO: This should change, for now, we are gonna update transaction until 10 confirmations.
                 // Updates are no needed. It can be calculated based on
                 // the current block and the block that tx was mined.
-                if tx_instance.tx_was_seen && tx_instance.confirmations >= 10 {
+                if tx_instance.tx_was_seen && tx_instance.confirmations >= 6 {
                     continue;
                 }
 

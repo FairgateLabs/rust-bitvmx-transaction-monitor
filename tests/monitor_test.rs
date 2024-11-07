@@ -40,7 +40,7 @@ fn no_instances() -> Result<(), anyhow::Error> {
 
     let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_100));
 
-    monitor.detect_instance_changes()?;
+    monitor.tick()?;
 
     assert_eq!(monitor.get_current_height(), block_100 + 1);
 
@@ -132,7 +132,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
 
-    monitor.detect_instance_changes()?;
+    monitor.tick()?;
 
     assert_eq!(monitor.get_current_height(), block_200 + 1);
 
@@ -204,7 +204,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
 
     let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200));
 
-    monitor.detect_instance_changes()?;
+    monitor.tick()?;
 
     assert_eq!(monitor.get_current_height(), 201);
 

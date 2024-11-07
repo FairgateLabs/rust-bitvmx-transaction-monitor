@@ -65,9 +65,7 @@ fn main() -> Result<()> {
             prev_height = monitor.get_current_height();
         }
 
-        monitor
-            .detect_instance_changes()
-            .context("Fail to detect instances")?;
+        monitor.tick().context("Fail to detect instances")?;
     }
 
     Ok(())
