@@ -8,9 +8,6 @@ pub struct TxStatus {
 
     pub tx_hex: Option<String>,
 
-    //If transaction was seen in the blockchain then true
-    pub tx_was_seen: bool,
-
     //Firt block height seen in the blockchain data
     // TODO: this should have more information about the block. block hash.
     pub height_tx_seen: Option<BlockHeight>,

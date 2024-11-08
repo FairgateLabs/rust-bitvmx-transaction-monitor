@@ -13,7 +13,6 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
@@ -23,7 +22,6 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
@@ -39,7 +37,6 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
@@ -49,7 +46,6 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
@@ -65,7 +61,6 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
@@ -75,7 +70,6 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },

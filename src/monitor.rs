@@ -93,7 +93,6 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
                     .map(|tx_id| TxStatus {
                         tx_id,
                         tx_hex: None,
-                        tx_was_seen: false,
                         height_tx_seen: None,
                         confirmations: 0,
                     })
@@ -213,7 +212,7 @@ where
                 //TODO: This should change, for now, we are gonna update transaction until 10 confirmations.
                 // Updates are no needed. It can be calculated based on
                 // the current block and the block that tx was mined.
-                if tx_instance.tx_was_seen && tx_instance.confirmations >= 6 {
+                if tx_instance.height_tx_seen.is_some() && tx_instance.confirmations >= 6 {
                     continue;
                 }
 
@@ -221,7 +220,7 @@ where
                 let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
 
                 if tx_info.is_some() {
-                    if tx_instance.tx_was_seen
+                    if tx_instance.height_tx_seen.is_some()
                         && current_height > tx_instance.height_tx_seen.unwrap()
                     {
                         self.bitvmx_store.update_instance_tx_confirmations(
@@ -241,7 +240,7 @@ where
                         continue;
                     }
 
-                    if !tx_instance.tx_was_seen {
+                    if !tx_instance.height_tx_seen.is_some() {
                         let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
 
                         self.bitvmx_store.update_instance_tx_seen(

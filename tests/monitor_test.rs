@@ -67,14 +67,12 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: true,
                 height_tx_seen: Some(190),
                 confirmations: 10,
             },
             TxStatus {
                 tx_id: tx_to_seen.clone(),
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },
@@ -157,7 +155,6 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         txs: vec![TxStatus {
             tx_id: tx_to_seen.clone(),
             tx_hex: None,
-            tx_was_seen: true,
             height_tx_seen: Some(200),
             confirmations,
         }],

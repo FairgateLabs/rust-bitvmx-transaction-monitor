@@ -19,14 +19,12 @@ fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: true,
                 height_tx_seen: Some(190),
                 confirmations: 10,
             },
             TxStatus {
                 tx_id: txid2,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },
@@ -50,14 +48,12 @@ fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },
             TxStatus {
                 tx_id: txid2,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },
@@ -117,14 +113,12 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: true,
                 height_tx_seen: Some(190),
                 confirmations: 10,
             },
             TxStatus {
                 tx_id: tx_id_not_seen,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },
@@ -182,7 +176,6 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
         txs: vec![TxStatus {
             tx_id: txid,
             tx_hex: None,
-            tx_was_seen: true,
             height_tx_seen: Some(190),
             confirmations: 1,
         }],
@@ -222,7 +215,6 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         txs: vec![TxStatus {
             tx_id: tx_id,
             tx_hex: None,
-            tx_was_seen: true,
             height_tx_seen: Some(190),
             confirmations: 1,
         }],
@@ -244,7 +236,6 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         .find(|tx| tx.tx_id == tx_id_to_add)
         .unwrap();
     assert_eq!(new_tx.tx_hex, None);
-    assert_eq!(new_tx.tx_was_seen, false);
     assert_eq!(new_tx.height_tx_seen, None);
     assert_eq!(new_tx.confirmations, 0);
 
@@ -271,7 +262,6 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
         txs: vec![TxStatus {
             tx_id: tx_id,
             tx_hex: None,
-            tx_was_seen: true,
             height_tx_seen: Some(190),
             confirmations: 1,
         }],
@@ -347,14 +337,12 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
                 TxStatus {
                     tx_id: tx_id_1,
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
                 TxStatus {
                     tx_id: tx_id_3,
                     tx_hex: None,
-                    tx_was_seen: false,
                     height_tx_seen: None,
                     confirmations: 0,
                 },
@@ -366,7 +354,6 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
             txs: vec![TxStatus {
                 tx_id: tx_id_2,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             }],
@@ -432,14 +419,12 @@ fn remove_instance() -> Result<(), anyhow::Error> {
             TxStatus {
                 tx_id: tx_id_1,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },
             TxStatus {
                 tx_id: tx_id_2,
                 tx_hex: None,
-                tx_was_seen: false,
                 height_tx_seen: None,
                 confirmations: 0,
             },

@@ -299,10 +299,9 @@ impl BitvmxApi for BitvmxStore {
 
         match tx_instance {
             Some(mut tx) => {
-                if tx.tx_was_seen {
+                if tx.height_tx_seen.is_some() {
                     warn!("Txn already seen, looks this methods is being calling more than what should be")
                 }
-                tx.tx_was_seen = true;
                 tx.confirmations = 1;
                 tx.height_tx_seen = Some(height_tx_was_seen);
                 tx.tx_hex = Some(tx_hex.to_string());
@@ -390,7 +389,6 @@ impl BitvmxApi for BitvmxStore {
         let tx_data = TxStatus {
             tx_id: *tx_id,
             tx_hex: None,
-            tx_was_seen: false,
             height_tx_seen: None,
             confirmations: 0,
         };
