@@ -68,13 +68,11 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
                 tx_id: txid,
                 tx_hex: None,
                 height_tx_seen: Some(190),
-                confirmations: 10,
             },
             TxStatus {
                 tx_id: tx_to_seen.clone(),
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
         ],
         start_height: 180,
@@ -149,14 +147,13 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
             .unwrap();
 
-    let confirmations = 1;
+
     let instances = vec![BitvmxInstance {
         id: intance_id,
         txs: vec![TxStatus {
             tx_id: tx_to_seen.clone(),
             tx_hex: None,
             height_tx_seen: Some(200),
-            confirmations,
         }],
         start_height: 180,
     }];

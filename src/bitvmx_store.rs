@@ -302,7 +302,6 @@ impl BitvmxApi for BitvmxStore {
                 if tx.height_tx_seen.is_some() {
                     warn!("Txn already seen, looks this methods is being calling more than what should be")
                 }
-                tx.confirmations = 1;
                 tx.height_tx_seen = Some(height_tx_was_seen);
                 tx.tx_hex = Some(tx_hex.to_string());
                 self.save_instance_tx(instance_id, &tx)?;
@@ -327,8 +326,7 @@ impl BitvmxApi for BitvmxStore {
         let tx_instance = self.get_instance_tx(instance_id, txid)?;
 
         match tx_instance {
-            Some(mut tx) => {
-                tx.confirmations = current_height - tx.height_tx_seen.unwrap() + 1;
+            Some(tx) => {
                 self.save_instance_tx(instance_id, &tx)?;
             }
             None => warn!(
@@ -390,7 +388,6 @@ impl BitvmxApi for BitvmxStore {
             tx_id: *tx_id,
             tx_hex: None,
             height_tx_seen: None,
-            confirmations: 0,
         };
 
         self.save_instance_tx(instance_id, &tx_data)?;

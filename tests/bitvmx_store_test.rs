@@ -20,13 +20,11 @@ fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
                 tx_id: txid,
                 tx_hex: None,
                 height_tx_seen: Some(190),
-                confirmations: 10,
             },
             TxStatus {
                 tx_id: txid2,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
         ],
         start_height: 180,
@@ -49,13 +47,11 @@ fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
                 tx_id: txid,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
             TxStatus {
                 tx_id: txid2,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
         ],
         start_height: 1000,
@@ -114,13 +110,11 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
                 tx_id: txid,
                 tx_hex: None,
                 height_tx_seen: Some(190),
-                confirmations: 10,
             },
             TxStatus {
                 tx_id: tx_id_not_seen,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
         ],
         start_height: 180,
@@ -137,9 +131,6 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     bitvmx_store.update_instance_tx_seen(instances[0].id, &tx_id_not_seen, block_300, "")?;
 
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
-
-    // Once a transaction is seen in a block, the number of confirmations is 1 at that point.
-    assert_eq!(instances[0].txs[1].confirmations, 1);
 
     // First block seen should be block_300
     assert_eq!(instances[0].txs[1].height_tx_seen, Some(block_300));
@@ -160,9 +151,6 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     // First block seen should be block_300, never change
     assert_eq!(instances[0].txs[1].height_tx_seen, Some(block_300));
 
-    // Once a transaction is seen in a block, the number of confirmations is last_block_height - firt_height_seen.
-    assert_eq!(instances[0].txs[1].confirmations, block_400 - block_300 + 1);
-
     Ok(())
 }
 
@@ -177,7 +165,6 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
             tx_id: txid,
             tx_hex: None,
             height_tx_seen: Some(190),
-            confirmations: 1,
         }],
         start_height: 180,
     }];
@@ -193,10 +180,6 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
     //The instance is not pending anymore
     let instances = bitvmx_store.get_instances_ready_to_track(instances[0].id)?;
     assert_eq!(instances.len(), 0);
-
-    // Check the confirmations
-    let instances = bitvmx_store.get_all_instances_for_tracking()?;
-    assert_eq!(instances[0].txs[0].confirmations, 1000 - 189);
 
     Ok(())
 }
@@ -216,7 +199,6 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
             tx_id: tx_id,
             tx_hex: None,
             height_tx_seen: Some(190),
-            confirmations: 1,
         }],
         start_height: 180,
     }];
@@ -237,7 +219,6 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         .unwrap();
     assert_eq!(new_tx.tx_hex, None);
     assert_eq!(new_tx.height_tx_seen, None);
-    assert_eq!(new_tx.confirmations, 0);
 
     Ok(())
 }
@@ -263,7 +244,6 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
             tx_id: tx_id,
             tx_hex: None,
             height_tx_seen: Some(190),
-            confirmations: 1,
         }],
         start_height: 180,
     }];
@@ -338,13 +318,11 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
                     tx_id: tx_id_1,
                     tx_hex: None,
                     height_tx_seen: None,
-                    confirmations: 0,
                 },
                 TxStatus {
                     tx_id: tx_id_3,
                     tx_hex: None,
                     height_tx_seen: None,
-                    confirmations: 0,
                 },
             ],
             start_height: 100,
@@ -355,7 +333,6 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
                 tx_id: tx_id_2,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             }],
             start_height: 200,
         },
@@ -420,13 +397,11 @@ fn remove_instance() -> Result<(), anyhow::Error> {
                 tx_id: tx_id_1,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
             TxStatus {
                 tx_id: tx_id_2,
                 tx_hex: None,
                 height_tx_seen: None,
-                confirmations: 0,
             },
         ],
         start_height: 100,

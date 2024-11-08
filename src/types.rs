@@ -11,9 +11,6 @@ pub struct TxStatus {
     //Firt block height seen in the blockchain data
     // TODO: this should have more information about the block. block hash.
     pub height_tx_seen: Option<BlockHeight>,
-
-    // Number of blocks that have passed since the transaction was identified in Bitcoin.
-    pub confirmations: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
