@@ -102,9 +102,16 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     let tx_info = TransactionInfo {
         tx_id: tx_to_seen,
-        block_hash: hash_150,
+        block_hash: hash_150, 
         orphan: false,
         block_height: 150,
+    };
+
+    let tx_info_2 = TransactionInfo {
+        tx_id: txid,
+        block_hash: hash_150, // change hash to correspondent hash
+        orphan: false,
+        block_height: 190,
     };
 
     // Tx was found by the indexer and is already in the blockchain.
@@ -113,6 +120,12 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .with(eq(tx_to_seen.clone()))
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
+
+    mock_indexer
+        .expect_get_tx_info()
+        .with(eq(txid.clone()))
+        .times(1)
+        .returning(move |_| Ok(Some(tx_info_2.clone())));
 
     // The first time was seen the tx should not call update_bitvmx_tx_confirmations
     mock_bitvmx_store

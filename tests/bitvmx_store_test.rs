@@ -135,9 +135,8 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     // First block seen should be block_300
     assert_eq!(instances[0].txs[1].height_tx_seen, Some(block_300));
 
-    let block_400 = 400;
     //Update again but in another block
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id_not_seen, block_400)?;
+    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id_not_seen)?;
 
     // This will return instances are not confirmed > 6
     let data = bitvmx_store.get_instances_ready_to_track(100000)?;
@@ -175,7 +174,7 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
 
     // Tx 2 was seen in block_300
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &txid, 1000)?;
+    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &txid)?;
 
     //The instance is not pending anymore
     let instances = bitvmx_store.get_instances_ready_to_track(instances[0].id)?;
@@ -252,7 +251,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     bitvmx_store.save_instances(&instances)?;
 
     // update the tx with a confirmation
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id, 1000)?;
+    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id)?;
 
     //get and check news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -281,7 +280,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 0);
 
     //update tx with a confirmation in another block
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id, 1000)?;
+    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id)?;
 
     // Get the news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -350,9 +349,9 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     bitvmx_store.update_instance_tx_seen(1, &tx_id_1, 150, "tx_hex_1")?;
     bitvmx_store.update_instance_tx_seen(2, &tx_id_2, 250, "tx_hex_2")?;
     // update each tx with confirms
-    bitvmx_store.update_instance_tx_confirmations(1, &tx_id_1, 1000)?;
-    bitvmx_store.update_instance_tx_confirmations(2, &tx_id_2, 2000)?;
-    bitvmx_store.update_instance_tx_confirmations(1, &tx_id_3, 1000)?;
+    bitvmx_store.update_instance_tx_confirmations(1, &tx_id_1)?;
+    bitvmx_store.update_instance_tx_confirmations(2, &tx_id_2)?;
+    bitvmx_store.update_instance_tx_confirmations(1, &tx_id_3)?;
 
     // Get and verify news
     let instance_news = bitvmx_store.get_instance_news()?;

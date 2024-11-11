@@ -211,34 +211,11 @@ where
                 //TODO: This should change, for now, we are gonna update transaction until 10 confirmations.
                 // Updates are no needed. It can be calculated based on
                 // the current block and the block that tx was mined.
-                if tx_instance.height_tx_seen.is_some() && current_height - tx_instance.height_tx_seen.unwrap() + 1 >= 6 {
-                    continue;
-                }
 
                 // if Trasanction is None, means it was not mined or is in some orphan block.
                 let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
 
                 if tx_info.is_some() {
-                    if tx_instance.height_tx_seen.is_some()
-                        && current_height > tx_instance.height_tx_seen.unwrap()
-                    {
-                        self.bitvmx_store.update_instance_tx_confirmations(
-                            instance.id,
-                            &tx_instance.tx_id,
-                            current_height,
-                        )?;
-
-                        info!(
-                            "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
-                            instance.id,
-                            tx_instance.tx_id,
-                            current_height,
-                            current_height - tx_instance.height_tx_seen.unwrap() + 1
-                        );
-
-                        continue;
-                    }
-
                     if !tx_instance.height_tx_seen.is_some() {
                         let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
 

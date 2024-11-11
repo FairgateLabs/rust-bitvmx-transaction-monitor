@@ -37,7 +37,6 @@ pub trait BitvmxApi {
         &self,
         instance_id: InstanceId,
         txid: &Txid,
-        current_height: BlockHeight,
     ) -> Result<()>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
@@ -320,8 +319,7 @@ impl BitvmxApi for BitvmxStore {
     fn update_instance_tx_confirmations(
         &self,
         instance_id: InstanceId,
-        txid: &Txid,
-        current_height: BlockHeight,
+        txid: &Txid
     ) -> Result<()> {
         let tx_instance = self.get_instance_tx(instance_id, txid)?;
 
