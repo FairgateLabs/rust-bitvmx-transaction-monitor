@@ -3,7 +3,7 @@ use bitcoin_indexer::{indexer::MockIndexerApi, types::TransactionInfo};
 use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
-    types::{BitvmxInstance, TxStatus},
+    types::{BitvmxInstance, BlockInfo, TxStatus},
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -67,12 +67,18 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                height_tx_seen: Some(190),
+                block_info: Some(BlockInfo {
+                    block_height: 190,
+                    block_hash: BlockHash::from_str(
+                        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+                    ).unwrap(),
+                    is_orphan: false,
+                }),
             },
             TxStatus {
                 tx_id: tx_to_seen.clone(),
                 tx_hex: None,
-                height_tx_seen: None,
+                block_info: None,
             },
         ],
         start_height: 180,
@@ -99,6 +105,9 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     let hash_150 =
         BlockHash::from_str("12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+    
+    let hash_190 = 
+        BlockHash::from_str("23efda3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
 
     let tx_info = TransactionInfo {
         tx_id: tx_to_seen,
@@ -109,10 +118,12 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     let tx_info_2 = TransactionInfo {
         tx_id: txid,
-        block_hash: hash_150, // change hash to correspondent hash
+        block_hash: hash_190,
         orphan: false,
         block_height: 190,
     };
+
+    let tx_info_3 = tx_info.clone();
 
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
@@ -135,7 +146,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     // Then call update_bitvmx_tx_seen for the first time
     mock_bitvmx_store
         .expect_update_instance_tx_seen()
-        .with(eq(intance_id), eq(tx_to_seen), eq(150), eq("0x123"))
+        .with(eq(intance_id), eq(tx_to_seen), eq(tx_info_3), eq("0x123"))
         .times(1)
         .returning(|_, _, _, _| Ok(()));
 
@@ -166,7 +177,13 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         txs: vec![TxStatus {
             tx_id: tx_to_seen.clone(),
             tx_hex: None,
-            height_tx_seen: Some(200),
+            block_info: Some(BlockInfo {
+                block_height: 200,
+                block_hash: BlockHash::from_str(
+                    "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+                ).unwrap(),
+                is_orphan: false,
+            }),
         }],
         start_height: 180,
     }];

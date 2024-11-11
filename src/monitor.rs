@@ -93,7 +93,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
                     .map(|tx_id| TxStatus {
                         tx_id,
                         tx_hex: None,
-                        height_tx_seen: None,
+                        block_info: None,
                     })
                     .collect();
                 BitvmxInstance {
@@ -215,21 +215,27 @@ where
                 // if Trasanction is None, means it was not mined or is in some orphan block.
                 let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
 
-                if tx_info.is_some() {
-                    if !tx_instance.height_tx_seen.is_some() {
-                        let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
-
-                        self.bitvmx_store.update_instance_tx_seen(
-                            instance.id,
-                            &tx_instance.tx_id,
-                            tx_info.unwrap().block_height,
-                            &tx_hex,
-                        )?;
-
-                        info!(
-                            "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                            instance.id, tx_instance.tx_id, current_height
-                        );
+                match tx_info {
+                    Some(tx_info) => {
+                        if !tx_instance.block_info.is_some() {
+                            let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
+    
+                            self.bitvmx_store.update_instance_tx_seen(
+                                instance.id,
+                                &tx_instance.tx_id,
+                                tx_info,
+                                &tx_hex,
+                            )?;
+    
+                            info!(
+                                "Found bitvmx intance: {} | tx_id: {} | at height: {}",
+                                instance.id, tx_instance.tx_id, current_height
+                            );
+                        }
+                    }
+                    None => {
+                        // If the transaction is not found, it means it was not mined yet.
+                        // We should not update the transaction.
                     }
                 }
             }
