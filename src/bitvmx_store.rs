@@ -325,18 +325,6 @@ impl BitvmxApi for BitvmxStore {
         instance_id: InstanceId,
         txid: &Txid
     ) -> Result<()> {
-        let tx_instance = self.get_instance_tx(instance_id, txid)?;
-
-        match tx_instance {
-            Some(tx) => {
-                self.save_instance_tx(instance_id, &tx)?;
-            }
-            None => warn!(
-                "Txn for the bitvmx instance {} txid {} was not found",
-                instance_id, txid
-            ),
-        }
-
         self.update_news(instance_id, *txid)?;
 
         Ok(())

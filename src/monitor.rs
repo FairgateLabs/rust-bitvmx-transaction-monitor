@@ -217,25 +217,43 @@ where
 
                 match tx_info {
                     Some(tx_info) => {
-                        if !tx_instance.block_info.is_some() {
-                            let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
+                        match tx_instance.block_info {
+                            Some(block_info) => {
+                                if (current_height - block_info.block_height) <= 6 
+                                    && current_height > block_info.block_height {
+                                    self.bitvmx_store.update_instance_tx_confirmations(
+                                        instance.id,
+                                        &tx_instance.tx_id,
+                                    )?;
+            
+                                    info!(
+                                        "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
+                                        instance.id,
+                                        tx_instance.tx_id,
+                                        current_height,
+                                        current_height - block_info.block_height + 1,
+                                    );
+                                }
+                            }
+                            None => {
+                                let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
     
-                            self.bitvmx_store.update_instance_tx_seen(
-                                instance.id,
-                                &tx_instance.tx_id,
-                                tx_info,
-                                &tx_hex,
-                            )?;
-    
-                            info!(
-                                "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                                instance.id, tx_instance.tx_id, current_height
-                            );
+                                self.bitvmx_store.update_instance_tx_seen(
+                                    instance.id,
+                                    &tx_instance.tx_id,
+                                    tx_info,
+                                    &tx_hex,
+                                )?;
+        
+                                info!(
+                                    "Found bitvmx intance: {} | tx_id: {} | at height: {}",
+                                    instance.id, tx_instance.tx_id, current_height
+                                );
+                            }
                         }
                     }
                     None => {
-                        // If the transaction is not found, it means it was not mined yet.
-                        // We should not update the transaction.
+                        //ToDo Make an error for this case
                     }
                 }
             }
