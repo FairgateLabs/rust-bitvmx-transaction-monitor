@@ -23,4 +23,8 @@ pub struct Args {
     /// Bitcoin height to start indexing from
     #[arg(long, short = 'c')]
     pub checkpoint_height: Option<BlockHeight>,
+
+    /// Confirmation threshold
+    #[arg(long, short = 't')]
+    pub confirmation_threshold: Option<String>,
 }

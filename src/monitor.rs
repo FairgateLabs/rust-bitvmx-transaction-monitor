@@ -19,6 +19,7 @@ where
     pub indexer: I,
     pub bitvmx_store: B,
     current_height: BlockHeight,
+    confirmation_threshold: u32,
 }
 
 impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
@@ -26,6 +27,7 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         node_rpc_url: &str,
         db_file_path: &str,
         checkpoint: Option<BlockHeight>,
+        confirmation_threshold: u32,
     ) -> Result<Self> {
         let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
@@ -33,7 +35,7 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         let indexed_height = indexer.get_best_block()?;
         let bitvmx_store = BitvmxStore::new_with_path(db_file_path)?;
         let current_height = define_height_to_sync(checkpoint, blockchain_height, indexed_height)?;
-        let monitor = Monitor::new(indexer, bitvmx_store, Some(current_height));
+        let monitor = Monitor::new(indexer, bitvmx_store, Some(current_height), confirmation_threshold);
 
         Ok(monitor)
     }
@@ -147,13 +149,14 @@ where
     I: IndexerApi,
     B: BitvmxApi,
 {
-    pub fn new(indexer: I, bitvmx_store: B, current_height: Option<BlockHeight>) -> Self {
+    pub fn new(indexer: I, bitvmx_store: B, current_height: Option<BlockHeight>, confirmation_threshold: u32) -> Self {
         let current_height = current_height.unwrap_or(0);
 
         Self {
             indexer,
             bitvmx_store,
             current_height,
+            confirmation_threshold
         }
     }
 
@@ -208,10 +211,6 @@ where
 
         for instance in instances {
             for tx_instance in instance.txs {
-                //TODO: This should change, for now, we are gonna update transaction until 10 confirmations.
-                // Updates are no needed. It can be calculated based on
-                // the current block and the block that tx was mined.
-
                 // if Trasanction is None, means it was not mined or is in some orphan block.
                 let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
 
@@ -219,11 +218,11 @@ where
                     Some(tx_info) => {
                         match tx_instance.block_info {
                             Some(block_info) => {
-                                if (current_height - block_info.block_height) <= 6 
-                                    && current_height > block_info.block_height {
-                                    self.bitvmx_store.update_instance_tx_confirmations(
+                                if current_height > block_info.block_height
+                                    && (current_height - block_info.block_height) <= self.confirmation_threshold {
+                                    self.bitvmx_store.update_news(
                                         instance.id,
-                                        &tx_instance.tx_id,
+                                        tx_instance.tx_id,
                                     )?;
             
                                     info!(
@@ -241,7 +240,9 @@ where
                                 self.bitvmx_store.update_instance_tx_seen(
                                     instance.id,
                                     &tx_instance.tx_id,
-                                    tx_info,
+                                    tx_info.block_height,
+                                    tx_info.block_hash,
+                                    tx_info.orphan,
                                     &tx_hex,
                                 )?;
         
