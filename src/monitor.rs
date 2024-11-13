@@ -1,5 +1,5 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
-use crate::types::{BitvmxInstance, InstanceData, InstanceId, TxStatus};
+use crate::types::{BitvmxInstance, InstanceData, InstanceId, TxStatus, TxStatusResponse};
 use anyhow::{Context, Ok, Result};
 use bitcoin::Txid;
 use bitcoin_indexer::{
@@ -35,7 +35,12 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         let indexed_height = indexer.get_best_block()?;
         let bitvmx_store = BitvmxStore::new_with_path(db_file_path)?;
         let current_height = define_height_to_sync(checkpoint, blockchain_height, indexed_height)?;
-        let monitor = Monitor::new(indexer, bitvmx_store, Some(current_height), confirmation_threshold);
+        let monitor = Monitor::new(
+            indexer,
+            bitvmx_store,
+            Some(current_height),
+            confirmation_threshold,
+        );
 
         Ok(monitor)
     }
@@ -73,7 +78,9 @@ pub trait MonitorApi {
         &self,
         instance_id: InstanceId,
         tx_id: Txid,
-    ) -> Result<Option<TxStatus>>;
+    ) -> Result<Option<TxStatusResponse>>;
+
+    fn get_confirmation_threshold(&self) -> u32;
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
@@ -132,7 +139,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         &self,
         instance_id: InstanceId,
         tx_id: Txid,
-    ) -> Result<Option<TxStatus>> {
+    ) -> Result<Option<TxStatusResponse>> {
         self.get_instance_tx_status(instance_id, tx_id)
     }
 
@@ -142,6 +149,10 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         info!("Monitor is ready? {}", current_height == blockchain_height);
         Ok(current_height == blockchain_height)
     }
+
+    fn get_confirmation_threshold(&self) -> u32 {
+        self.confirmation_threshold
+    }
 }
 
 impl<I, B> Monitor<I, B>
@@ -149,14 +160,19 @@ where
     I: IndexerApi,
     B: BitvmxApi,
 {
-    pub fn new(indexer: I, bitvmx_store: B, current_height: Option<BlockHeight>, confirmation_threshold: u32) -> Self {
+    pub fn new(
+        indexer: I,
+        bitvmx_store: B,
+        current_height: Option<BlockHeight>,
+        confirmation_threshold: u32,
+    ) -> Self {
         let current_height = current_height.unwrap_or(0);
 
         Self {
             indexer,
             bitvmx_store,
             current_height,
-            confirmation_threshold
+            confirmation_threshold,
         }
     }
 
@@ -215,44 +231,42 @@ where
                 let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
 
                 match tx_info {
-                    Some(tx_info) => {
-                        match tx_instance.block_info {
-                            Some(block_info) => {
-                                if current_height > block_info.block_height
-                                    && (current_height - block_info.block_height) <= self.confirmation_threshold {
-                                    self.bitvmx_store.update_news(
-                                        instance.id,
-                                        tx_instance.tx_id,
-                                    )?;
-            
-                                    info!(
+                    Some(tx_info) => match tx_instance.block_info {
+                        Some(block_info) => {
+                            if current_height > block_info.block_height
+                                && (current_height - block_info.block_height)
+                                    <= self.confirmation_threshold
+                            {
+                                self.bitvmx_store
+                                    .update_news(instance.id, tx_instance.tx_id)?;
+
+                                info!(
                                         "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
                                         instance.id,
                                         tx_instance.tx_id,
                                         current_height,
                                         current_height - block_info.block_height + 1,
                                     );
-                                }
-                            }
-                            None => {
-                                let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
-    
-                                self.bitvmx_store.update_instance_tx_seen(
-                                    instance.id,
-                                    &tx_instance.tx_id,
-                                    tx_info.block_height,
-                                    tx_info.block_hash,
-                                    tx_info.orphan,
-                                    &tx_hex,
-                                )?;
-        
-                                info!(
-                                    "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                                    instance.id, tx_instance.tx_id, current_height
-                                );
                             }
                         }
-                    }
+                        None => {
+                            let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
+
+                            self.bitvmx_store.update_instance_tx_seen(
+                                instance.id,
+                                &tx_instance.tx_id,
+                                tx_info.block_height,
+                                tx_info.block_hash,
+                                tx_info.orphan,
+                                &tx_hex,
+                            )?;
+
+                            info!(
+                                "Found bitvmx intance: {} | tx_id: {} | at height: {}",
+                                instance.id, tx_instance.tx_id, current_height
+                            );
+                        }
+                    },
                     None => {
                         //ToDo Make an error for this case
                     }
@@ -285,11 +299,22 @@ where
         &self,
         instance_id: InstanceId,
         tx_id: Txid,
-    ) -> Result<Option<TxStatus>> {
+    ) -> Result<Option<TxStatusResponse>> {
         let tx_status = self
             .bitvmx_store
             .get_instance_tx_status(instance_id, &tx_id)?;
 
-        Ok(tx_status)
+        let tx_status_response = tx_status.map(|tx_status| {
+            let confirmations = tx_status.get_confirmations(self.current_height);
+
+            TxStatusResponse {
+                tx_id: tx_status.tx_id,
+                tx_hex: tx_status.tx_hex,
+                block_info: tx_status.block_info,
+                confirmations,
+            }
+        });
+
+        Ok(tx_status_response)
     }
 }
