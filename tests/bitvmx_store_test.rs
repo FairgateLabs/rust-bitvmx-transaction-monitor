@@ -1,7 +1,7 @@
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use bitvmx_transaction_monitor::{
     bitvmx_store::{BitvmxApi, BitvmxStore},
-    types::{BitvmxInstance, TxStatus},
+    types::{BitvmxInstance, BlockInfo, TxStatus},
 };
 
 use std::str::FromStr;
@@ -19,16 +19,18 @@ fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: true,
-                height_tx_seen: Some(190),
-                confirmations: 10,
+                block_info: Some(BlockInfo {
+                    block_height: 190,
+                    block_hash: BlockHash::from_str(
+                        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+                        .unwrap(),  
+                    is_orphan: false,
+                }),
             },
             TxStatus {
                 tx_id: txid2,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             },
         ],
         start_height: 180,
@@ -50,16 +52,12 @@ fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             },
             TxStatus {
                 tx_id: txid2,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             },
         ],
         start_height: 1000,
@@ -102,8 +100,6 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
 
 #[test]
 fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
-    let block_300 = 300;
-
     let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
         .unwrap();
 
@@ -111,26 +107,42 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
         Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
             .unwrap();
 
+    let block_hash = BlockHash::from_str(
+        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+        .unwrap();    
+    let is_orphan = false;
+    let block_height = 300;
+
     let instances = vec![BitvmxInstance {
         id: 2,
         txs: vec![
             TxStatus {
                 tx_id: txid,
                 tx_hex: None,
-                tx_was_seen: true,
-                height_tx_seen: Some(190),
-                confirmations: 10,
+                block_info: Some(BlockInfo {
+                    block_height: 190,
+                    block_hash: BlockHash::from_str(
+                        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+                        .unwrap(),  
+                    is_orphan: false,
+                }),
             },
             TxStatus {
                 tx_id: tx_id_not_seen,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             },
         ],
         start_height: 180,
     }];
+
+    let block_300 = BlockInfo{
+        block_height: 300,
+        block_hash: BlockHash::from_str(
+            "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+            .unwrap(),  
+        is_orphan: false,
+    };
 
     let bitvmx_store = BitvmxStore::new_with_path("test_outputs/test_two")?;
     bitvmx_store.save_instances(&instances)?;
@@ -140,19 +152,15 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     assert_eq!(instances.len(), 1);
 
     // Tx 2 was seen in block_300
-    bitvmx_store.update_instance_tx_seen(instances[0].id, &tx_id_not_seen, block_300, "")?;
+    bitvmx_store.update_instance_tx_seen(instances[0].id, &tx_id_not_seen, block_height, block_hash, is_orphan, "")?;
 
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
 
-    // Once a transaction is seen in a block, the number of confirmations is 1 at that point.
-    assert_eq!(instances[0].txs[1].confirmations, 1);
-
     // First block seen should be block_300
-    assert_eq!(instances[0].txs[1].height_tx_seen, Some(block_300));
+    assert_eq!(instances[0].txs[1].block_info, Some(block_300.clone()));
 
-    let block_400 = 400;
     //Update again but in another block
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id_not_seen, block_400)?;
+    bitvmx_store.update_news(instances[0].id, tx_id_not_seen)?;
 
     // This will return instances are not confirmed > 6
     let data = bitvmx_store.get_instances_ready_to_track(100000)?;
@@ -164,10 +172,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     let instances = bitvmx_store.get_all_instances_for_tracking()?;
 
     // First block seen should be block_300, never change
-    assert_eq!(instances[0].txs[1].height_tx_seen, Some(block_300));
-
-    // Once a transaction is seen in a block, the number of confirmations is last_block_height - firt_height_seen.
-    assert_eq!(instances[0].txs[1].confirmations, block_400 - block_300 + 1);
+    assert_eq!(instances[0].txs[1].block_info, Some(block_300));
 
     Ok(())
 }
@@ -182,9 +187,13 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
         txs: vec![TxStatus {
             tx_id: txid,
             tx_hex: None,
-            tx_was_seen: true,
-            height_tx_seen: Some(190),
-            confirmations: 1,
+            block_info: Some(BlockInfo {
+                block_height: 190,
+                block_hash: BlockHash::from_str(
+                    "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+                    .unwrap(),  
+                is_orphan: false,
+            }),
         }],
         start_height: 180,
     }];
@@ -195,15 +204,11 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
 
     // Tx 2 was seen in block_300
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &txid, 1000)?;
+    bitvmx_store.update_news(instances[0].id, txid)?;
 
     //The instance is not pending anymore
     let instances = bitvmx_store.get_instances_ready_to_track(instances[0].id)?;
     assert_eq!(instances.len(), 0);
-
-    // Check the confirmations
-    let instances = bitvmx_store.get_all_instances_for_tracking()?;
-    assert_eq!(instances[0].txs[0].confirmations, 1000 - 189);
 
     Ok(())
 }
@@ -222,9 +227,13 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         txs: vec![TxStatus {
             tx_id: tx_id,
             tx_hex: None,
-            tx_was_seen: true,
-            height_tx_seen: Some(190),
-            confirmations: 1,
+            block_info: Some(BlockInfo {
+                block_height: 190,
+                block_hash: BlockHash::from_str(
+                    "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+                    .unwrap(),  
+                is_orphan: false,
+            }),
         }],
         start_height: 180,
     }];
@@ -244,9 +253,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         .find(|tx| tx.tx_id == tx_id_to_add)
         .unwrap();
     assert_eq!(new_tx.tx_hex, None);
-    assert_eq!(new_tx.tx_was_seen, false);
-    assert_eq!(new_tx.height_tx_seen, None);
-    assert_eq!(new_tx.confirmations, 0);
+    assert!(new_tx.block_info.is_none());
 
     Ok(())
 }
@@ -271,18 +278,28 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
         txs: vec![TxStatus {
             tx_id: tx_id,
             tx_hex: None,
-            tx_was_seen: true,
-            height_tx_seen: Some(190),
-            confirmations: 1,
+            block_info: Some(BlockInfo {
+                block_height: 190,
+                block_hash: BlockHash::from_str(
+                    "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+                    .unwrap(),  
+                is_orphan: false,
+            }),
         }],
         start_height: 180,
     }];
+
+    let block_hash = BlockHash::from_str(
+        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")
+        .unwrap();  
+    let is_orphan = false;
+    let block_height = 1000;
 
     // Add the instance to the store
     bitvmx_store.save_instances(&instances)?;
 
     // update the tx with a confirmation
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id, 1000)?;
+    bitvmx_store.update_news(instances[0].id, tx_id)?;
 
     //get and check news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -293,7 +310,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     assert!(instance_news[0].1.contains(&tx_id));
 
     // update the tx with a confirmation in another block
-    bitvmx_store.update_instance_tx_seen(instances[0].id, &tx_id, 1000, "123")?;
+    bitvmx_store.update_instance_tx_seen(instances[0].id, &tx_id, block_height, block_hash, is_orphan, "123")?;
 
     // Get the news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -311,7 +328,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 0);
 
     //update tx with a confirmation in another block
-    bitvmx_store.update_instance_tx_confirmations(instances[0].id, &tx_id, 1000)?;
+    bitvmx_store.update_news(instances[0].id, tx_id)?;
 
     // Get the news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -347,16 +364,12 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
                 TxStatus {
                     tx_id: tx_id_1,
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
                 TxStatus {
                     tx_id: tx_id_3,
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
             ],
             start_height: 100,
@@ -366,9 +379,7 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
             txs: vec![TxStatus {
                 tx_id: tx_id_2,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             }],
             start_height: 200,
         },
@@ -381,14 +392,24 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     let instance_news = bitvmx_store.get_instance_news()?;
     assert_eq!(instance_news.len(), 0);
 
+    let hash = BlockHash::from_str(
+        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+    ).unwrap();
+
+    let block_height_1 = 150;
+    let block_height_2 = 250;
+    let block_height_3 = 100;
+
+    let is_orphan = false;
+
     // Update transactions in both instances
-    bitvmx_store.update_instance_tx_seen(1, &tx_id_3, 100, "tx_hex_3")?;
-    bitvmx_store.update_instance_tx_seen(1, &tx_id_1, 150, "tx_hex_1")?;
-    bitvmx_store.update_instance_tx_seen(2, &tx_id_2, 250, "tx_hex_2")?;
+    bitvmx_store.update_instance_tx_seen(1, &tx_id_3, block_height_1, hash, is_orphan, "tx_hex_3")?;
+    bitvmx_store.update_instance_tx_seen(1, &tx_id_1, block_height_2, hash, is_orphan, "tx_hex_1")?;
+    bitvmx_store.update_instance_tx_seen(2, &tx_id_2, block_height_3, hash, is_orphan, "tx_hex_2")?;
     // update each tx with confirms
-    bitvmx_store.update_instance_tx_confirmations(1, &tx_id_1, 1000)?;
-    bitvmx_store.update_instance_tx_confirmations(2, &tx_id_2, 2000)?;
-    bitvmx_store.update_instance_tx_confirmations(1, &tx_id_3, 1000)?;
+    bitvmx_store.update_news(1, tx_id_1)?;
+    bitvmx_store.update_news(2, tx_id_2)?;
+    bitvmx_store.update_news(1, tx_id_3)?;
 
     // Get and verify news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -432,16 +453,12 @@ fn remove_instance() -> Result<(), anyhow::Error> {
             TxStatus {
                 tx_id: tx_id_1,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             },
             TxStatus {
                 tx_id: tx_id_2,
                 tx_hex: None,
-                tx_was_seen: false,
-                height_tx_seen: None,
-                confirmations: 0,
+                block_info: None,
             },
         ],
         start_height: 100,

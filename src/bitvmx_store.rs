@@ -1,6 +1,6 @@
-use crate::types::{BitvmxInstance, InstanceId, TxStatus};
+use crate::types::{BitvmxInstance, BlockInfo, InstanceId, TxStatus};
 use anyhow::{bail, Context, Ok, Result};
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use bitcoin_indexer::types::BlockHeight;
 use log::warn;
 use mockall::automock;
@@ -29,15 +29,10 @@ pub trait BitvmxApi {
         &self,
         instance_id: InstanceId,
         txid: &Txid,
-        current_height: BlockHeight,
+        tx_height: BlockHeight,
+        tx_block_hash: BlockHash,
+        tx_is_orphan: bool,
         tx_hex: &str,
-    ) -> Result<()>;
-
-    fn update_instance_tx_confirmations(
-        &self,
-        instance_id: InstanceId,
-        txid: &Txid,
-        current_height: BlockHeight,
     ) -> Result<()>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
@@ -52,6 +47,8 @@ pub trait BitvmxApi {
         instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<Option<TxStatus>>;
+
+    fn update_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()>;
 }
 
 impl BitvmxStore {
@@ -70,10 +67,6 @@ impl BitvmxStore {
         let store = Storage::new_with_path(&PathBuf::from(format!("{}/monitor", store_path)))?;
         Ok(Self { store })
     }
-
-    // pub fn new(store: Storage) -> Result<Self> {
-    //     Ok(Self { store })
-    // }
 
     fn get_instance(&self, instance_id: InstanceId) -> Result<Option<BitvmxInstance>> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
@@ -198,29 +191,6 @@ impl BitvmxStore {
 
         Ok(instances)
     }
-
-    fn update_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()> {
-        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
-        let mut instance_news = self
-            .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
-            .unwrap_or_default();
-
-        // Find the index of the instance in the news
-        if let Some(index) = instance_news.iter().position(|(id, _)| *id == instance_id) {
-            // If the instance exists, update its transactions
-            if !instance_news[index].1.contains(&txid) {
-                instance_news[index].1.push(txid);
-            }
-        } else {
-            // If the instance doesn't exist, add it with the new transaction
-            instance_news.push((instance_id, vec![txid]));
-        }
-
-        self.store.set(&instance_news_key, &instance_news)?;
-
-        Ok(())
-    }
 }
 
 #[automock]
@@ -292,44 +262,24 @@ impl BitvmxApi for BitvmxStore {
         &self,
         instance_id: InstanceId,
         txid: &Txid,
-        height_tx_was_seen: BlockHeight,
+        tx_height: BlockHeight,
+        tx_block_hash: BlockHash,
+        tx_is_orphan: bool,
         tx_hex: &str,
     ) -> Result<()> {
         let tx_instance = self.get_instance_tx(instance_id, txid)?;
 
         match tx_instance {
             Some(mut tx) => {
-                if tx.tx_was_seen {
+                if tx.block_info.is_some() {
                     warn!("Txn already seen, looks this methods is being calling more than what should be")
                 }
-                tx.tx_was_seen = true;
-                tx.confirmations = 1;
-                tx.height_tx_seen = Some(height_tx_was_seen);
+                tx.block_info = Some(BlockInfo {
+                    block_height: tx_height,
+                    block_hash: tx_block_hash,
+                    is_orphan: tx_is_orphan,
+                });
                 tx.tx_hex = Some(tx_hex.to_string());
-                self.save_instance_tx(instance_id, &tx)?;
-            }
-            None => warn!(
-                "Txn for the bitvmx instance {} txid {} was not found",
-                instance_id, txid
-            ),
-        }
-
-        self.update_news(instance_id, *txid)?;
-
-        Ok(())
-    }
-
-    fn update_instance_tx_confirmations(
-        &self,
-        instance_id: InstanceId,
-        txid: &Txid,
-        current_height: BlockHeight,
-    ) -> Result<()> {
-        let tx_instance = self.get_instance_tx(instance_id, txid)?;
-
-        match tx_instance {
-            Some(mut tx) => {
-                tx.confirmations = current_height - tx.height_tx_seen.unwrap() + 1;
                 self.save_instance_tx(instance_id, &tx)?;
             }
             None => warn!(
@@ -390,9 +340,7 @@ impl BitvmxApi for BitvmxStore {
         let tx_data = TxStatus {
             tx_id: *tx_id,
             tx_hex: None,
-            tx_was_seen: false,
-            height_tx_seen: None,
-            confirmations: 0,
+            block_info: None,
         };
 
         self.save_instance_tx(instance_id, &tx_data)?;
@@ -402,5 +350,28 @@ impl BitvmxApi for BitvmxStore {
 
     fn remove_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         self.remove_instance_tx(instance_id, tx_id)
+    }
+
+    fn update_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()> {
+        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
+        let mut instance_news = self
+            .store
+            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .unwrap_or_default();
+
+        // Find the index of the instance in the news
+        if let Some(index) = instance_news.iter().position(|(id, _)| *id == instance_id) {
+            // If the instance exists, update its transactions
+            if !instance_news[index].1.contains(&txid) {
+                instance_news[index].1.push(txid);
+            }
+        } else {
+            // If the instance doesn't exist, add it with the new transaction
+            instance_news.push((instance_id, vec![txid]));
+        }
+
+        self.store.set(&instance_news_key, &instance_news)?;
+
+        Ok(())
     }
 }

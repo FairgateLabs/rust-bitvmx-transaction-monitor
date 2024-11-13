@@ -13,9 +13,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
                 TxStatus {
                     tx_id: Txid::from_str(
@@ -23,9 +21,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
             ],
             start_height: 1,
@@ -39,9 +35,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
                 TxStatus {
                     tx_id: Txid::from_str(
@@ -49,9 +43,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
             ],
             start_height: 180,
@@ -65,9 +57,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
                 TxStatus {
                     tx_id: Txid::from_str(
@@ -75,9 +65,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
                     )
                     .unwrap(),
                     tx_hex: None,
-                    tx_was_seen: false,
-                    height_tx_seen: None,
-                    confirmations: 0,
+                    block_info: None,
                 },
             ],
             start_height: 1000,

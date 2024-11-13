@@ -1,4 +1,4 @@
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 // use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
@@ -8,15 +8,16 @@ pub struct TxStatus {
 
     pub tx_hex: Option<String>,
 
-    //If transaction was seen in the blockchain then true
-    pub tx_was_seen: bool,
-
     //Firt block height seen in the blockchain data
-    // TODO: this should have more information about the block. block hash.
-    pub height_tx_seen: Option<BlockHeight>,
+    // TODO: this should have more information about the block. block hash
+    pub block_info: Option<BlockInfo>,
+}
 
-    // Number of blocks that have passed since the transaction was identified in Bitcoin.
-    pub confirmations: u32,
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct BlockInfo {
+    pub block_height: BlockHeight,
+    pub block_hash: BlockHash,
+    pub is_orphan: bool, 
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

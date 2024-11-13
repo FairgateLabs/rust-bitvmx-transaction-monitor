@@ -36,6 +36,13 @@ fn main() -> Result<()> {
         .or_else(|| env::var("NODE_RPC_URL").ok())
         .context("No Bitcoin rpc url provided")?;
 
+    let confirmation_threshold= args
+        .confirmation_threshold
+        .or_else(|| env::var("CONFIRMATION_THRESHOLD").ok())
+        .context("No confirmation threshold provided")?;
+
+    let confirmation_threshold = confirmation_threshold.parse::<u32>()?;
+
     let checkpoint_height: Option<BlockHeight> = get_checkpoint()?;
 
     let bitcoin_client = BitcoinClient::new(&node_rpc_url)?;
@@ -45,7 +52,7 @@ fn main() -> Result<()> {
     info!("Connected to chain {}", network);
     info!("Chain best block at {}H", blockchain_height);
 
-    let mut monitor = Monitor::new_with_paths(&node_rpc_url, &db_file_path, checkpoint_height)?;
+    let mut monitor = Monitor::new_with_paths(&node_rpc_url, &db_file_path, checkpoint_height, confirmation_threshold)?;
 
     let bitvmx_instances = get_bitvmx_instances_example();
     monitor.save_instances_for_tracking(bitvmx_instances)?;
