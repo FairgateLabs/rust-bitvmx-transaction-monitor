@@ -45,6 +45,16 @@ impl TxStatusResponse {
     pub fn was_seen(&self) -> bool {
         self.block_info.is_some()
     }
+
+    pub fn is_orphan(&self) -> bool {
+        //Orphan should have:
+        //  block_info because it was mined time before.
+        //  confirmation == 0 , this is just a validation, orphan should be moved as confirmation 0.
+        //  is_orphan = true
+        self.block_info.is_some()
+            && self.confirmations == 0
+            && self.block_info.as_ref().unwrap().is_orphan
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
