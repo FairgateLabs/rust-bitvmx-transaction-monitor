@@ -219,7 +219,8 @@ where
                         match tx_instance.block_info {
                             Some(block_info) => {
                                 if current_height > block_info.block_height
-                                    && (current_height - block_info.block_height) <= self.confirmation_threshold {
+                                    && (current_height - block_info.block_height) <= self.confirmation_threshold 
+                                    && !tx_info.orphan{
                                     self.bitvmx_store.update_news(
                                         instance.id,
                                         tx_instance.tx_id,
@@ -247,7 +248,7 @@ where
                                 )?;
         
                                 info!(
-                                    "Found bitvmx intance: {} | tx_id: {} | at height: {}",
+                                    "Found bitvmx instance: {} | tx_id: {} | at height: {}",
                                     instance.id, tx_instance.tx_id, current_height
                                 );
                             }

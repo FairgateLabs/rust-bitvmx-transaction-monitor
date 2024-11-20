@@ -237,6 +237,101 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
 
 #[test]
 fn tx_got_caught_in_reorganisation() -> Result<(), anyhow::Error> {
+    let mut mock_indexer = MockIndexerApi::new();
+    let mut mock_bitvmx_store = MockBitvmxStore::new();
 
+    let block_200 = 200;
+    let instance_id = 2;
+
+    let tx_to_seen =
+        Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+            .unwrap();
+    let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
+        .unwrap();
+
+    let instances = vec![BitvmxInstance {
+        id: instance_id,
+        txs: vec![
+            TxStatus {
+                tx_id: tx_to_seen.clone(),
+                tx_hex: None,
+                block_info: None,
+            },
+        ],
+        start_height: 180,
+    }];
+    Ok(())
+}
+
+#[test]
+fn orphan_tx_has_confirmations_equals_zero() -> Result<(), anyhow::Error>{
+    let mut mock_indexer = MockIndexerApi::new();
+    let mut mock_bitvmx_store = MockBitvmxStore::new();
+
+    let block_200 = 200;
+    let intance_id = 2;
+
+    let tx_to_seen =
+        Txid::from_str(&"3a3f8d147abf0b9b9d25b07de7a16a4db96bda3e474ceab4c4f9e8e107d5b02f")
+            .unwrap();
+
+
+    let instances = vec![BitvmxInstance {
+        id: intance_id,
+        txs: vec![TxStatus {
+            tx_id: tx_to_seen.clone(),
+            tx_hex: None,
+            block_info: Some(BlockInfo {
+                block_height: 200,
+                block_hash: BlockHash::from_str(
+                    "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
+                ).unwrap(),
+                is_orphan: false,
+            }),
+        }],
+        start_height: 180,
+    }];
+
+    mock_indexer
+        .expect_index_height()
+        .returning(move |_| Ok(201));
+
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(block_200)));
+
+    let hash_190 =
+        BlockHash::from_str("12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+
+    let tx_info = TransactionInfo {
+        tx_id: tx_to_seen,
+        block_hash: hash_190,
+        orphan: true,
+        block_height: 190,
+    };
+    
+    mock_indexer
+        .expect_get_tx_info()
+        .with(eq(tx_to_seen.clone()))
+        .times(1)
+        .returning(move |_| Ok(Some(tx_info.clone())));
+
+    mock_bitvmx_store
+        .expect_get_instances_ready_to_track()
+        .with(eq(block_200))
+        .times(1)
+        .returning(move |_| Ok(instances.clone()));
+
+    mock_bitvmx_store
+        .expect_update_news()
+        .times(0);
+
+    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
+
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_200), 6);
+
+    monitor.tick()?;
+
+    assert_eq!(monitor.get_current_height(), 201);
     Ok(())
 }
