@@ -77,7 +77,7 @@ pub trait MonitorApi {
     fn get_instance_tx_status(
         &self,
         instance_id: InstanceId,
-        tx_id: Txid,
+        tx_id: &Txid,
     ) -> Result<Option<TxStatusResponse>>;
 
     fn get_confirmation_threshold(&self) -> u32;
@@ -138,7 +138,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     fn get_instance_tx_status(
         &self,
         instance_id: InstanceId,
-        tx_id: Txid,
+        tx_id: &Txid,
     ) -> Result<Option<TxStatusResponse>> {
         self.get_instance_tx_status(instance_id, tx_id)
     }
@@ -298,11 +298,11 @@ where
     pub fn get_instance_tx_status(
         &self,
         instance_id: InstanceId,
-        tx_id: Txid,
+        tx_id: &Txid,
     ) -> Result<Option<TxStatusResponse>> {
         let tx_status = self
             .bitvmx_store
-            .get_instance_tx_status(instance_id, &tx_id)?;
+            .get_instance_tx_status(instance_id, tx_id)?;
 
         let tx_status_response = tx_status.map(|tx_status| {
             let confirmations = tx_status.get_confirmations(self.current_height);

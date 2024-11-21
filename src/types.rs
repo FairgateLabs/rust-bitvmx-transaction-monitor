@@ -42,8 +42,8 @@ pub struct TxStatusResponse {
 }
 
 impl TxStatusResponse {
-    pub fn was_seen(&self) -> bool {
-        self.block_info.is_some()
+    pub fn is_confirmed(&self) -> bool {
+        self.block_info.is_some() && self.confirmations > 0
     }
 
     pub fn is_orphan(&self) -> bool {
