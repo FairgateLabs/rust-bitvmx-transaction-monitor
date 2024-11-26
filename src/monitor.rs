@@ -219,8 +219,8 @@ where
                         match tx_instance.block_info {
                             Some(block_info) => {
                                 if current_height > block_info.block_height
-                                    && (current_height - block_info.block_height) <= self.confirmation_threshold 
-                                    && !tx_info.orphan{
+                                    && (current_height - block_info.block_height) <= self.confirmation_threshold
+                                    {
                                     self.bitvmx_store.update_news(
                                         instance.id,
                                         tx_instance.tx_id,
