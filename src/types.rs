@@ -1,11 +1,11 @@
-use bitcoin::{BlockHash, Txid};
+use bitcoin::{BlockHash, Transaction, Txid};
 // use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TxStatus {
     pub tx_id: Txid,
-    pub tx_hex: Option<String>,
+    pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
 }
 
@@ -36,7 +36,7 @@ impl TxStatus {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TxStatusResponse {
     pub tx_id: Txid,
-    pub tx_hex: Option<String>,
+    pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
     pub confirmations: u32,
 }

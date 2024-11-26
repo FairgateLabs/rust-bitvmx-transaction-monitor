@@ -1,6 +1,6 @@
 use crate::types::{BitvmxInstance, BlockInfo, InstanceId, TxStatus};
 use anyhow::{bail, Context, Ok, Result};
-use bitcoin::{BlockHash, Txid};
+use bitcoin::{BlockHash, Transaction, Txid};
 use bitcoin_indexer::types::BlockHeight;
 use log::warn;
 use mockall::automock;
@@ -28,11 +28,10 @@ pub trait BitvmxApi {
     fn update_instance_tx_seen(
         &self,
         instance_id: InstanceId,
-        txid: &Txid,
+        tx: &Transaction,
         tx_height: BlockHeight,
         tx_block_hash: BlockHash,
         tx_is_orphan: bool,
-        tx_hex: &str,
     ) -> Result<()>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
@@ -261,34 +260,35 @@ impl BitvmxApi for BitvmxStore {
     fn update_instance_tx_seen(
         &self,
         instance_id: InstanceId,
-        txid: &Txid,
+        tx: &Transaction,
         tx_height: BlockHeight,
         tx_block_hash: BlockHash,
         tx_is_orphan: bool,
-        tx_hex: &str,
     ) -> Result<()> {
-        let tx_instance = self.get_instance_tx(instance_id, txid)?;
+        let tx_instance = self.get_instance_tx(instance_id, &tx.compute_txid())?;
 
         match tx_instance {
-            Some(mut tx) => {
-                if tx.block_info.is_some() {
+            Some(mut tx_status) => {
+                if tx_status.block_info.is_some() {
                     warn!("Txn already seen, looks this methods is being calling more than what should be")
                 }
-                tx.block_info = Some(BlockInfo {
+                tx_status.block_info = Some(BlockInfo {
                     block_height: tx_height,
                     block_hash: tx_block_hash,
                     is_orphan: tx_is_orphan,
                 });
-                tx.tx_hex = Some(tx_hex.to_string());
-                self.save_instance_tx(instance_id, &tx)?;
+                tx_status.tx = Some(tx.clone());
+
+                self.save_instance_tx(instance_id, &tx_status)?;
             }
             None => warn!(
                 "Txn for the bitvmx instance {} txid {} was not found",
-                instance_id, txid
+                instance_id,
+                tx.compute_txid()
             ),
         }
 
-        self.update_news(instance_id, *txid)?;
+        self.update_news(instance_id, tx.compute_txid())?;
 
         Ok(())
     }
@@ -339,7 +339,7 @@ impl BitvmxApi for BitvmxStore {
     fn save_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
         let tx_data = TxStatus {
             tx_id: *tx_id,
-            tx_hex: None,
+            tx: None,
             block_info: None,
         };
 

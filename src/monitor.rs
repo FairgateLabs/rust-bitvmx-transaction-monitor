@@ -101,7 +101,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
                     .into_iter()
                     .map(|tx_id| TxStatus {
                         tx_id,
-                        tx_hex: None,
+                        tx: None,
                         block_info: None,
                     })
                     .collect();
@@ -204,7 +204,7 @@ where
     }
 
     pub fn tick(&mut self) -> Result<()> {
-        let new_height = self.indexer.index_height(&self.current_height)?;
+        let new_height = self.indexer.tick(&self.current_height)?;
 
         let current_height = self
             .indexer
@@ -228,7 +228,7 @@ where
         for instance in instances {
             for tx_instance in instance.txs {
                 // if Trasanction is None, means it was not mined or is in some orphan block.
-                let tx_info = self.indexer.get_tx_info(&tx_instance.tx_id)?;
+                let tx_info = self.indexer.get_tx(&tx_instance.tx_id)?;
 
                 match tx_info {
                     Some(tx_info) => match tx_instance.block_info {
@@ -250,15 +250,12 @@ where
                             }
                         }
                         None => {
-                            let tx_hex = self.indexer.get_tx(&tx_instance.tx_id)?;
-
                             self.bitvmx_store.update_instance_tx_seen(
                                 instance.id,
-                                &tx_instance.tx_id,
+                                &tx_info.tx,
                                 tx_info.block_height,
                                 tx_info.block_hash,
                                 tx_info.orphan,
-                                &tx_hex,
                             )?;
 
                             info!(
@@ -309,7 +306,7 @@ where
 
             TxStatusResponse {
                 tx_id: tx_status.tx_id,
-                tx_hex: tx_status.tx_hex,
+                tx: tx_status.tx,
                 block_info: tx_status.block_info,
                 confirmations,
             }
