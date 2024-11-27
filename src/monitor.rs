@@ -32,9 +32,9 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer = Indexer::new_with_path(bitcoin_client, db_file_path)?;
-        let indexed_height = indexer.get_best_block()?;
+        let indexed_block = indexer.get_best_block()?;
         let bitvmx_store = BitvmxStore::new_with_path(db_file_path)?;
-        let current_height = define_height_to_sync(checkpoint, blockchain_height, indexed_height)?;
+        let current_height = define_height_to_sync(checkpoint, blockchain_height, Some(indexed_block.unwrap().height))?;
         let monitor = Monitor::new(
             indexer,
             bitvmx_store,
@@ -206,21 +206,21 @@ where
     pub fn tick(&mut self) -> Result<()> {
         let new_height = self.indexer.tick(&self.current_height)?;
 
-        let current_height = self
+        let current_block = self
             .indexer
             .get_best_block()
             .context("Failed to retrieve current block")?;
 
-        if current_height.is_none() {
+        if current_block.is_none() {
             return Ok(());
         }
 
-        let current_height = current_height.unwrap();
+        let current_block = current_block.unwrap();
 
         // Get operations that have already started
         let instances = self
             .bitvmx_store
-            .get_instances_ready_to_track(current_height)
+            .get_instances_ready_to_track(current_block.height)
             .context("Failed to retrieve operations")?;
 
         // Count existing operations get all thansaction that meet next rules:
@@ -233,8 +233,8 @@ where
                 match tx_info {
                     Some(tx_info) => match tx_instance.block_info {
                         Some(block_info) => {
-                            if current_height > block_info.block_height
-                                && (current_height - block_info.block_height)
+                            if current_block.height > block_info.block_height
+                                && (current_block.height - block_info.block_height)
                                     <= self.confirmation_threshold
                             {
                                 self.bitvmx_store
@@ -244,8 +244,8 @@ where
                                         "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
                                         instance.id,
                                         tx_instance.tx_id,
-                                        current_height,
-                                        current_height - block_info.block_height + 1,
+                                        current_block.height,
+                                        current_block.height - block_info.block_height + 1,
                                     );
                             }
                         }
@@ -260,7 +260,7 @@ where
 
                             info!(
                                 "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                                instance.id, tx_instance.tx_id, current_height
+                                instance.id, tx_instance.tx_id, current_block.height
                             );
                         }
                     },
