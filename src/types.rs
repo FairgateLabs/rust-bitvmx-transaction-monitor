@@ -1,5 +1,4 @@
 use bitcoin::{BlockHash, Transaction, Txid};
-// use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -7,6 +6,12 @@ pub struct TxStatus {
     pub tx_id: Txid,
     pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+
+pub struct AddressStatus {
+    pub tx: Option<Transaction>,
 }
 
 impl TxStatus {

@@ -1,7 +1,7 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
 use crate::types::{BitvmxInstance, InstanceData, InstanceId, TxStatus, TxStatusResponse};
-use anyhow::{Context, Ok, Result};
-use bitcoin::Txid;
+use anyhow::{Context, Result};
+use bitcoin::{Address, Network, Transaction, Txid};
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
@@ -62,6 +62,7 @@ pub trait MonitorApi {
     fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
 
+    fn save_address_for_tracking(&self, address: Address) -> Result<()>;
     /// Notifies about changes in the status of every transaction (tx) that belongs
     /// to a BitVMX instance.
     ///
@@ -154,6 +155,10 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
     fn get_confirmation_threshold(&self) -> u32 {
         self.confirmation_threshold
     }
+
+    fn save_address_for_tracking(&self, address: Address) -> Result<()> {
+        self.bitvmx_store.save_address(address)
+    }
 }
 
 impl<I, B> Monitor<I, B>
@@ -238,7 +243,7 @@ where
                                     <= self.confirmation_threshold
                             {
                                 self.bitvmx_store
-                                    .update_news(instance.id, tx_instance.tx_id)?;
+                                    .update_instance_news(instance.id, tx_instance.tx_id)?;
 
                                 info!(
                                         "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
@@ -273,7 +278,51 @@ where
 
         self.current_height = new_height;
 
+        self.detect_addresses_in_transactions(best_full_block.txs)
+            .context("Failed to detect addresses in transactions")?;
+
         Ok(())
+    }
+
+    fn detect_addresses_in_transactions(&self, transactions: Vec<Transaction>) -> Result<()> {
+        let addresses = self
+            .bitvmx_store
+            .get_addresses()
+            .context("Failed to get addresses")?;
+
+        for address in addresses {
+            for tx in transactions.iter() {
+                let matched_with_the_address = self.address_exist_in_output(address.clone(), tx);
+
+                if matched_with_the_address {
+                    self.bitvmx_store
+                        .update_address_news(address.clone(), tx)
+                        .context(format!(
+                            "Failed to save transaction for address {}",
+                            address
+                        ))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn address_exist_in_output(&self, address: Address, tx: &Transaction) -> bool {
+        //TODO: Bitcoin Network is hardcoded here, we need to use the network from configuration
+
+        // Iterate through outputs to find the address
+        for output in tx.output.iter() {
+            if let Ok(output_address) =
+                bitcoin::Address::from_script(&output.script_pubkey, Network::Bitcoin)
+            {
+                if output_address == address {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     pub fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {

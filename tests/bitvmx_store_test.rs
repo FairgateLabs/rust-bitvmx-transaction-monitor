@@ -3,7 +3,6 @@ use bitvmx_transaction_monitor::{
     bitvmx_store::{BitvmxApi, BitvmxStore},
     types::{BitvmxInstance, BlockInfo, TxStatus},
 };
-
 use std::str::FromStr;
 
 fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
@@ -176,7 +175,7 @@ fn update_bitvmx_tx() -> Result<(), anyhow::Error> {
     assert_eq!(instances[0].txs[1].block_info, Some(block_300.clone()));
 
     //Update again but in another block
-    bitvmx_store.update_news(instances[0].id, tx_not_seen.compute_txid())?;
+    bitvmx_store.update_instance_news(instances[0].id, tx_not_seen.compute_txid())?;
 
     // This will return instances are not confirmed > 6
     let data = bitvmx_store.get_instances_ready_to_track(100000)?;
@@ -221,7 +220,7 @@ fn update_bitvmx_tx_confirmation() -> Result<(), anyhow::Error> {
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
 
     // Tx 2 was seen in block_300
-    bitvmx_store.update_news(instances[0].id, txid)?;
+    bitvmx_store.update_instance_news(instances[0].id, txid)?;
 
     //The instance is not pending anymore
     let instances = bitvmx_store.get_instances_ready_to_track(instances[0].id)?;
@@ -322,7 +321,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     bitvmx_store.save_instances(&instances)?;
 
     // update the tx with a confirmation
-    bitvmx_store.update_news(instances[0].id, tx.compute_txid())?;
+    bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
 
     //get and check news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -357,7 +356,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 0);
 
     //update tx with a confirmation in another block
-    bitvmx_store.update_news(instances[0].id, tx.compute_txid())?;
+    bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
 
     // Get the news
     let instance_news = bitvmx_store.get_instance_news()?;
@@ -448,9 +447,9 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     bitvmx_store.update_instance_tx_seen(1, &tx_1, block_height_2, hash, is_orphan)?;
     bitvmx_store.update_instance_tx_seen(2, &tx_2, block_height_3, hash, is_orphan)?;
     // update each tx with confirms
-    bitvmx_store.update_news(1, tx_1.compute_txid())?;
-    bitvmx_store.update_news(2, tx_2.compute_txid())?;
-    bitvmx_store.update_news(1, tx_3.compute_txid())?;
+    bitvmx_store.update_instance_news(1, tx_1.compute_txid())?;
+    bitvmx_store.update_instance_news(2, tx_2.compute_txid())?;
+    bitvmx_store.update_instance_news(1, tx_3.compute_txid())?;
 
     // Get and verify news
     let instance_news = bitvmx_store.get_instance_news()?;
