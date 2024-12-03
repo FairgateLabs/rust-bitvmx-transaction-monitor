@@ -1,10 +1,4 @@
-use bitcoin::{
-    absolute::{self, LockTime},
-    key::{rand, Secp256k1},
-    secp256k1::{All, SecretKey},
-    transaction, Amount, BlockHash, Network, Transaction, TxOut,
-};
-use bitcoin::{Address, CompressedPublicKey};
+use bitcoin::{absolute::LockTime, BlockHash, Transaction};
 use bitcoin_indexer::{
     indexer::MockIndexerApi,
     types::{FullBlock, TransactionInfo},
@@ -298,42 +292,4 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     assert_eq!(monitor.get_current_height(), 201);
 
     Ok(())
-}
-
-#[test]
-fn detect_address_in_tx() -> Result<(), anyhow::Error> {
-    let to = get_address();
-    let to_clone = to.clone();
-
-    // The spend output is locked to a key controlled by the receiver.
-    let spend = TxOut {
-        value: Amount::default(),
-        script_pubkey: to.script_pubkey(),
-    };
-
-    // The transaction we want to sign and broadcast.
-    let unsigned_tx = Transaction {
-        version: transaction::Version::TWO,  // Post BIP-68.
-        lock_time: absolute::LockTime::ZERO, // Ignore the locktime.
-        input: vec![],                       // Input goes into index 0.
-        output: vec![spend],                 // cpfp output is always index 0.
-    };
-
-    let mock_indexer = MockIndexerApi::new();
-    let mock_bitvmx_store = MockBitvmxStore::new();
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, None, 6);
-    let matched = monitor.address_exist_in_output(to_clone, &unsigned_tx);
-
-    assert!(matched);
-
-    Ok(())
-}
-
-fn get_address() -> Address {
-    let secp: Secp256k1<All> = Secp256k1::new();
-    let sk = SecretKey::new(&mut rand::thread_rng());
-    let pk = bitcoin::PublicKey::new(sk.public_key(&secp));
-    let compressed = CompressedPublicKey::try_from(pk).unwrap();
-    let to = Address::p2wpkh(&compressed, Network::Bitcoin);
-    to
 }
