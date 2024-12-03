@@ -8,10 +8,11 @@ pub struct TxStatus {
     pub block_info: Option<BlockInfo>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 
 pub struct AddressStatus {
     pub tx: Option<Transaction>,
+    pub block_info: Option<BlockInfo>,
 }
 
 impl TxStatus {

@@ -10,6 +10,7 @@ use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_transaction_monitor::{
     bitvmx_store::{BitvmxApi, BitvmxStore, MockBitvmxStore},
     monitor::Monitor,
+    types::{AddressStatus, BlockInfo},
 };
 
 pub fn generate_random_string() -> String {
@@ -82,15 +83,29 @@ fn address_test() -> Result<(), anyhow::Error> {
 
     // No news for now.
     let news = bitvmx_store.get_address_news()?;
-    assert_eq!(news, Vec::<(Address, Vec<Transaction>)>::new());
+    assert_eq!(news, Vec::<(Address, Vec<AddressStatus>)>::new());
 
     // It should have a news for address_1
-    bitvmx_store.update_address_news(address_1.clone(), &tx)?;
+    let block_hash = bitcoin::BlockHash::from_str(
+        "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+    )?;
+    bitvmx_store.update_address_news(address_1.clone(), &tx, 100, block_hash, false)?;
     let news = bitvmx_store.get_address_news()?;
+    println!("News: {:?}", news);
     assert_eq!(news[0].0, address_1.clone());
-    assert_eq!(news[0].1, vec![tx.clone()]);
 
-    bitvmx_store.update_address_news(address_2.clone(), &tx)?;
+    let address_status = AddressStatus {
+        tx: Some(tx.clone()),
+        block_info: Some(BlockInfo {
+            block_height: 100,
+            block_hash,
+            is_orphan: false,
+        }),
+    };
+
+    assert_eq!(news[0].1, vec![address_status]);
+
+    bitvmx_store.update_address_news(address_2.clone(), &tx, 100, block_hash, false)?;
     let news = bitvmx_store.get_address_news()?;
     assert_eq!(news[0].0, address_1.clone());
     assert_eq!(news[1].0, address_2.clone());
@@ -103,7 +118,7 @@ fn address_test() -> Result<(), anyhow::Error> {
     // acknowledge address_2
     bitvmx_store.acknowledge_address_news(address_2.clone())?;
     let news = bitvmx_store.get_address_news()?;
-    assert_eq!(news, Vec::<(Address, Vec<Transaction>)>::new());
+    assert_eq!(news, Vec::<(Address, Vec<AddressStatus>)>::new());
 
     Ok(())
 }

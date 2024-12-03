@@ -57,8 +57,15 @@ pub trait BitvmxApi {
     //Address Methods
     fn get_addresses(&self) -> Result<Vec<Address>>;
     fn save_address(&self, address: Address) -> Result<()>;
-    fn update_address_news(&self, address: Address, tx: &Transaction) -> Result<()>;
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<Transaction>)>>;
+    fn update_address_news(
+        &self,
+        address: Address,
+        tx: &Transaction,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        orphan: bool,
+    ) -> Result<()>;
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
     fn acknowledge_address_news(&self, address: Address) -> Result<()>;
 }
 
@@ -240,20 +247,28 @@ impl BitvmxApi for BitvmxStore {
         }
     }
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<Transaction>)>> {
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>> {
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
         let address_news = self
             .store
-            .get::<_, Vec<(Address<NetworkUnchecked>, Vec<Transaction>)>>(&address_news_key)
-            .unwrap_or_default();
+            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)
+            .unwrap_or(None)
+            .unwrap_or_else(Vec::new);
 
-        let address_txs = match &address_news {
-            Some(news) => news
-                .iter()
-                .map(|a| (a.clone().0.assume_checked(), a.clone().1))
-                .collect(),
-            None => vec![],
-        };
+        let mut address_txs = Vec::new();
+        for address in address_news {
+            let address_news_key =
+                self.get_address_key(AddressKey::Address(address.clone().assume_checked()));
+
+            let address_status = self
+                .store
+                .get::<&str, Vec<AddressStatus>>(&address_news_key)
+                .context(format!("There was an error getting {}", address_news_key))
+                .unwrap_or(None)
+                .unwrap_or_else(Vec::new);
+
+            address_txs.push((address.assume_checked(), address_status));
+        }
 
         Ok(address_txs)
     }
@@ -406,47 +421,50 @@ impl BitvmxApi for BitvmxStore {
         Ok(())
     }
 
-    fn update_address_news(&self, address: Address, tx: &Transaction) -> Result<()> {
+    fn update_address_news(
+        &self,
+        address: Address,
+        tx: &Transaction,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        orphan: bool,
+    ) -> Result<()> {
         let address_key = self.get_address_key(AddressKey::Address(address.clone()));
 
-        let address_status = self
+        let mut address_status = self
             .store
-            .get::<&str, AddressStatus>(&address_key)
-            .context("There was an error getting address status")?;
+            .get::<&str, Vec<AddressStatus>>(&address_key)
+            .context("There was an error getting address status")?
+            .unwrap_or_else(Vec::new);
 
-        if let Some(mut address_status_data) = address_status {
-            address_status_data.tx = Some(tx.clone());
+        let block_info = Some(BlockInfo {
+            block_height,
+            block_hash,
+            is_orphan: orphan,
+        });
 
-            self.store
-                .set(&address_key, address_status_data)
-                .context("Failed to update address list")?;
-        }
+        address_status.push(AddressStatus {
+            tx: Some(tx.clone()),
+            block_info,
+        });
+
+        self.store
+            .set(&address_key, address_status)
+            .context("Failed to update address list")?;
 
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
-        let mut address_news = self
+        let mut addresses = self
             .store
-            .get::<&str, Vec<(Address<NetworkUnchecked>, Vec<Transaction>)>>(&address_news_key)
-            .context(format!("There was an error getting {}", address_news_key))
+            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)
             .unwrap_or(None)
             .unwrap_or_else(Vec::new);
 
-        let address_exists = address_news
-            .iter_mut()
-            .find(|a| a.0.clone().assume_checked() == address);
-
-        if let Some(address_entry) = address_exists {
-            // Address exists, check if tx is already in array
-            if !address_entry.1.contains(tx) {
-                address_entry.1.push(tx.clone());
-            }
-        } else {
-            // Address doesn't exist, create new tuple
-            address_news.push((address.as_unchecked().clone(), vec![tx.clone()]));
+        if !addresses.iter().any(|a| a == address.as_unchecked()) {
+            addresses.push(address.as_unchecked().clone());
+            self.store
+                .set(&address_news_key, &addresses)
+                .context("Failed to update address news")?;
         }
-
-        self.store
-            .set(&address_news_key, &address_news)
-            .context("Failed to update address news")?;
 
         Ok(())
     }
@@ -499,12 +517,12 @@ impl BitvmxApi for BitvmxStore {
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
         let mut address_news = self
             .store
-            .get::<_, Vec<(Address<NetworkUnchecked>, Vec<Transaction>)>>(&address_news_key)?
+            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)?
             .unwrap_or_default();
 
         let address_checked: Vec<Address> = address_news
             .iter()
-            .map(|a| a.clone().0.assume_checked())
+            .map(|a| a.clone().assume_checked())
             .collect();
 
         if let Some(pos) = address_checked.iter().position(|a| a == &address) {

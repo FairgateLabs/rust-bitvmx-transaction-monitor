@@ -1,7 +1,10 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
-use crate::types::{BitvmxInstance, InstanceData, InstanceId, TxStatus, TxStatusResponse};
+use crate::types::{
+    AddressStatus, BitvmxInstance, InstanceData, InstanceId, TxStatus, TxStatusResponse,
+};
 use anyhow::{Context, Result};
 use bitcoin::{Address, Network, Transaction, Txid};
+use bitcoin_indexer::types::FullBlock;
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
@@ -72,7 +75,7 @@ pub trait MonitorApi {
     ///   - `TxStatus`: The current status of the transaction.
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<Transaction>)>>;
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
 
     /// Acknowledges or marks an instance id and tx processed, effectively
     /// removing it from the list of pending changes.
@@ -162,7 +165,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         self.bitvmx_store.save_address(address)
     }
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<Transaction>)>> {
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>> {
         self.bitvmx_store.get_address_news()
     }
 }
@@ -284,25 +287,31 @@ where
 
         self.current_height = new_height;
 
-        self.detect_addresses_in_transactions(best_full_block.txs)
+        self.detect_addresses_in_transactions(best_full_block)
             .context("Failed to detect addresses in transactions")?;
 
         Ok(())
     }
 
-    fn detect_addresses_in_transactions(&self, transactions: Vec<Transaction>) -> Result<()> {
+    fn detect_addresses_in_transactions(&self, full_block: FullBlock) -> Result<()> {
         let addresses = self
             .bitvmx_store
             .get_addresses()
             .context("Failed to get addresses")?;
 
         for address in addresses {
-            for tx in transactions.iter() {
+            for tx in full_block.txs.iter() {
                 let matched_with_the_address = self.address_exist_in_output(address.clone(), tx);
 
                 if matched_with_the_address {
                     self.bitvmx_store
-                        .update_address_news(address.clone(), tx)
+                        .update_address_news(
+                            address.clone(),
+                            tx,
+                            full_block.height,
+                            full_block.hash,
+                            full_block.orphan,
+                        )
                         .context(format!(
                             "Failed to save transaction for address {}",
                             address
