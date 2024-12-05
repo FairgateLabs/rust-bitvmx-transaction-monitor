@@ -380,9 +380,8 @@ impl BitvmxApi for BitvmxStore {
         let addresses = self
             .store
             .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)
-            .context(format!("There was an error getting {}", address_list_key))
-            .unwrap_or(Some(vec![]))
-            .unwrap();
+            .context(format!("There was an error getting {}", address_list_key))?
+            .unwrap_or_else(Vec::new);
 
         let addreses_checked: Vec<Address> = addresses
             .iter()
