@@ -2,10 +2,9 @@ use bitcoin::{BlockHash, Transaction, Txid};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TxStatus {
+pub struct TransactionStatus {
     pub tx_id: Txid,
     pub tx: Option<Transaction>,
-    pub block_info: Option<BlockInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -13,30 +12,6 @@ pub struct TxStatus {
 pub struct AddressStatus {
     pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
-}
-
-impl TxStatus {
-    pub fn was_seen(&self) -> bool {
-        self.block_info.is_some()
-    }
-
-    pub fn get_confirmations(&self, current_height: u32) -> u32 {
-        if !self.was_seen() {
-            return 0;
-        }
-
-        let height_seen = self.block_info.as_ref().unwrap().block_height;
-
-        if current_height >= height_seen {
-            current_height - height_seen + 1
-        } else {
-            //TODO: Review this, this could implies that if indexer runs again in a checkpoint older, transaction status should no be in the database.
-            // This is a special case where either the indexer is backward or there is a reorganization
-            // that reorganizes blocks and the winning chain is shorter, leaving out the transaction that was seen.
-            // Default case for now is 0
-            0
-        }
-    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -83,7 +58,7 @@ pub struct BitvmxInstance {
     pub id: InstanceId,
 
     //bitvmx linked transactions data + speed up transactions data
-    pub txs: Vec<TxStatus>,
+    pub txs: Vec<TransactionStatus>,
 
     //First height to start searching the bitvmx instance in the blockchain
     pub start_height: BlockHeight,

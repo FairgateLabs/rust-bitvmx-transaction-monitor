@@ -1,6 +1,7 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
 use crate::types::{
-    AddressStatus, BitvmxInstance, InstanceData, InstanceId, TxStatus, TxStatusResponse,
+    AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
+    TxStatusResponse,
 };
 use anyhow::{Context, Result};
 use bitcoin::{Address, Network, Transaction, Txid};
@@ -60,9 +61,13 @@ pub trait MonitorApi {
     fn tick(&mut self) -> Result<()>;
 
     fn get_current_height(&self) -> BlockHeight;
+
     fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
+
     fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+
     fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
 
     fn save_address_for_tracking(&self, address: Address) -> Result<()>;
@@ -106,11 +111,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
                 let txs = instance_data
                     .txs
                     .into_iter()
-                    .map(|tx_id| TxStatus {
-                        tx_id,
-                        tx: None,
-                        block_info: None,
-                    })
+                    .map(|tx_id| TransactionStatus { tx_id, tx: None })
                     .collect();
                 BitvmxInstance {
                     id: instance_data.instance_id,
@@ -241,45 +242,24 @@ where
         // Count existing operations get all thansaction that meet next rules:
         for instance in instances {
             for tx_instance in instance.txs {
-                // if Trasanction is None, means it was not mined or is in some orphan block.
+                // if Trasanction is None, means it was not mined.
                 let tx_info = self.indexer.get_tx(&tx_instance.tx_id)?;
 
-                match tx_info {
-                    Some(tx_info) => match tx_instance.block_info {
-                        Some(block_info) => {
-                            if best_full_block.height > block_info.block_height
-                                && (best_full_block.height - block_info.block_height)
-                                    <= self.confirmation_threshold
-                            {
-                                self.bitvmx_store
-                                    .update_instance_news(instance.id, tx_instance.tx_id)?;
+                if let Some(_tx_info) = tx_info {
+                    if best_full_block.height > _tx_info.block_height
+                        && (best_full_block.height - _tx_info.block_height)
+                            <= self.confirmation_threshold
+                    {
+                        self.bitvmx_store
+                            .update_instance_news(instance.id, tx_instance.tx_id)?;
 
-                                info!(
-                                        "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
-                                        instance.id,
-                                        tx_instance.tx_id,
-                                        best_full_block.height,
-                                        best_full_block.height - block_info.block_height + 1,
-                                    );
-                            }
-                        }
-                        None => {
-                            self.bitvmx_store.update_instance_tx_seen(
-                                instance.id,
-                                &tx_info.tx,
-                                tx_info.block_height,
-                                tx_info.block_hash,
-                                tx_info.orphan,
-                            )?;
-
-                            info!(
-                                "Found bitvmx intance: {} | tx_id: {} | at height: {}",
-                                instance.id, tx_instance.tx_id, best_full_block.height
-                            );
-                        }
-                    },
-                    None => {
-                        //ToDo Make an error for this case
+                        info!(
+                                    "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
+                                    instance.id,
+                                    tx_instance.tx_id,
+                                    best_full_block.height,
+                                    best_full_block.height - _tx_info.block_height + 1,
+                                );
                     }
                 }
             }
@@ -361,19 +341,20 @@ where
         instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<Option<TxStatusResponse>> {
-        let tx_status = self
-            .bitvmx_store
-            .get_instance_tx_status(instance_id, tx_id)?;
+        let tx_status = self.indexer.get_tx(tx_id).context(format!(
+            "Failed to get transaction status for tx_id {} in instance {}",
+            tx_id, instance_id
+        ))?;
 
-        let tx_status_response = tx_status.map(|tx_status| {
-            let confirmations = tx_status.get_confirmations(self.current_height);
-
-            TxStatusResponse {
-                tx_id: tx_status.tx_id,
-                tx: tx_status.tx,
-                block_info: tx_status.block_info,
-                confirmations,
-            }
+        let tx_status_response = tx_status.map(|tx_status| TxStatusResponse {
+            tx_id: tx_status.tx.compute_txid(),
+            tx: Some(tx_status.tx),
+            block_info: Some(BlockInfo {
+                block_height: tx_status.block_height,
+                block_hash: tx_status.block_hash,
+                is_orphan: tx_status.orphan,
+            }),
+            confirmations: tx_status.confirmations,
         });
 
         Ok(tx_status_response)

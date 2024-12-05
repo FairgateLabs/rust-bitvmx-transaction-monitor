@@ -6,7 +6,7 @@ use bitcoin_indexer::{
 use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
-    types::{BitvmxInstance, BlockInfo, TxStatus},
+    types::{BitvmxInstance, TransactionStatus},
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -53,9 +53,6 @@ fn no_instances() -> Result<(), anyhow::Error> {
 
     // Then we never call update_bitvmx_tx_confirmations
     mock_bitvmx_store.expect_update_instance_news().times(0);
-
-    // Then we never call update_bitvmx_tx_seen
-    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
     let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_100_height), 6);
 
@@ -104,22 +101,13 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     let instances = vec![BitvmxInstance {
         id: instance_id,
         txs: vec![
-            TxStatus {
+            TransactionStatus {
                 tx_id: tx.compute_txid(),
                 tx: None,
-                block_info: Some(BlockInfo {
-                    block_height: 190,
-                    block_hash: BlockHash::from_str(
-                        "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
-                    )
-                    .unwrap(),
-                    is_orphan: false,
-                }),
             },
-            TxStatus {
+            TransactionStatus {
                 tx_id: tx_to_seen.compute_txid(),
                 tx: None,
-                block_info: None,
             },
         ],
         start_height: 180,
@@ -136,6 +124,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         block_hash: hash_150,
         orphan: false,
         block_height: 150,
+        confirmations: 10,
     };
 
     let tx_info = TransactionInfo {
@@ -143,6 +132,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         block_hash: hash_190,
         orphan: false,
         block_height: 190,
+        confirmations: 10,
     };
 
     mock_indexer
@@ -174,19 +164,6 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 
     // The first time was seen the tx should not call update_bitvmx_tx_confirmations
     mock_bitvmx_store.expect_update_instance_news().times(0);
-
-    // Then call update_bitvmx_tx_seen for the first time
-    mock_bitvmx_store
-        .expect_update_instance_tx_seen()
-        .with(
-            eq(instance_id),
-            eq(tx_to_seen),
-            eq(150),
-            eq(hash_150),
-            eq(false),
-        )
-        .times(1)
-        .returning(|_, _, _, _, _| Ok(()));
 
     mock_bitvmx_store
         .expect_get_addresses()
@@ -232,17 +209,9 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
 
     let instances = vec![BitvmxInstance {
         id: intance_id,
-        txs: vec![TxStatus {
+        txs: vec![TransactionStatus {
             tx_id: tx_to_seen.compute_txid(),
             tx: None,
-            block_info: Some(BlockInfo {
-                block_height: 200,
-                block_hash: BlockHash::from_str(
-                    "12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d",
-                )
-                .unwrap(),
-                is_orphan: false,
-            }),
         }],
         start_height: 180,
     }];
@@ -261,6 +230,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         block_hash: hash_100,
         orphan: false,
         block_height: 100,
+        confirmations: 10,
     };
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
@@ -281,9 +251,6 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
 
     // Do no Increase confirmations given the block is the same were was found
     mock_bitvmx_store.expect_update_instance_news().times(0);
-
-    // Also the update_bitvmx_tx_seen is not call
-    mock_bitvmx_store.expect_update_instance_tx_seen().times(0);
 
     let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_height_200), 6);
 
