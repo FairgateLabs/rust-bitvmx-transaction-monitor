@@ -80,8 +80,6 @@ pub trait MonitorApi {
     ///   - `TxStatus`: The current status of the transaction.
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
-
     /// Acknowledges or marks an instance id and tx processed, effectively
     /// removing it from the list of pending changes.
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
@@ -91,6 +89,9 @@ pub trait MonitorApi {
         instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<Option<TxStatusResponse>>;
+
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
+    fn acknowledge_address_news(&self, address: Address) -> Result<()>;
 
     fn get_confirmation_threshold(&self) -> u32;
 }
@@ -168,6 +169,10 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
 
     fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>> {
         self.bitvmx_store.get_address_news()
+    }
+
+    fn acknowledge_address_news(&self, address: Address) -> Result<()> {
+        self.bitvmx_store.acknowledge_address_news(address)
     }
 }
 
