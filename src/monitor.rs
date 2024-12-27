@@ -53,47 +53,138 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
 
 #[automock]
 pub trait MonitorApi {
-    // Determines if the monitor is ready and fully synced.
-    fn is_ready(&mut self) -> Result<bool>;
-
-    // The `tick` method is responsible for monitoring the status of transactions associated with stored instances. It checks if any of these transactions have been confirmed.
-    // Additionally, it triggers the indexer to continue its indexing process if it is not yet fully synchronized with the blockchain.
-    fn tick(&mut self) -> Result<()>;
-
-    fn get_current_height(&self) -> BlockHeight;
-
-    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
-
-    fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
-
-    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
-
-    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
-
-    fn save_address_for_tracking(&self, address: Address) -> Result<()>;
-
-    /// Notifies about changes in the status of every transaction that belongs to a BitVMX instance.
+    /// Checks if the monitor is ready and fully synced with the blockchain.
     ///
     /// # Returns
-    /// - `Ok(Vec<(InstanceId, TxStatus>)>`: A vector of tuples where each tuple contains:
-    ///   - `InstanceId`: The Bitvmx instance id
-    ///   - `TransactionStatus`: The current status of the transaction.
+    /// - `Ok(bool)`: Returns true if the monitor is ready and synced, false otherwise.
+    /// - `Err`: If there was an error checking the sync status.
+    fn is_ready(&mut self) -> Result<bool>;
+
+    /// Processes one tick of the monitor's operation.
+    ///
+    /// This method monitors transaction statuses for stored instances and checks for confirmations.
+    /// It also triggers the indexer to continue syncing if not yet synchronized with the blockchain.
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the tick operation completed successfully.
+    /// - `Err`: If there was an error during processing.
+    fn tick(&mut self) -> Result<()>;
+
+    /// Gets the current block height that the monitor has processed.
+    ///
+    /// # Returns
+    /// The current block height as a `BlockHeight`.
+    fn get_current_height(&self) -> BlockHeight;
+
+    /// Saves multiple instances for monitoring.
+    ///
+    /// # Arguments
+    /// * `instances` - Vector of instance data to be tracked
+    ///
+    /// # Returns
+    /// - `Ok(())`: If instances were saved successfully.
+    /// - `Err`: If there was an error saving the instances.
+    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<()>;
+
+    /// Saves a single transaction to be monitored for a specific instance.
+    ///
+    /// # Arguments
+    /// * `instance_id` - ID of the instance the transaction belongs to
+    /// * `tx_id` - Transaction ID to monitor
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the transaction was saved successfully.
+    /// - `Err`: If there was an error saving the transaction.
+    fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+
+    /// Removes a transaction from being monitored for a specific instance.
+    ///
+    /// # Arguments
+    /// * `instance_id` - ID of the instance the transaction belongs to
+    /// * `tx_id` - Transaction ID to stop monitoring
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the transaction was removed successfully.
+    /// - `Err`: If there was an error removing the transaction.
+    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<()>;
+
+    /// Gets all instances currently being tracked.
+    ///
+    /// # Returns
+    /// - `Ok(Vec<BitvmxInstance>)`: Vector of all tracked instances.
+    /// - `Err`: If there was an error retrieving the instances.
+    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
+
+    /// Saves an address to be monitored for transactions.
+    ///
+    /// # Arguments
+    /// * `address` - Bitcoin address to monitor
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the address was saved successfully.
+    /// - `Err`: If there was an error saving the address.
+    fn save_address_for_tracking(&self, address: Address) -> Result<()>;
+
+    /// Gets status updates for transactions belonging to monitored instances.
+    ///
+    /// # Returns
+    /// - `Ok(Vec<(InstanceId, Vec<TransactionStatus>)>)`: Vector of tuples containing:
+    ///   - `InstanceId`: The BitVMX instance ID
+    ///   - `Vec<TransactionStatus>`: Vector of status updates for the instance's transactions
+    /// - `Err`: If there was an error retrieving the updates.
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>>;
 
-    /// Acknowledges or marks an instance id and tx processed, effectively
-    /// removing it from the list of news
+    /// Acknowledges that a transaction status update has been processed.
+    ///
+    /// This removes the status update from the pending news queue.
+    ///
+    /// # Arguments
+    /// * `instance_id` - ID of the instance the transaction belongs to
+    /// * `tx_id` - Transaction ID that was processed
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the acknowledgment was successful.
+    /// - `Err`: If there was an error processing the acknowledgment.
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
+    /// Gets the current status of a specific transaction for an instance.
+    ///
+    /// # Arguments
+    /// * `instance_id` - ID of the instance the transaction belongs to
+    /// * `tx_id` - Transaction ID to check
+    ///
+    /// # Returns
+    /// - `Ok(Option<TransactionStatus>)`: The transaction's status if found.
+    /// - `Err`: If there was an error retrieving the status.
     fn get_instance_tx_status(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
     ) -> Result<Option<TransactionStatus>>;
 
+    /// Gets status updates for monitored addresses.
+    ///
+    /// # Returns
+    /// - `Ok(Vec<(Address, Vec<AddressStatus>)>)`: Vector of address/status pairs.
+    /// - `Err`: If there was an error retrieving the updates.
     fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
 
+    /// Acknowledges that an address status update has been processed.
+    ///
+    /// # Arguments
+    /// * `address` - The address whose updates were processed
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the acknowledgment was successful.
+    /// - `Err`: If there was an error processing the acknowledgment.
     fn acknowledge_address_news(&self, address: Address) -> Result<()>;
 
+    /// Gets the configured confirmation threshold that determines when a transaction is considered final.
+    /// This threshold represents the minimum number of blocks that must be mined on top of the block
+    /// containing the transaction before it is treated as irreversible.
+    ///
+    /// # Returns
+    /// The confirmation threshold as a u32.
     fn get_confirmation_threshold(&self) -> u32;
 }
 
