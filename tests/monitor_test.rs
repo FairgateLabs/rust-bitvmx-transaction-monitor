@@ -6,7 +6,7 @@ use bitcoin_indexer::{
 use bitvmx_transaction_monitor::{
     bitvmx_store::MockBitvmxStore,
     monitor::Monitor,
-    types::{BitvmxInstance, TransactionStatus},
+    types::{BitvmxInstance, TransactionStore},
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -101,11 +101,11 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     let instances = vec![BitvmxInstance {
         id: instance_id,
         txs: vec![
-            TransactionStatus {
+            TransactionStore {
                 tx_id: tx.compute_txid(),
                 tx: None,
             },
-            TransactionStatus {
+            TransactionStore {
                 tx_id: tx_to_seen.compute_txid(),
                 tx: None,
             },
@@ -209,7 +209,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
 
     let instances = vec![BitvmxInstance {
         id: intance_id,
-        txs: vec![TransactionStatus {
+        txs: vec![TransactionStore {
             tx_id: tx_to_seen.compute_txid(),
             tx: None,
         }],

@@ -1,4 +1,4 @@
-use crate::types::{BitvmxInstance, TransactionStatus};
+use crate::types::{BitvmxInstance, TransactionStore};
 use bitcoin::Txid;
 use std::str::FromStr;
 
@@ -7,14 +7,14 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
         BitvmxInstance {
             id: 1,
             txs: vec![
-                TransactionStatus {
+                TransactionStore {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115be1",
                     )
                     .unwrap(),
                     tx: None,
                 },
-                TransactionStatus {
+                TransactionStore {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bea",
                     )
@@ -27,14 +27,14 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
         BitvmxInstance {
             id: 2,
             txs: vec![
-                TransactionStatus {
+                TransactionStore {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bed",
                     )
                     .unwrap(),
                     tx: None,
                 },
-                TransactionStatus {
+                TransactionStore {
                     tx_id: Txid::from_str(
                         "8904aba41b91cc59eea5f5767bf8fbd5f8d861629885267379cae615c8115bec",
                     )
@@ -47,14 +47,14 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
         BitvmxInstance {
             id: 3,
             txs: vec![
-                TransactionStatus {
+                TransactionStore {
                     tx_id: Txid::from_str(
                         "3c2d0b8d3052af2423f7c93450473aeacfb47e7aa3f0b0ae63f3e240a15496b1",
                     )
                     .unwrap(),
                     tx: None,
                 },
-                TransactionStatus {
+                TransactionStore {
                     tx_id: Txid::from_str(
                         "3c2d0b8d3052af2423f7c93450473aeacfb47e7aa3f0b0ae63f3e240a15496b2",
                     )

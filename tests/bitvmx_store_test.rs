@@ -1,7 +1,7 @@
 use bitcoin::{absolute::LockTime, Transaction, Txid};
 use bitvmx_transaction_monitor::{
     bitvmx_store::{BitvmxApi, BitvmxStore},
-    types::{BitvmxInstance, TransactionStatus},
+    types::{BitvmxInstance, TransactionStore},
 };
 use std::str::FromStr;
 
@@ -15,11 +15,11 @@ fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
     let instances = vec![BitvmxInstance {
         id: 2,
         txs: vec![
-            TransactionStatus {
+            TransactionStore {
                 tx_id: txid,
                 tx: None,
             },
-            TransactionStatus {
+            TransactionStore {
                 tx_id: txid2,
                 tx: None,
             },
@@ -40,11 +40,11 @@ fn get_mock_bitvmx_instances_no_started() -> Vec<BitvmxInstance> {
     let instances = vec![BitvmxInstance {
         id: 3,
         txs: vec![
-            TransactionStatus {
+            TransactionStore {
                 tx_id: txid,
                 tx: None,
             },
-            TransactionStatus {
+            TransactionStore {
                 tx_id: txid2,
                 tx: None,
             },
@@ -98,7 +98,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
 
     let instances = vec![BitvmxInstance {
         id: 2,
-        txs: vec![TransactionStatus {
+        txs: vec![TransactionStore {
             tx_id: tx_id,
             tx: None,
         }],
@@ -145,7 +145,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     // Add a new instance with one tx
     let instances = vec![BitvmxInstance {
         id: 2,
-        txs: vec![TransactionStatus {
+        txs: vec![TransactionStore {
             tx_id: tx.compute_txid(),
             tx: None,
             // block_info: Some(BlockInfo {
@@ -238,11 +238,11 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
         BitvmxInstance {
             id: 1,
             txs: vec![
-                TransactionStatus {
+                TransactionStore {
                     tx_id: tx_1.compute_txid(),
                     tx: None,
                 },
-                TransactionStatus {
+                TransactionStore {
                     tx_id: tx_3.compute_txid(),
                     tx: None,
                 },
@@ -251,7 +251,7 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
         },
         BitvmxInstance {
             id: 2,
-            txs: vec![TransactionStatus {
+            txs: vec![TransactionStore {
                 tx_id: tx_2.compute_txid(),
                 tx: None,
             }],
@@ -314,11 +314,11 @@ fn remove_instance() -> Result<(), anyhow::Error> {
     let instances = vec![BitvmxInstance {
         id: 1,
         txs: vec![
-            TransactionStatus {
+            TransactionStore {
                 tx_id: tx_id_1,
                 tx: None,
             },
-            TransactionStatus {
+            TransactionStore {
                 tx_id: tx_id_2,
                 tx: None,
             },

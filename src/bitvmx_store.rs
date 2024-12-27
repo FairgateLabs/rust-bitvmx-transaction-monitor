@@ -1,4 +1,4 @@
-use crate::types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStatus};
+use crate::types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore};
 use anyhow::{bail, Context, Ok, Result};
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
 use bitcoin_indexer::types::BlockHeight;
@@ -34,10 +34,9 @@ pub trait BitvmxApi {
     fn save_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
     fn remove_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
 
+    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()>;
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
-
-    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()>;
 
     //Address Methods
     fn get_addresses(&self) -> Result<Vec<Address>>;
@@ -49,6 +48,7 @@ pub trait BitvmxApi {
         block_height: BlockHeight,
         block_hash: BlockHash,
         orphan: bool,
+        confirmations: u32,
     ) -> Result<()>;
     fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
     fn acknowledge_address_news(&self, address: Address) -> Result<()>;
@@ -93,7 +93,7 @@ impl BitvmxStore {
     fn save_instance_tx(
         &self,
         instance_id: InstanceId,
-        tx_status: &TransactionStatus,
+        tx_status: &TransactionStore,
     ) -> Result<()> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
         let instance = self
@@ -297,7 +297,7 @@ impl BitvmxApi for BitvmxStore {
     }
 
     fn save_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
-        let tx_data = TransactionStatus {
+        let tx_data = TransactionStore {
             tx_id: *tx_id,
             tx: None,
         };
@@ -334,6 +334,7 @@ impl BitvmxApi for BitvmxStore {
         block_height: BlockHeight,
         block_hash: BlockHash,
         orphan: bool,
+        confirmations: u32,
     ) -> Result<()> {
         let address_key = self.get_address_key(AddressKey::Address(address.clone()));
 
@@ -352,6 +353,7 @@ impl BitvmxApi for BitvmxStore {
         address_status.push(AddressStatus {
             tx: Some(tx.clone()),
             block_info,
+            confirmations,
         });
 
         self.store

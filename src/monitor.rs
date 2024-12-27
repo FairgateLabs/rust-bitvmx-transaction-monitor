@@ -1,7 +1,7 @@
 use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
 use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
-    TxStatusResponse,
+    TransactionStore,
 };
 use anyhow::{Context, Result};
 use bitcoin::{Address, Network, Transaction, Txid};
@@ -71,26 +71,27 @@ pub trait MonitorApi {
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
 
     fn save_address_for_tracking(&self, address: Address) -> Result<()>;
-    /// Notifies about changes in the status of every transaction (tx) that belongs
-    /// to a BitVMX instance.
+
+    /// Notifies about changes in the status of every transaction that belongs to a BitVMX instance.
     ///
     /// # Returns
     /// - `Ok(Vec<(InstanceId, TxStatus>)>`: A vector of tuples where each tuple contains:
     ///   - `InstanceId`: The Bitvmx instance id
-    ///   - `TxStatus`: The current status of the transaction.
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
+    ///   - `TransactionStatus`: The current status of the transaction.
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>>;
 
     /// Acknowledges or marks an instance id and tx processed, effectively
-    /// removing it from the list of pending changes.
+    /// removing it from the list of news
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
     fn get_instance_tx_status(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-    ) -> Result<Option<TxStatusResponse>>;
+    ) -> Result<Option<TransactionStatus>>;
 
     fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
+
     fn acknowledge_address_news(&self, address: Address) -> Result<()>;
 
     fn get_confirmation_threshold(&self) -> u32;
@@ -112,7 +113,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
                 let txs = instance_data
                     .txs
                     .into_iter()
-                    .map(|tx_id| TransactionStatus { tx_id, tx: None })
+                    .map(|tx_id| TransactionStore { tx_id, tx: None })
                     .collect();
                 BitvmxInstance {
                     id: instance_data.instance_id,
@@ -136,7 +137,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         self.get_instances_for_tracking()
     }
 
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>> {
         self.get_instance_news()
     }
 
@@ -148,7 +149,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-    ) -> Result<Option<TxStatusResponse>> {
+    ) -> Result<Option<TransactionStatus>> {
         self.get_instance_tx_status(instance_id, tx_id)
     }
 
@@ -289,6 +290,8 @@ where
                 let matched_with_the_address = self.address_exist_in_output(address.clone(), tx);
 
                 if matched_with_the_address {
+                    let confirmations = self.current_height - full_block.height + 1;
+
                     self.bitvmx_store
                         .update_address_news(
                             address.clone(),
@@ -296,6 +299,7 @@ where
                             full_block.height,
                             full_block.hash,
                             full_block.orphan,
+                            confirmations,
                         )
                         .context(format!(
                             "Failed to save transaction for address {}",
@@ -325,10 +329,27 @@ where
         false
     }
 
-    pub fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+    pub fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>> {
         let instances = self.bitvmx_store.get_instance_news()?;
 
-        Ok(instances)
+        let mut news = Vec::new();
+
+        for (instance_id, txs) in instances {
+            let mut tx_responses = Vec::new();
+
+            for tx_id in txs {
+                if let Ok(Some(status)) = self.get_instance_tx_status(instance_id, &tx_id) {
+                    tx_responses.push(status);
+                } else {
+                    anyhow::bail!("Failed to get transaction status");
+                }
+            }
+
+            if !tx_responses.is_empty() {
+                news.push((instance_id, tx_responses));
+            }
+        }
+        Ok(news)
     }
 
     pub fn acknowledge_instance_tx_news(
@@ -345,13 +366,13 @@ where
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
-    ) -> Result<Option<TxStatusResponse>> {
+    ) -> Result<Option<TransactionStatus>> {
         let tx_status = self.indexer.get_tx(tx_id).context(format!(
             "Failed to get transaction status for tx_id {} in instance {}",
             tx_id, instance_id
         ))?;
 
-        let tx_status_response = tx_status.map(|tx_status| TxStatusResponse {
+        let tx_status_response = tx_status.map(|tx_status| TransactionStatus {
             tx_id: tx_status.tx.compute_txid(),
             tx: Some(tx_status.tx),
             block_info: Some(BlockInfo {

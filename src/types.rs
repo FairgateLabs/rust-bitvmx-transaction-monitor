@@ -2,7 +2,7 @@ use bitcoin::{BlockHash, Transaction, Txid};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TransactionStatus {
+pub struct TransactionStore {
     pub tx_id: Txid,
     pub tx: Option<Transaction>,
 }
@@ -12,17 +12,18 @@ pub struct TransactionStatus {
 pub struct AddressStatus {
     pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
+    pub confirmations: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TxStatusResponse {
+pub struct TransactionStatus {
     pub tx_id: Txid,
     pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
     pub confirmations: u32,
 }
 
-impl TxStatusResponse {
+impl TransactionStatus {
     pub fn is_confirmed(&self) -> bool {
         self.block_info.is_some() && self.confirmations > 0
     }
@@ -58,7 +59,7 @@ pub struct BitvmxInstance {
     pub id: InstanceId,
 
     //bitvmx linked transactions data + speed up transactions data
-    pub txs: Vec<TransactionStatus>,
+    pub txs: Vec<TransactionStore>,
 
     //First height to start searching the bitvmx instance in the blockchain
     pub start_height: BlockHeight,

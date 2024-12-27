@@ -89,7 +89,7 @@ fn address_test() -> Result<(), anyhow::Error> {
     let block_hash = bitcoin::BlockHash::from_str(
         "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
     )?;
-    bitvmx_store.update_address_news(address_1.clone(), &tx, 100, block_hash, false)?;
+    bitvmx_store.update_address_news(address_1.clone(), &tx, 100, block_hash, false, 101)?;
     let news = bitvmx_store.get_address_news()?;
     println!("News: {:?}", news);
     assert_eq!(news[0].0, address_1.clone());
@@ -101,11 +101,12 @@ fn address_test() -> Result<(), anyhow::Error> {
             block_hash,
             is_orphan: false,
         }),
+        confirmations: 101,
     };
 
     assert_eq!(news[0].1, vec![address_status]);
 
-    bitvmx_store.update_address_news(address_2.clone(), &tx, 100, block_hash, false)?;
+    bitvmx_store.update_address_news(address_2.clone(), &tx, 100, block_hash, false, 101)?;
     let news = bitvmx_store.get_address_news()?;
     assert_eq!(news[0].0, address_1.clone());
     assert_eq!(news[1].0, address_2.clone());
