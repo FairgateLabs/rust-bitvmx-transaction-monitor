@@ -147,20 +147,15 @@ pub trait MonitorApi {
     /// - `Err`: If there was an error processing the acknowledgment.
     fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()>;
 
-    /// Gets the current status of a specific transaction for an instance.
+    /// Gets the current status of a specific transaction.
     ///
     /// # Arguments
-    /// * `instance_id` - ID of the instance the transaction belongs to
     /// * `tx_id` - Transaction ID to check
     ///
     /// # Returns
     /// - `Ok(Option<TransactionStatus>)`: The transaction's status if found.
     /// - `Err`: If there was an error retrieving the status.
-    fn get_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<Option<TransactionStatus>>;
+    fn get_instance_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>>;
 
     /// Gets status updates for monitored addresses.
     ///
@@ -236,12 +231,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         self.acknowledge_instance_tx_news(instance_id, tx_id)
     }
 
-    fn get_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<Option<TransactionStatus>> {
-        self.get_instance_tx_status(instance_id, tx_id)
+    fn get_instance_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>> {
+        self.get_instance_tx_status(tx_id)
     }
 
     fn is_ready(&mut self) -> Result<bool> {
@@ -429,7 +420,7 @@ where
             let mut tx_responses = Vec::new();
 
             for tx_id in txs {
-                if let Ok(Some(status)) = self.get_instance_tx_status(instance_id, &tx_id) {
+                if let Ok(Some(status)) = self.get_instance_tx_status(&tx_id) {
                     tx_responses.push(status);
                 } else {
                     anyhow::bail!("Failed to get transaction status");
@@ -453,14 +444,10 @@ where
         Ok(())
     }
 
-    pub fn get_instance_tx_status(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<Option<TransactionStatus>> {
+    pub fn get_instance_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>> {
         let tx_status = self.indexer.get_tx(tx_id).context(format!(
-            "Failed to get transaction status for tx_id {} in instance {}",
-            tx_id, instance_id
+            "Failed to get transaction status for tx_id {}",
+            tx_id
         ))?;
 
         let tx_status_response = tx_status.map(|tx_status| TransactionStatus {
