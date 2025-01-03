@@ -116,7 +116,7 @@ impl BitvmxStore {
                 } else {
                     _instance.txs.push(tx_status.clone());
                 }
-                self.store.set(instance_key, _instance)?;
+                self.store.set(instance_key, _instance, None)?;
             }
             None => bail!(
                 "There was an error trying to save instance {}",
@@ -242,7 +242,7 @@ impl BitvmxApi for BitvmxStore {
                 instances_news.remove(index);
             }
 
-            self.store.set(&instance_news_key, &instances_news)?;
+            self.store.set(&instance_news_key, &instances_news, None)?;
         } else {
             // If the instance is not found in the news, we can either ignore it or log a warning
             warn!("No news found for instance {}", instance_id);
@@ -273,7 +273,7 @@ impl BitvmxApi for BitvmxStore {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance.id));
 
         // Store the instance under its ID
-        self.store.set(&instance_key, instance).context(format!(
+        self.store.set(&instance_key, instance, None).context(format!(
             "Failed to store instance under key {}",
             instance_key
         ))?;
@@ -289,7 +289,7 @@ impl BitvmxApi for BitvmxStore {
         if !all_instances.contains(&instance.id) {
             all_instances.push(instance.id);
             self.store
-                .set(instances_key, &all_instances)
+                .set(instances_key, &all_instances, None)
                 .context("Failed to update instances list")?;
         }
 
@@ -320,7 +320,7 @@ impl BitvmxApi for BitvmxStore {
             addresses.push(address.as_unchecked().clone());
 
             self.store
-                .set(&address_list_key, &addresses)
+                .set(&address_list_key, &addresses, None)
                 .context("Failed to update address list")?;
         }
 
@@ -357,7 +357,7 @@ impl BitvmxApi for BitvmxStore {
         });
 
         self.store
-            .set(&address_key, address_status)
+            .set(&address_key, address_status, None)
             .context("Failed to update address list")?;
 
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
@@ -370,7 +370,7 @@ impl BitvmxApi for BitvmxStore {
         if !addresses.iter().any(|a| a == address.as_unchecked()) {
             addresses.push(address.as_unchecked().clone());
             self.store
-                .set(&address_news_key, &addresses)
+                .set(&address_news_key, &addresses, None)
                 .context("Failed to update address news")?;
         }
 
@@ -415,7 +415,7 @@ impl BitvmxApi for BitvmxStore {
             instance_news.push((instance_id, vec![txid]));
         }
 
-        self.store.set(&instance_news_key, &instance_news)?;
+        self.store.set(&instance_news_key, &instance_news, None)?;
 
         Ok(())
     }
@@ -434,7 +434,7 @@ impl BitvmxApi for BitvmxStore {
 
         if let Some(pos) = address_checked.iter().position(|a| a == &address) {
             address_news.remove(pos);
-            self.store.set(&address_news_key, &address_news)?;
+            self.store.set(&address_news_key, &address_news, None)?;
         }
 
         Ok(())
