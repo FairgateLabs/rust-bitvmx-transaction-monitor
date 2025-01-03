@@ -27,11 +27,11 @@ jobs:
 
     - name: Clone Bitcoin Indexer
       run: |        
-        git clone https://github.com/FairgateLabs/rust-bitcoin-indexer.git
+        git clone https://github.com/FairgateLabs/rust-bitcoin-indexer.git ../rust-bitcoin-indexer
     
     - name: Clone Storage Backend
       run: |        
-        git clone --branch integration https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git
+        git clone https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git ../rust-bitvmx-storage-backend
 
     - name: Build project
       run: cargo build --verbose
