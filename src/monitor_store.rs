@@ -6,7 +6,7 @@ use mockall::automock;
 use std::path::PathBuf;
 use storage_backend::storage::{KeyValueStore, Storage};
 
-pub struct BitvmxStore {
+pub struct MonitorStore {
     store: Storage,
 }
 enum InstanceKey {
@@ -20,7 +20,7 @@ enum AddressKey {
     AddressNews,
 }
 
-pub trait BitvmxApi {
+pub trait MonitorStoreApi {
     fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
 
     fn get_instances_ready_to_track(
@@ -53,7 +53,7 @@ pub trait BitvmxApi {
     fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorStoreError>;
 }
 
-impl BitvmxStore {
+impl MonitorStore {
     fn get_instance_key(&self, key: InstanceKey) -> String {
         match key {
             InstanceKey::Instance(instance_id) => format!("instance/{}", instance_id),
@@ -174,7 +174,7 @@ impl BitvmxStore {
 }
 
 #[automock]
-impl BitvmxApi for BitvmxStore {
+impl MonitorStoreApi for MonitorStore {
     fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
         self.get_instances()
     }

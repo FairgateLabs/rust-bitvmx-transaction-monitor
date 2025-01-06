@@ -8,7 +8,7 @@ use bitcoin::{
 };
 use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_transaction_monitor::{
-    bitvmx_store::{BitvmxApi, BitvmxStore, MockBitvmxStore},
+    monitor_store::{MonitorStoreApi, MonitorStore, MockMonitorStore},
     monitor::Monitor,
     types::{AddressStatus, BlockInfo},
 };
@@ -37,7 +37,7 @@ fn detect_address_in_tx() -> Result<(), anyhow::Error> {
     };
 
     let mock_indexer = MockIndexerApi::new();
-    let mock_bitvmx_store = MockBitvmxStore::new();
+    let mock_bitvmx_store = MockMonitorStore::new();
     let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, None, 6);
     let matched = monitor.address_exist_in_output(to_clone, &unsigned_tx);
 
@@ -58,7 +58,7 @@ fn get_address() -> Address {
 #[test]
 fn address_test() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/address_test/{}", generate_random_string());
-    let bitvmx_store = BitvmxStore::new_with_path(&path)?;
+    let bitvmx_store = MonitorStore::new_with_path(&path)?;
     // Create two instances with one transaction each
     let address_1 = Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")?.assume_checked();
     let address_2 =

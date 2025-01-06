@@ -1,4 +1,4 @@
-use crate::bitvmx_store::{BitvmxApi, BitvmxStore};
+use crate::monitor_store::{MonitorStoreApi, MonitorStore};
 use crate::errors::MonitorError;
 use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
@@ -18,7 +18,7 @@ use mockall::automock;
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
-    B: BitvmxApi,
+    B: MonitorStoreApi,
 {
     pub indexer: I,
     pub bitvmx_store: B,
@@ -26,7 +26,7 @@ where
     confirmation_threshold: u32,
 }
 
-impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
+impl Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
     pub fn new_with_paths(
         node_rpc_url: &str,
         db_file_path: &str,
@@ -37,7 +37,7 @@ impl Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer = Indexer::new_with_path(bitcoin_client, db_file_path)?;
         let best_block = indexer.get_best_block()?;
-        let bitvmx_store = BitvmxStore::new_with_path(db_file_path)?;
+        let bitvmx_store = MonitorStore::new_with_path(db_file_path)?;
         let current_height =
             define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
         let monitor = Monitor::new(
@@ -183,7 +183,7 @@ pub trait MonitorApi {
     fn get_confirmation_threshold(&self) -> u32;
 }
 
-impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
+impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
     fn tick(&mut self) -> Result<(), MonitorError> {
         self.tick()
     }
@@ -265,7 +265,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, BitvmxStore> {
 impl<I, B> Monitor<I, B>
 where
     I: IndexerApi,
-    B: BitvmxApi,
+    B: MonitorStoreApi,
 {
     pub fn new(
         indexer: I,

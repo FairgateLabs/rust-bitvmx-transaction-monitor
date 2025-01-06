@@ -4,7 +4,7 @@ use bitcoin_indexer::{
     types::{FullBlock, TransactionInfo},
 };
 use bitvmx_transaction_monitor::{
-    bitvmx_store::MockBitvmxStore,
+    monitor_store::MockMonitorStore,
     monitor::Monitor,
     types::{BitvmxInstance, TransactionStore},
 };
@@ -14,7 +14,7 @@ use std::str::FromStr;
 #[test]
 fn no_instances() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let mut mock_bitvmx_store = MockBitvmxStore::new();
+    let mut mock_bitvmx_store = MockMonitorStore::new();
 
     let best_block_100 = FullBlock {
         height: 100,
@@ -66,7 +66,7 @@ fn no_instances() -> Result<(), anyhow::Error> {
 #[test]
 fn instance_tx_detected() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let mut mock_bitvmx_store = MockBitvmxStore::new();
+    let mut mock_bitvmx_store = MockMonitorStore::new();
 
     let block_200 = FullBlock {
         height: 200,
@@ -181,7 +181,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 #[test]
 fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let mut mock_bitvmx_store = MockBitvmxStore::new();
+    let mut mock_bitvmx_store = MockMonitorStore::new();
 
     let block_200 = FullBlock {
         height: 200,
