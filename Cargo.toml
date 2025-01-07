@@ -22,6 +22,7 @@ env_logger = { version = "*", default-features = false, features = [
 ] }
 dotenv = "0.15"
 anyhow = "1.0.86"
+thiserror = "1.0.63"
 clap = { version = "4.5.9", features = ["derive"] }
 mockall = "0.13.0"
 postgres = "0.19.1"

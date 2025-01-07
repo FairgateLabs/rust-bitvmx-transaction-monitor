@@ -1,5 +1,4 @@
-use crate::types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore};
-use anyhow::{bail, Context, Ok, Result};
+use crate::{errors::MonitorStoreError, types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore}};
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
 use bitcoin_indexer::types::BlockHeight;
 use log::warn;
@@ -7,7 +6,7 @@ use mockall::automock;
 use std::path::PathBuf;
 use storage_backend::storage::{KeyValueStore, Storage};
 
-pub struct BitvmxStore {
+pub struct MonitorStore {
     store: Storage,
 }
 enum InstanceKey {
@@ -21,26 +20,26 @@ enum AddressKey {
     AddressNews,
 }
 
-pub trait BitvmxApi {
-    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>>;
+pub trait MonitorStoreApi {
+    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
 
     fn get_instances_ready_to_track(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<BitvmxInstance>>;
+    ) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
 
-    fn save_instance(&self, instance: &BitvmxInstance) -> Result<()>;
-    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()>;
-    fn save_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
-    fn remove_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
+    fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
+    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError>;
+    fn save_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), MonitorStoreError>;
+    fn remove_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), MonitorStoreError>;
 
-    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()>;
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>>;
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: &Txid) -> Result<()>;
+    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<(), MonitorStoreError>;
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError>;
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), MonitorStoreError>;
 
     //Address Methods
-    fn get_addresses(&self) -> Result<Vec<Address>>;
-    fn save_address(&self, address: Address) -> Result<()>;
+    fn get_addresses(&self) -> Result<Vec<Address>, MonitorStoreError>;
+    fn save_address(&self, address: Address) -> Result<(), MonitorStoreError>;
     fn update_address_news(
         &self,
         address: Address,
@@ -49,12 +48,12 @@ pub trait BitvmxApi {
         block_hash: BlockHash,
         orphan: bool,
         confirmations: u32,
-    ) -> Result<()>;
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>>;
-    fn acknowledge_address_news(&self, address: Address) -> Result<()>;
+    ) -> Result<(), MonitorStoreError>;
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorStoreError>;
+    fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorStoreError>;
 }
 
-impl BitvmxStore {
+impl MonitorStore {
     fn get_instance_key(&self, key: InstanceKey) -> String {
         match key {
             InstanceKey::Instance(instance_id) => format!("instance/{}", instance_id),
@@ -71,21 +70,16 @@ impl BitvmxStore {
         }
     }
 
-    pub fn new_with_path(store_path: &str) -> Result<Self> {
+    pub fn new_with_path(store_path: &str) -> Result<Self, MonitorStoreError> {
         let store = Storage::new_with_path(&PathBuf::from(format!("{}/monitor", store_path)))?;
         Ok(Self { store })
     }
 
-    fn get_instance(&self, instance_id: InstanceId) -> Result<Option<BitvmxInstance>> {
+    fn get_instance(&self, instance_id: InstanceId) -> Result<Option<BitvmxInstance>, MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
         let instance = self
             .store
-            .get::<&str, BitvmxInstance>(&instance_key)
-            .context(format!(
-                "There was an error getting an instance {}",
-                instance_key
-            ))
-            .unwrap();
+            .get::<&str, BitvmxInstance>(&instance_key)?;
 
         Ok(instance)
     }
@@ -94,13 +88,11 @@ impl BitvmxStore {
         &self,
         instance_id: InstanceId,
         tx_status: &TransactionStore,
-    ) -> Result<()> {
+    ) -> Result<(), MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
         let instance = self
             .store
-            .get::<&str, BitvmxInstance>(&instance_key)
-            .context(format!("There was an error getting {}", instance_key))
-            .unwrap();
+            .get::<&str, BitvmxInstance>(&instance_key)?;
 
         match instance {
             Some(mut _instance) =>
@@ -118,16 +110,13 @@ impl BitvmxStore {
                 }
                 self.store.set(instance_key, _instance, None)?;
             }
-            None => bail!(
-                "There was an error trying to save instance {}",
-                instance_key
-            ),
+            None => return Err(MonitorStoreError::UnexpectedError(format!("There was an error trying to save instance {}", instance_key))),
         }
 
         Ok(())
     }
 
-    fn remove_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+    fn remove_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         // Retrieve the instance using the instance_id
         let instance = self.get_instance(instance_id)?;
 
@@ -145,20 +134,24 @@ impl BitvmxStore {
                     // Update the instance in the store after removal
                     self.save_instance(&_instance)?;
                 } else {
-                    bail!(
+                    return Err(MonitorStoreError::UnexpectedError(format!(
                         "Transaction with id {} not found in instance {}",
-                        tx_id,
-                        instance_id
-                    );
+                        tx_id, instance_id
+                    )));
                 }
             }
-            None => bail!("Instance not found: {}", instance_id),
+            None => {
+                return Err(MonitorStoreError::UnexpectedError(format!(
+                    "Instance {} not found",
+                    instance_id
+                )));
+            }
         }
 
         Ok(())
     }
 
-    fn get_instances(&self) -> Result<Vec<BitvmxInstance>> {
+    fn get_instances(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
         let mut instances = Vec::<BitvmxInstance>::new();
 
         let instances_key = self.get_instance_key(InstanceKey::InstanceList);
@@ -172,7 +165,7 @@ impl BitvmxStore {
 
             match instance {
                 Some(inst) => instances.push(inst),
-                None => bail!("There is an error trying to get instance"),
+                None => return Err(MonitorStoreError::UnexpectedError("There is an error trying to get instance".to_string())),
             }
         }
 
@@ -181,12 +174,12 @@ impl BitvmxStore {
 }
 
 #[automock]
-impl BitvmxApi for BitvmxStore {
-    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>> {
+impl MonitorStoreApi for MonitorStore {
+    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
         self.get_instances()
     }
 
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>> {
+    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let instance_news = self
             .store
@@ -199,12 +192,11 @@ impl BitvmxApi for BitvmxStore {
         }
     }
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>> {
+    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorStoreError> {
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
         let address_news = self
             .store
-            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)
-            .unwrap_or(None)
+            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)?
             .unwrap_or_else(Vec::new);
 
         let mut address_txs = Vec::new();
@@ -214,9 +206,7 @@ impl BitvmxApi for BitvmxStore {
 
             let address_status = self
                 .store
-                .get::<&str, Vec<AddressStatus>>(&address_news_key)
-                .context(format!("There was an error getting {}", address_news_key))
-                .unwrap_or(None)
+                .get::<&str, Vec<AddressStatus>>(&address_news_key)?
                 .unwrap_or_else(Vec::new);
 
             address_txs.push((address.assume_checked(), address_status));
@@ -225,7 +215,7 @@ impl BitvmxApi for BitvmxStore {
         Ok(address_txs)
     }
 
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
 
         let mut instances_news = self
@@ -254,7 +244,7 @@ impl BitvmxApi for BitvmxStore {
     fn get_instances_ready_to_track(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<BitvmxInstance>> {
+    ) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
         // This method will return bitvmx instances excluding the onces are not ready to track
         let mut bitvmx_instances = self.get_instances()?;
         bitvmx_instances.retain(|i| (i.start_height <= current_height));
@@ -262,21 +252,18 @@ impl BitvmxApi for BitvmxStore {
         Ok(bitvmx_instances)
     }
 
-    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<()> {
+    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError> {
         for instance in instances {
             self.save_instance(instance)?;
         }
         Ok(())
     }
 
-    fn save_instance(&self, instance: &BitvmxInstance) -> Result<()> {
+    fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance.id));
 
         // Store the instance under its ID
-        self.store.set(&instance_key, instance, None).context(format!(
-            "Failed to store instance under key {}",
-            instance_key
-        ))?;
+        self.store.set(&instance_key, instance, None)?;
 
         // Maintain a list of all instances
         let instances_key = self.get_instance_key(InstanceKey::InstanceList);
@@ -289,14 +276,13 @@ impl BitvmxApi for BitvmxStore {
         if !all_instances.contains(&instance.id) {
             all_instances.push(instance.id);
             self.store
-                .set(instances_key, &all_instances, None)
-                .context("Failed to update instances list")?;
+                .set(instances_key, &all_instances, None)?;
         }
 
         Ok(())
     }
 
-    fn save_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+    fn save_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         let tx_data = TransactionStore {
             tx_id: *tx_id,
             tx: None,
@@ -307,21 +293,18 @@ impl BitvmxApi for BitvmxStore {
         Ok(())
     }
 
-    fn save_address(&self, address: Address) -> Result<()> {
+    fn save_address(&self, address: Address) -> Result<(), MonitorStoreError> {
         let address_list_key = self.get_address_key(AddressKey::AddressList);
         let mut addresses = self
             .store
-            .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)
-            .context(format!("There was an error getting {}", address_list_key))
-            .unwrap_or(None)
+            .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)?
             .unwrap_or_else(Vec::new);
 
         if !addresses.iter().any(|a| a == address.as_unchecked()) {
             addresses.push(address.as_unchecked().clone());
 
             self.store
-                .set(&address_list_key, &addresses, None)
-                .context("Failed to update address list")?;
+                .set(&address_list_key, &addresses, None)?;
         }
 
         Ok(())
@@ -335,13 +318,12 @@ impl BitvmxApi for BitvmxStore {
         block_hash: BlockHash,
         orphan: bool,
         confirmations: u32,
-    ) -> Result<()> {
+    ) -> Result<(), MonitorStoreError> {
         let address_key = self.get_address_key(AddressKey::Address(address.clone()));
 
         let mut address_status = self
             .store
-            .get::<&str, Vec<AddressStatus>>(&address_key)
-            .context("There was an error getting address status")?
+            .get::<&str, Vec<AddressStatus>>(&address_key)?
             .unwrap_or_else(Vec::new);
 
         let block_info = Some(BlockInfo {
@@ -357,8 +339,7 @@ impl BitvmxApi for BitvmxStore {
         });
 
         self.store
-            .set(&address_key, address_status, None)
-            .context("Failed to update address list")?;
+            .set(&address_key, address_status, None)?;
 
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
         let mut addresses = self
@@ -370,19 +351,17 @@ impl BitvmxApi for BitvmxStore {
         if !addresses.iter().any(|a| a == address.as_unchecked()) {
             addresses.push(address.as_unchecked().clone());
             self.store
-                .set(&address_news_key, &addresses, None)
-                .context("Failed to update address news")?;
+                .set(&address_news_key, &addresses, None)?;
         }
 
         Ok(())
     }
 
-    fn get_addresses(&self) -> Result<Vec<Address>> {
+    fn get_addresses(&self) -> Result<Vec<Address>, MonitorStoreError> {
         let address_list_key = self.get_address_key(AddressKey::AddressList);
         let addresses = self
             .store
-            .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)
-            .context(format!("There was an error getting {}", address_list_key))?
+            .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)?
             .unwrap_or_else(Vec::new);
 
         let addreses_checked: Vec<Address> = addresses
@@ -393,11 +372,11 @@ impl BitvmxApi for BitvmxStore {
         Ok(addreses_checked)
     }
 
-    fn remove_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<()> {
+    fn remove_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         self.remove_instance_tx(instance_id, tx_id)
     }
 
-    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<()> {
+    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let mut instance_news = self
             .store
@@ -420,7 +399,7 @@ impl BitvmxApi for BitvmxStore {
         Ok(())
     }
 
-    fn acknowledge_address_news(&self, address: Address) -> Result<()> {
+    fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorStoreError> {
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
         let mut address_news = self
             .store
