@@ -1,4 +1,7 @@
-use crate::{errors::MonitorStoreError, types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore}};
+use crate::{
+    errors::MonitorStoreError,
+    types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore},
+};
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
 use bitcoin_indexer::types::BlockHeight;
 use log::warn;
@@ -30,12 +33,25 @@ pub trait MonitorStoreApi {
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
     fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError>;
-    fn save_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), MonitorStoreError>;
-    fn remove_transaction(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), MonitorStoreError>;
+    fn save_transaction(&self, instance_id: InstanceId, tx: &Txid)
+        -> Result<(), MonitorStoreError>;
+    fn remove_transaction(
+        &self,
+        instance_id: InstanceId,
+        tx: &Txid,
+    ) -> Result<(), MonitorStoreError>;
 
-    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<(), MonitorStoreError>;
+    fn update_instance_news(
+        &self,
+        instance_id: InstanceId,
+        txid: Txid,
+    ) -> Result<(), MonitorStoreError>;
     fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError>;
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx: &Txid) -> Result<(), MonitorStoreError>;
+    fn acknowledge_instance_tx_news(
+        &self,
+        instance_id: InstanceId,
+        tx: &Txid,
+    ) -> Result<(), MonitorStoreError>;
 
     //Address Methods
     fn get_addresses(&self) -> Result<Vec<Address>, MonitorStoreError>;
@@ -75,11 +91,12 @@ impl MonitorStore {
         Ok(Self { store })
     }
 
-    fn get_instance(&self, instance_id: InstanceId) -> Result<Option<BitvmxInstance>, MonitorStoreError> {
+    fn get_instance(
+        &self,
+        instance_id: InstanceId,
+    ) -> Result<Option<BitvmxInstance>, MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
-        let instance = self
-            .store
-            .get::<&str, BitvmxInstance>(&instance_key)?;
+        let instance = self.store.get::<&str, BitvmxInstance>(&instance_key)?;
 
         Ok(instance)
     }
@@ -90,9 +107,7 @@ impl MonitorStore {
         tx_status: &TransactionStore,
     ) -> Result<(), MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
-        let instance = self
-            .store
-            .get::<&str, BitvmxInstance>(&instance_key)?;
+        let instance = self.store.get::<&str, BitvmxInstance>(&instance_key)?;
 
         match instance {
             Some(mut _instance) =>
@@ -110,13 +125,22 @@ impl MonitorStore {
                 }
                 self.store.set(instance_key, _instance, None)?;
             }
-            None => return Err(MonitorStoreError::UnexpectedError(format!("There was an error trying to save instance {}", instance_key))),
+            None => {
+                return Err(MonitorStoreError::UnexpectedError(format!(
+                    "There was an error trying to save instance {}",
+                    instance_key
+                )))
+            }
         }
 
         Ok(())
     }
 
-    fn remove_instance_tx(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
+    fn remove_instance_tx(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), MonitorStoreError> {
         // Retrieve the instance using the instance_id
         let instance = self.get_instance(instance_id)?;
 
@@ -165,7 +189,11 @@ impl MonitorStore {
 
             match instance {
                 Some(inst) => instances.push(inst),
-                None => return Err(MonitorStoreError::UnexpectedError("There is an error trying to get instance".to_string())),
+                None => {
+                    return Err(MonitorStoreError::UnexpectedError(
+                        "There is an error trying to get instance".to_string(),
+                    ))
+                }
             }
         }
 
@@ -215,7 +243,11 @@ impl MonitorStoreApi for MonitorStore {
         Ok(address_txs)
     }
 
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
+    fn acknowledge_instance_tx_news(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
 
         let mut instances_news = self
@@ -275,14 +307,17 @@ impl MonitorStoreApi for MonitorStore {
 
         if !all_instances.contains(&instance.id) {
             all_instances.push(instance.id);
-            self.store
-                .set(instances_key, &all_instances, None)?;
+            self.store.set(instances_key, &all_instances, None)?;
         }
 
         Ok(())
     }
 
-    fn save_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
+    fn save_transaction(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), MonitorStoreError> {
         let tx_data = TransactionStore {
             tx_id: *tx_id,
             tx: None,
@@ -303,8 +338,7 @@ impl MonitorStoreApi for MonitorStore {
         if !addresses.iter().any(|a| a == address.as_unchecked()) {
             addresses.push(address.as_unchecked().clone());
 
-            self.store
-                .set(&address_list_key, &addresses, None)?;
+            self.store.set(&address_list_key, &addresses, None)?;
         }
 
         Ok(())
@@ -338,8 +372,7 @@ impl MonitorStoreApi for MonitorStore {
             confirmations,
         });
 
-        self.store
-            .set(&address_key, address_status, None)?;
+        self.store.set(&address_key, address_status, None)?;
 
         let address_news_key = self.get_address_key(AddressKey::AddressNews);
         let mut addresses = self
@@ -350,8 +383,7 @@ impl MonitorStoreApi for MonitorStore {
 
         if !addresses.iter().any(|a| a == address.as_unchecked()) {
             addresses.push(address.as_unchecked().clone());
-            self.store
-                .set(&address_news_key, &addresses, None)?;
+            self.store.set(&address_news_key, &addresses, None)?;
         }
 
         Ok(())
@@ -372,11 +404,19 @@ impl MonitorStoreApi for MonitorStore {
         Ok(addreses_checked)
     }
 
-    fn remove_transaction(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorStoreError> {
+    fn remove_transaction(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), MonitorStoreError> {
         self.remove_instance_tx(instance_id, tx_id)
     }
 
-    fn update_instance_news(&self, instance_id: InstanceId, txid: Txid) -> Result<(), MonitorStoreError> {
+    fn update_instance_news(
+        &self,
+        instance_id: InstanceId,
+        txid: Txid,
+    ) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let mut instance_news = self
             .store

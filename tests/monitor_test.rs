@@ -4,8 +4,8 @@ use bitcoin_indexer::{
     types::{FullBlock, TransactionInfo},
 };
 use bitvmx_transaction_monitor::{
-    monitor_store::MockMonitorStore,
     monitor::Monitor,
+    monitor_store::MockMonitorStore,
     types::{BitvmxInstance, TransactionStore},
 };
 use mockall::predicate::*;

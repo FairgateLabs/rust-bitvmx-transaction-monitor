@@ -8,8 +8,8 @@ use bitcoin::{
 };
 use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_transaction_monitor::{
-    monitor_store::{MonitorStoreApi, MonitorStore, MockMonitorStore},
     monitor::Monitor,
+    monitor_store::{MockMonitorStore, MonitorStore, MonitorStoreApi},
     types::{AddressStatus, BlockInfo},
 };
 

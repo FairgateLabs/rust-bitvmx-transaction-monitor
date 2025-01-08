@@ -1,5 +1,5 @@
-use crate::monitor_store::{MonitorStoreApi, MonitorStore};
 use crate::errors::MonitorError;
+use crate::monitor_store::{MonitorStore, MonitorStoreApi};
 use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
     TransactionStore,
@@ -84,7 +84,8 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If instances were saved successfully.
     /// - `Err`: If there was an error saving the instances.
-    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<(), MonitorError>;
+    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>)
+        -> Result<(), MonitorError>;
 
     /// Saves a single transaction to be monitored for a specific instance.
     ///
@@ -95,7 +96,11 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the transaction was saved successfully.
     /// - `Err`: If there was an error saving the transaction.
-    fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), MonitorError>;
+    fn save_transaction_for_tracking(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<(), MonitorError>;
 
     /// Removes a transaction from being monitored for a specific instance.
     ///
@@ -106,7 +111,11 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the transaction was removed successfully.
     /// - `Err`: If there was an error removing the transaction.
-    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), MonitorError>;
+    fn remove_transaction_for_tracking(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<(), MonitorError>;
 
     /// Gets all instances currently being tracked.
     ///
@@ -145,7 +154,11 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the acknowledgment was successful.
     /// - `Err`: If there was an error processing the acknowledgment.
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorError>;
+    fn acknowledge_instance_tx_news(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), MonitorError>;
 
     /// Gets the current status of a specific transaction.
     ///
@@ -155,7 +168,10 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(Option<TransactionStatus>)`: The transaction's status if found.
     /// - `Err`: If there was an error retrieving the status.
-    fn get_instance_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError>;
+    fn get_instance_tx_status(
+        &self,
+        tx_id: &Txid,
+    ) -> Result<Option<TransactionStatus>, MonitorError>;
 
     /// Gets status updates for monitored addresses.
     ///
@@ -192,7 +208,10 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
         self.get_current_height()
     }
 
-    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>) -> Result<(), MonitorError> {
+    fn save_instances_for_tracking(
+        &self,
+        instances: Vec<InstanceData>,
+    ) -> Result<(), MonitorError> {
         let bitvmx_instances: Vec<BitvmxInstance> = instances
             .into_iter()
             .map(|instance_data| {
@@ -211,11 +230,19 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
 
         self.save_instances_for_tracking(bitvmx_instances)
     }
-    fn save_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), MonitorError> {
+    fn save_transaction_for_tracking(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<(), MonitorError> {
         self.save_transaction_for_tracking(instance_id, tx_id)
     }
 
-    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), MonitorError> {
+    fn remove_transaction_for_tracking(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<(), MonitorError> {
         self.remove_transaction_for_tracking(instance_id, tx_id)
     }
 
@@ -227,11 +254,18 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
         self.get_instance_news()
     }
 
-    fn acknowledge_instance_tx_news(&self, instance_id: InstanceId, tx_id: &Txid) -> Result<(), MonitorError> {
+    fn acknowledge_instance_tx_news(
+        &self,
+        instance_id: InstanceId,
+        tx_id: &Txid,
+    ) -> Result<(), MonitorError> {
         self.acknowledge_instance_tx_news(instance_id, tx_id)
     }
 
-    fn get_instance_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError> {
+    fn get_instance_tx_status(
+        &self,
+        tx_id: &Txid,
+    ) -> Result<Option<TransactionStatus>, MonitorError> {
         self.get_instance_tx_status(tx_id)
     }
 
@@ -283,7 +317,10 @@ where
         }
     }
 
-    pub fn save_instances_for_tracking(&self, instances: Vec<BitvmxInstance>) -> Result<(), MonitorError> {
+    pub fn save_instances_for_tracking(
+        &self,
+        instances: Vec<BitvmxInstance>,
+    ) -> Result<(), MonitorError> {
         self.bitvmx_store.save_instances(&instances)?;
 
         Ok(())
@@ -298,7 +335,11 @@ where
         Ok(())
     }
 
-    fn remove_transaction_for_tracking(&self, instance_id: InstanceId, tx_id: Txid) -> Result<(), MonitorError> {
+    fn remove_transaction_for_tracking(
+        &self,
+        instance_id: InstanceId,
+        tx_id: Txid,
+    ) -> Result<(), MonitorError> {
         self.bitvmx_store.remove_transaction(instance_id, &tx_id)?;
         Ok(())
     }
@@ -315,9 +356,7 @@ where
     pub fn tick(&mut self) -> Result<(), MonitorError> {
         let new_height = self.indexer.tick(&self.current_height)?;
 
-        let best_block = self
-            .indexer
-            .get_best_block()?;
+        let best_block = self.indexer.get_best_block()?;
 
         if best_block.is_none() {
             return Ok(());
@@ -364,9 +403,7 @@ where
     }
 
     fn detect_addresses_in_transactions(&self, full_block: FullBlock) -> Result<(), MonitorError> {
-        let addresses = self
-            .bitvmx_store
-            .get_addresses()?;
+        let addresses = self.bitvmx_store.get_addresses()?;
 
         for address in addresses {
             for tx in full_block.txs.iter() {
@@ -375,15 +412,14 @@ where
                 if matched_with_the_address {
                     let confirmations = self.current_height - full_block.height + 1;
 
-                    self.bitvmx_store
-                        .update_address_news(
-                            address.clone(),
-                            tx,
-                            full_block.height,
-                            full_block.hash,
-                            full_block.orphan,
-                            confirmations,
-                        )?;
+                    self.bitvmx_store.update_address_news(
+                        address.clone(),
+                        tx,
+                        full_block.height,
+                        full_block.hash,
+                        full_block.orphan,
+                        confirmations,
+                    )?;
                 }
             }
         }
@@ -408,7 +444,9 @@ where
         false
     }
 
-    pub fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>, MonitorError> {
+    pub fn get_instance_news(
+        &self,
+    ) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>, MonitorError> {
         let instances = self.bitvmx_store.get_instance_news()?;
 
         let mut news = Vec::new();
@@ -444,7 +482,10 @@ where
         Ok(())
     }
 
-    pub fn get_instance_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError> {
+    pub fn get_instance_tx_status(
+        &self,
+        tx_id: &Txid,
+    ) -> Result<Option<TransactionStatus>, MonitorError> {
         let tx_status = self.indexer.get_tx(tx_id)?;
 
         let tx_status_response = tx_status.map(|tx_status| TransactionStatus {

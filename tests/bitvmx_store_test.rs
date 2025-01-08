@@ -1,6 +1,6 @@
 use bitcoin::{absolute::LockTime, Transaction, Txid};
 use bitvmx_transaction_monitor::{
-    monitor_store::{MonitorStoreApi, MonitorStore},
+    monitor_store::{MonitorStore, MonitorStoreApi},
     types::{BitvmxInstance, TransactionStore},
 };
 use std::str::FromStr;
