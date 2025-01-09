@@ -8,7 +8,8 @@ use bitvmx_transaction_monitor::{
 };
 use clap::Parser;
 use log::{info, warn};
-use std::{env, sync::mpsc::channel, thread, time::Duration};
+use storage_backend::storage::Storage;
+use std::{env, path::PathBuf, rc::Rc, sync::mpsc::channel, thread, time::Duration};
 
 fn main() -> Result<()> {
     let (tx, rx) = channel();
@@ -52,9 +53,10 @@ fn main() -> Result<()> {
     info!("Connected to chain {}", network);
     info!("Chain best block at {}H", blockchain_height);
 
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(db_file_path))?);
     let mut monitor = Monitor::new_with_paths(
         &node_rpc_url,
-        &db_file_path,
+        storage,
         checkpoint_height,
         confirmation_threshold,
     )?;

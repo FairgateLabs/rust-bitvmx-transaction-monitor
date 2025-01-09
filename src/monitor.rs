@@ -1,20 +1,23 @@
+use std::rc::Rc;
+
 use crate::errors::MonitorError;
-use crate::monitor_store::{MonitorStore, MonitorStoreApi};
+use crate::store::{MonitorStore, MonitorStoreApi};
 use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
     TransactionStore,
 };
 use bitcoin::{Address, Network, Transaction, Txid};
+use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::types::FullBlock;
 use bitcoin_indexer::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     helper::define_height_to_sync,
     indexer::Indexer,
-    store::Store,
 };
 use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
 use log::info;
 use mockall::automock;
+use storage_backend::storage::Storage;
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -26,18 +29,19 @@ where
     confirmation_threshold: u32,
 }
 
-impl Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
+impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
     pub fn new_with_paths(
         node_rpc_url: &str,
-        db_file_path: &str,
+        storage: Rc<Storage>,
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
         let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
-        let indexer = Indexer::new_with_path(bitcoin_client, db_file_path)?;
+        let indexer_store = IndexerStore::new(storage.clone()).map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let indexer = Indexer::new(bitcoin_client, indexer_store);
         let best_block = indexer.get_best_block()?;
-        let bitvmx_store = MonitorStore::new_with_path(db_file_path)?;
+        let bitvmx_store = MonitorStore::new(storage)?;
         let current_height =
             define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
         let monitor = Monitor::new(
@@ -199,7 +203,7 @@ pub trait MonitorApi {
     fn get_confirmation_threshold(&self) -> u32;
 }
 
-impl MonitorApi for Monitor<Indexer<BitcoinClient, Store>, MonitorStore> {
+impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
     fn tick(&mut self) -> Result<(), MonitorError> {
         self.tick()
     }

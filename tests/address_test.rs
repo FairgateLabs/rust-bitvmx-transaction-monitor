@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 
 use bitcoin::{
     absolute::{self, LockTime},
@@ -9,9 +9,10 @@ use bitcoin::{
 use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_transaction_monitor::{
     monitor::Monitor,
-    monitor_store::{MockMonitorStore, MonitorStore, MonitorStoreApi},
+    store::{MockMonitorStore, MonitorStore, MonitorStoreApi},
     types::{AddressStatus, BlockInfo},
 };
+use storage_backend::storage::Storage;
 
 pub fn generate_random_string() -> String {
     use rand::Rng;
@@ -58,7 +59,9 @@ fn get_address() -> Address {
 #[test]
 fn address_test() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/address_test/{}", generate_random_string());
-    let bitvmx_store = MonitorStore::new_with_path(&path)?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let bitvmx_store = MonitorStore::new(storage)?;
+
     // Create two instances with one transaction each
     let address_1 = Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")?.assume_checked();
     let address_2 =

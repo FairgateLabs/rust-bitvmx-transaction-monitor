@@ -1,9 +1,10 @@
 use bitcoin::{absolute::LockTime, Transaction, Txid};
 use bitvmx_transaction_monitor::{
-    monitor_store::{MonitorStore, MonitorStoreApi},
+    store::{MonitorStore, MonitorStoreApi},
     types::{BitvmxInstance, TransactionStore},
 };
-use std::str::FromStr;
+use storage_backend::storage::Storage;
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 
 fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
     let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
@@ -66,8 +67,8 @@ fn get_all_mock_bitvmx_instances() -> Vec<BitvmxInstance> {
 
 #[test]
 fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
-    let file_path = String::from("test_outputs/test_one");
-    let bitvmx_store = MonitorStore::new_with_path(&file_path)?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_one"))?);
+    let bitvmx_store = MonitorStore::new(storage)?;
 
     let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
 
@@ -105,7 +106,9 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         start_height: 180,
     }];
 
-    let bitvmx_store = MonitorStore::new_with_path("test_outputs/test_four")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_four"))?);
+    let bitvmx_store = MonitorStore::new(storage)?;
+
     bitvmx_store.save_instances(&instances)?;
     bitvmx_store.save_transaction(instances[0].id, &tx_id_to_add)?;
 
@@ -126,7 +129,9 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
 
 #[test]
 fn get_instance_news() -> Result<(), anyhow::Error> {
-    let bitvmx_store = MonitorStore::new_with_path("test_outputs/test_five")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_five"))?);
+    let bitvmx_store = MonitorStore::new(storage)?;
+
     let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
@@ -208,7 +213,8 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
-    let bitvmx_store = MonitorStore::new_with_path("test_outputs/test_multiple_instances")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_multiple_instances"))?);
+    let bitvmx_store = MonitorStore::new(storage)?;
     // Create two instances with one transaction each
     let tx_1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -304,7 +310,8 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
 
 #[test]
 fn remove_instance() -> Result<(), anyhow::Error> {
-    let bitvmx_store = MonitorStore::new_with_path("test_outputs/test_remove_instances")?;
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_remove_instances"))?);
+    let bitvmx_store = MonitorStore::new(storage)?;
     // Create two instances with one transaction each
     let tx_id_1 =
         Txid::from_str("e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")?;

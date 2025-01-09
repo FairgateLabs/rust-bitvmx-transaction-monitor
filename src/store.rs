@@ -6,11 +6,11 @@ use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
 use bitcoin_indexer::types::BlockHeight;
 use log::warn;
 use mockall::automock;
-use std::path::PathBuf;
+use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
 
 pub struct MonitorStore {
-    store: Storage,
+    store: Rc<Storage>,
 }
 enum InstanceKey {
     Instance(InstanceId),
@@ -70,6 +70,10 @@ pub trait MonitorStoreApi {
 }
 
 impl MonitorStore {
+    pub fn new(store: Rc<Storage>) -> Result<Self, MonitorStoreError> {
+        Ok(Self { store })
+    }
+
     fn get_instance_key(&self, key: InstanceKey) -> String {
         match key {
             InstanceKey::Instance(instance_id) => format!("instance/{}", instance_id),
@@ -84,11 +88,6 @@ impl MonitorStore {
             AddressKey::Address(address) => format!("address/{}", address).to_string(),
             AddressKey::AddressNews => "address/news".to_string(),
         }
-    }
-
-    pub fn new_with_path(store_path: &str) -> Result<Self, MonitorStoreError> {
-        let store = Storage::new_with_path(&PathBuf::from(format!("{}/monitor", store_path)))?;
-        Ok(Self { store })
     }
 
     fn get_instance(
@@ -295,7 +294,7 @@ impl MonitorStoreApi for MonitorStore {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance.id));
 
         // Store the instance under its ID
-        self.store.set(&instance_key, instance, None)?;
+        self.store.set(instance_key, instance, None)?;
 
         // Maintain a list of all instances
         let instances_key = self.get_instance_key(InstanceKey::InstanceList);

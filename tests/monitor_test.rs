@@ -5,7 +5,7 @@ use bitcoin_indexer::{
 };
 use bitvmx_transaction_monitor::{
     monitor::Monitor,
-    monitor_store::MockMonitorStore,
+    store::MockMonitorStore,
     types::{BitvmxInstance, TransactionStore},
 };
 use mockall::predicate::*;
