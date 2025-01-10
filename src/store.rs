@@ -75,18 +75,20 @@ impl MonitorStore {
     }
 
     fn get_instance_key(&self, key: InstanceKey) -> String {
+        let prefix = "monitor";
         match key {
-            InstanceKey::Instance(instance_id) => format!("instance/{}", instance_id),
-            InstanceKey::InstanceList => "instance/list".to_string(),
-            InstanceKey::InstanceNews => "instance/news".to_string(),
+            InstanceKey::Instance(instance_id) => format!("{prefix}/instance/{}", instance_id),
+            InstanceKey::InstanceList => format!("{prefix}/instance/list"),
+            InstanceKey::InstanceNews => format!("{prefix}/instance/news"),
         }
     }
 
     fn get_address_key(&self, key: AddressKey) -> String {
+        let prefix = "monitor";
         match key {
-            AddressKey::AddressList => "address/list".to_string(),
-            AddressKey::Address(address) => format!("address/{}", address).to_string(),
-            AddressKey::AddressNews => "address/news".to_string(),
+            AddressKey::AddressList => format!("{prefix}/address/list"),
+            AddressKey::Address(address) => format!("{prefix}/address/{}", address),
+            AddressKey::AddressNews => format!("{prefix}/address/news"),
         }
     }
 
