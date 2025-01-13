@@ -9,6 +9,7 @@ use bitvmx_transaction_monitor::{
     types::{BitvmxInstance, TransactionStore},
 };
 use mockall::predicate::*;
+use uuid::Uuid;
 use std::str::FromStr;
 
 #[test]
@@ -83,7 +84,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     };
 
     let block_height_200 = block_200.height;
-    let instance_id = 2;
+    let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
 
     let tx_to_seen = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -99,7 +100,7 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         output: vec![],
     };
     let instances = vec![BitvmxInstance {
-        id: instance_id,
+        id: instance_id_2,
         txs: vec![
             TransactionStore {
                 tx_id: tx.compute_txid(),
@@ -198,7 +199,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     };
 
     let block_height_200 = block_200.height;
-    let intance_id = 2;
+    let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
 
     let tx_to_seen = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -208,7 +209,7 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     };
 
     let instances = vec![BitvmxInstance {
-        id: intance_id,
+        id: instance_id_2,
         txs: vec![TransactionStore {
             tx_id: tx_to_seen.compute_txid(),
             tx: None,

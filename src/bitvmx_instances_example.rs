@@ -1,11 +1,12 @@
 use crate::types::{BitvmxInstance, TransactionStore};
 use bitcoin::Txid;
 use std::str::FromStr;
+use uuid::Uuid;
 
 pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
     vec![
         BitvmxInstance {
-            id: 1,
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
             txs: vec![
                 TransactionStore {
                     tx_id: Txid::from_str(
@@ -25,7 +26,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
             start_height: 1,
         },
         BitvmxInstance {
-            id: 2,
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
             txs: vec![
                 TransactionStore {
                     tx_id: Txid::from_str(
@@ -45,7 +46,7 @@ pub fn get_bitvmx_instances_example() -> Vec<BitvmxInstance> {
             start_height: 180,
         },
         BitvmxInstance {
-            id: 3,
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
             txs: vec![
                 TransactionStore {
                     tx_id: Txid::from_str(
