@@ -1,5 +1,8 @@
 use bitcoin::{BlockHash, Transaction, Txid};
+use bitcoin_indexer::{bitcoin_client::BitcoinClient, indexer::Indexer, store::IndexerStore};
 use serde::{Deserialize, Serialize};
+
+use crate::{monitor::Monitor, store::MonitorStore};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionStore {
@@ -75,3 +78,4 @@ pub struct InstanceData {
 
 pub type BlockHeight = u32;
 pub type InstanceId = u32;
+pub type MonitorType = Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore>;
