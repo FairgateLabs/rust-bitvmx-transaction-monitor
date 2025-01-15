@@ -38,7 +38,35 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
     ) -> Result<Self, MonitorError> {
         let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
-        let indexer_store = IndexerStore::new(storage.clone()).map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let indexer_store = IndexerStore::new(storage.clone())
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let indexer = Indexer::new(bitcoin_client, indexer_store);
+        let best_block = indexer.get_best_block()?;
+        let bitvmx_store = MonitorStore::new(storage)?;
+        let current_height =
+            define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
+        let monitor = Monitor::new(
+            indexer,
+            bitvmx_store,
+            Some(current_height),
+            confirmation_threshold,
+        );
+
+        Ok(monitor)
+    }
+
+    pub fn new_with_paths_and_rpc_details(
+        rpc_url: &str,
+        rpc_user: &str,
+        rpc_pass: &str,
+        storage: Rc<Storage>,
+        checkpoint: Option<BlockHeight>,
+        confirmation_threshold: u32,
+    ) -> Result<Self, MonitorError> {
+        let bitcoin_client = BitcoinClient::new_with_parts(rpc_url, rpc_user, rpc_pass)?;
+        let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
+        let indexer_store = IndexerStore::new(storage.clone())
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
         let indexer = Indexer::new(bitcoin_client, indexer_store);
         let best_block = indexer.get_best_block()?;
         let bitvmx_store = MonitorStore::new(storage)?;
