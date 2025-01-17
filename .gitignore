@@ -1,5 +1,4 @@
 /target
-.env
 data
 Cargo.lock
 bitvmx_instances

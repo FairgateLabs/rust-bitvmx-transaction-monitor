@@ -1,5 +1,6 @@
 use bitcoin::{BlockHash, Transaction, Txid};
-use bitcoin_indexer::{bitcoin_client::BitcoinClient, indexer::Indexer, store::IndexerStore};
+use bitcoin_indexer::{indexer::Indexer, store::IndexerStore};
+use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -77,6 +78,5 @@ pub struct InstanceData {
     pub txs: Vec<Txid>,
 }
 
-pub type BlockHeight = u32;
 pub type InstanceId = Uuid;
 pub type MonitorType = Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore>;

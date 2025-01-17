@@ -11,7 +11,9 @@ readme = "README.md"
 
 [dependencies]
 bitcoin-indexer = { path = "../rust-bitcoin-indexer" }
+bitvmx-settings = { path = "../rust-bitvmx-settings" }
 rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
+bitvmx-bitcoin-rpc = { path = "../rust-bitvmx-bitcoin-rpc" }
 bitcoin = "0.32.2"
 bitcoincore-rpc = "0.19"
 log = "0.4"
@@ -20,10 +22,8 @@ env_logger = { version = "*", default-features = false, features = [
   "atty",
   "humantime",
 ] }
-dotenv = "0.15"
 anyhow = "1.0.86"
 thiserror = "1.0.63"
-clap = { version = "4.5.9", features = ["derive"] }
 mockall = "0.13.0"
 postgres = "0.19.1"
 serde = { version = "1.0", features = ["derive"] }

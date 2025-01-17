@@ -3,7 +3,7 @@ use crate::{
     types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore},
 };
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
-use bitcoin_indexer::types::BlockHeight;
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use log::warn;
 use mockall::automock;
 use std::rc::Rc;
