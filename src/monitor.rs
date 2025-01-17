@@ -9,14 +9,11 @@ use crate::types::{
 };
 use bitcoin::script::Instruction;
 use bitcoin::{Address, Network, Script, Transaction, Txid};
+use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
-use bitcoin_indexer::types::FullBlock;
-use bitcoin_indexer::{
-    bitcoin_client::{BitcoinClient, BitcoinClientApi},
-    helper::define_height_to_sync,
-    indexer::Indexer,
-};
-use bitcoin_indexer::{indexer::IndexerApi, types::BlockHeight};
+use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
+use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
+use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use log::info;
 use mockall::automock;
 use storage_backend::storage::Storage;
@@ -34,11 +31,13 @@ where
 impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
     pub fn new_with_paths(
         node_rpc_url: &str,
+        rpc_user: &str,
+        rpc_pass: &str,
         storage: Rc<Storage>,
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
-        let bitcoin_client = BitcoinClient::new(node_rpc_url)?;
+        let bitcoin_client = BitcoinClient::new(node_rpc_url, rpc_user, rpc_pass)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
@@ -65,7 +64,7 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
-        let bitcoin_client = BitcoinClient::new_with_parts(rpc_url, rpc_user, rpc_pass)?;
+        let bitcoin_client = BitcoinClient::new(rpc_url, rpc_user, rpc_pass)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
@@ -465,14 +464,14 @@ where
         // Iterate over script instructions to find pushed data
         let instructions = script.instructions_minimal();
         let mut result = Vec::new();
-       
-       for inst in instructions.flatten() {
+
+        for inst in instructions.flatten() {
             if let Instruction::PushBytes(data) = inst {
                 result.push(data.as_bytes().to_vec());
             }
         }
 
-         result
+        result
     }
 
     /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
@@ -502,7 +501,7 @@ where
 
         // Fourth part should be Bitcoin address
         let fourth_part = String::from_utf8_lossy(&data[3]);
-        if  Address::from_str(&fourth_part).is_err() {
+        if Address::from_str(&fourth_part).is_err() {
             return false;
         }
 
@@ -510,7 +509,9 @@ where
     }
 
     pub fn is_valid_rsk_address(address: &str) -> bool {
-        address.starts_with("0x") && address.len() == 42 && address[2..].chars().all(|c| c.is_ascii_hexdigit())
+        address.starts_with("0x")
+            && address.len() == 42
+            && address[2..].chars().all(|c| c.is_ascii_hexdigit())
     }
 
     /// Validates if a transaction is a valid peg-in transaction by checking:
@@ -547,7 +548,7 @@ where
         // Check the second output for the OP_RETURN structure
         if let Some(op_return_output) = tx.output.get(1) {
             if op_return_output.script_pubkey.is_op_return() {
-                 let data =  Self::extract_output_data(&op_return_output.script_pubkey);
+                let data = Self::extract_output_data(&op_return_output.script_pubkey);
 
                 if Self::is_valid_op_return_data(data) {
                     return true; // OP_RETURN has valid format
@@ -555,7 +556,7 @@ where
             }
         }
 
-       false
+        false
     }
 
     pub fn get_instance_news(

@@ -1,8 +1,6 @@
 use bitcoin::{absolute::LockTime, BlockHash, Transaction};
-use bitcoin_indexer::{
-    indexer::MockIndexerApi,
-    types::{FullBlock, TransactionInfo},
-};
+use bitcoin_indexer::indexer::MockIndexerApi;
+use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
     monitor::Monitor,
     store::MockMonitorStore,

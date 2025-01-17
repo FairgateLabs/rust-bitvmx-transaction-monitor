@@ -1,4 +1,5 @@
-use bitcoin_indexer::errors::{BitcoinClientError, IndexerError};
+use bitcoin_indexer::errors::IndexerError;
+use bitvmx_bitcoin_rpc::errors::BitcoinClientError;
 use storage_backend::error::StorageError;
 use thiserror::Error;
 
