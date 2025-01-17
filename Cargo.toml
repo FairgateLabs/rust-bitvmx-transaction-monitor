@@ -12,7 +12,6 @@ readme = "README.md"
 [dependencies]
 bitcoin-indexer = { path = "../rust-bitcoin-indexer" }
 bitvmx-settings = { path = "../rust-bitvmx-settings" }
-
 rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
 bitvmx-bitcoin-rpc = { path = "../rust-bitvmx-bitcoin-rpc" }
 bitcoin = "0.32.2"
