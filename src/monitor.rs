@@ -441,7 +441,7 @@ where
 
         for address in addresses {
             for tx in full_block.txs.iter() {
-                let matched_with_the_address = self.address_exist_in_tx(address.clone(), tx);
+                let matched_with_the_address = self.is_a_pegin_tx(address.clone(), tx);
 
                 if matched_with_the_address {
                     let confirmations = self.current_height - full_block.height + 1;
@@ -512,10 +512,15 @@ where
     pub fn is_valid_rsk_address(address: &str) -> bool {
         address.starts_with("0x") && address.len() == 42 && address[2..].chars().all(|c| c.is_ascii_hexdigit())
     }
-    /// Checks if the given address exists in the first transaction output.
-    /// And if the second output is a valid OP_RETURN.
-    pub fn address_exist_in_tx(&self, address: Address, tx: &Transaction) -> bool {
-       
+
+    /// Validates if a transaction is a valid peg-in transaction by checking:
+    /// 1. The first output matches the given committee address (N)
+    /// 2. The second output is a valid OP_RETURN containing:
+    ///    - "RSK_PEGIN" identifier
+    ///    - Packet number
+    ///    - RSK destination address
+    ///    - Bitcoin reimbursement address (R)
+    pub fn is_a_pegin_tx(&self, address: Address, tx: &Transaction) -> bool {
         // Ensure at least 2 outputs exist
         if tx.output.len() < 2 {
             return false;
@@ -525,6 +530,7 @@ where
         let mut first_output_match = false;
 
         if let Some(first_output) = tx.output.first() {
+            //TODO: get Network::Bitcoin from configuration.
             if let Ok(output_address) =
                 Address::from_script(&first_output.script_pubkey, Network::Bitcoin)
             {

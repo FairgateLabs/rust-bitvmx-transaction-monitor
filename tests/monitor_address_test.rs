@@ -44,17 +44,11 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
     let bytes = reimbursement_addr_data.as_bytes();
     reimbursement_addr_bytes[..bytes.len()].copy_from_slice(bytes);
 
-    // let data_bytes = b"RSK_PEGIN 1 0x7ac5496aee77c1ba1f0854206a26dda82a81d6d8";
-    // let data_bytes2 =  b"1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-
     // Create the OP_RETURN output
-    // TODO:  not sure how this script will be created. For now we just push the data bytes.
     let op_return_output = TxOut {
         value: Amount::ZERO,
         script_pubkey: Builder::new()
             .push_opcode(OP_RETURN)
-            // .push_slice(data_bytes)
-            // .push_slice(data_bytes2)
             .push_slice(b"RSK_PEGIN")
             .push_slice(b"1") // packet_number
             .push_slice(rootstock_address)
@@ -76,7 +70,7 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
     let monitor = Monitor::new(mock_indexer, mock_store, None, 6);
 
     // Validate that the committee address (N) is detected
-    assert!(monitor.address_exist_in_tx(committee_n.clone(), &pegin_tx));
+    assert!(monitor.is_a_pegin_tx(committee_n.clone(), &pegin_tx));
 
     Ok(())
 }
