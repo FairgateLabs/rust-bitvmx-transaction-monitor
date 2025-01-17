@@ -8,8 +8,8 @@ use bitvmx_transaction_monitor::{
 };
 use clap::Parser;
 use log::{info, warn};
-use storage_backend::storage::Storage;
 use std::{env, path::PathBuf, rc::Rc, sync::mpsc::channel, thread, time::Duration};
+use storage_backend::storage::Storage;
 
 fn main() -> Result<()> {
     let (tx, rx) = channel();

@@ -6,7 +6,8 @@ use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
     TransactionStore,
 };
-use bitcoin::{Address, Network, Transaction, Txid};
+use bitcoin::script::Instruction;
+use bitcoin::{Address, Network, Script, Transaction, Txid};
 use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::types::FullBlock;
 use bitcoin_indexer::{
@@ -459,21 +460,58 @@ where
         Ok(())
     }
 
-    pub fn address_exist_in_output(&self, address: Address, tx: &Transaction) -> bool {
-        //TODO: Bitcoin Network is hardcoded here, we need to use the network from configuration
+    pub fn extract_op_return_data(script: &Script) -> Option<Vec<u8>> {
+        // Iterate over script instructions to find pushed data
+        let instructions = script.instructions_minimal();
+        for inst in instructions.flatten() {
+            if let Instruction::PushBytes(data) = inst {
+                return Some(data.as_bytes().to_vec()); // Return the pushed data
+            }
+        }
+        None // No valid data found in the OP_RETURN
+    }
 
-        // Iterate through outputs to find the address
-        for output in tx.output.iter() {
+    /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
+    pub fn is_valid_op_return_data(data: &[u8]) -> bool {
+        // Expected OP_RETURN format: "RSK_PEGIN N A R"
+        let content = String::from_utf8_lossy(data);
+        let parts: Vec<&str> = content.split_whitespace().collect();
+        parts.len() == 4 && parts[0] == "RSK_PEGIN"
+    }
+
+    /// Checks if the given address exists in the transaction outputs.
+    pub fn address_exist_in_output(&self, address: Address, tx: &Transaction) -> bool {
+        // Ensure at least 2 outputs exist
+        if tx.output.len() < 2 {
+            return false;
+        }
+
+        // Check the first output for the matching address
+        let mut first_output_match = false;
+        let mut second_output_match = false;
+
+        if let Some(first_output) = tx.output.first() {
             if let Ok(output_address) =
-                bitcoin::Address::from_script(&output.script_pubkey, Network::Bitcoin)
+                Address::from_script(&first_output.script_pubkey, Network::Bitcoin)
             {
                 if output_address == address {
-                    return true;
+                    first_output_match = true;
                 }
             }
         }
 
-        false
+        // Check the second output for the OP_RETURN structure
+        if let Some(op_return_output) = tx.output.get(1) {
+            if op_return_output.script_pubkey.is_op_return() {
+                if let Some(data) = Self::extract_op_return_data(&op_return_output.script_pubkey) {
+                    if Self::is_valid_op_return_data(&data) {
+                        second_output_match = true; // OP_RETURN has valid format
+                    }
+                }
+            }
+        }
+
+        first_output_match && second_output_match
     }
 
     pub fn get_instance_news(

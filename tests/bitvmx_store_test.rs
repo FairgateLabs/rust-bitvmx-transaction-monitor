@@ -3,9 +3,9 @@ use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi},
     types::{BitvmxInstance, TransactionStore},
 };
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
 use uuid::Uuid;
-use std::{path::PathBuf, rc::Rc, str::FromStr};
 
 fn get_mock_bitvmx_instances_already_stated() -> Vec<BitvmxInstance> {
     let txid = Txid::from_str(&"e9b7ad71b2f0bbce7165b5ab4a3c1e17e9189f2891650e3b7d644bb7e88f200b")
@@ -68,7 +68,9 @@ fn get_all_mock_bitvmx_instances() -> Vec<BitvmxInstance> {
 
 #[test]
 fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_one"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_outputs/test_one",
+    ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
 
     let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
@@ -107,7 +109,9 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
         start_height: 180,
     }];
 
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_four"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_outputs/test_four",
+    ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
 
     bitvmx_store.save_instances(&instances)?;
@@ -130,7 +134,9 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
 
 #[test]
 fn get_instance_news() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_five"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_outputs/test_five",
+    ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
 
     let tx = Transaction {
@@ -142,7 +148,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
 
     let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
     //remove all the news
-    bitvmx_store.acknowledge_instance_tx_news( instance_id_2, &tx.compute_txid())?;
+    bitvmx_store.acknowledge_instance_tx_news(instance_id_2, &tx.compute_txid())?;
 
     let instance_news = bitvmx_store.get_instance_news()?;
 
@@ -215,7 +221,9 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_multiple_instances"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_outputs/test_multiple_instances",
+    ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
     // Create two instances with one transaction each
     let tx_1 = Transaction {
@@ -246,7 +254,7 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
 
     let instances = vec![
         BitvmxInstance {
-            id:           instance_id_1,
+            id: instance_id_1,
             txs: vec![
                 TransactionStore {
                     tx_id: tx_1.compute_txid(),
@@ -314,7 +322,9 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
 
 #[test]
 fn remove_instance() -> Result<(), anyhow::Error> {
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from("test_outputs/test_remove_instances"))?);
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
+        "test_outputs/test_remove_instances",
+    ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
     let instance_id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
     // Create two instances with one transaction each

@@ -9,8 +9,8 @@ use bitvmx_transaction_monitor::{
     types::{BitvmxInstance, TransactionStore},
 };
 use mockall::predicate::*;
-use uuid::Uuid;
 use std::str::FromStr;
+use uuid::Uuid;
 
 #[test]
 fn no_instances() -> Result<(), anyhow::Error> {

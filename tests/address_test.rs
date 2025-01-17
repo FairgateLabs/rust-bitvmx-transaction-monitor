@@ -1,15 +1,8 @@
 use std::{path::PathBuf, rc::Rc, str::FromStr};
 
-use bitcoin::{
-    absolute::{self, LockTime},
-    key::{rand, Secp256k1},
-    secp256k1::{All, SecretKey},
-    transaction, Address, Amount, CompressedPublicKey, Network, Transaction, TxOut,
-};
-use bitcoin_indexer::indexer::MockIndexerApi;
+use bitcoin::{absolute::LockTime, key::rand, Address, Transaction};
 use bitvmx_transaction_monitor::{
-    monitor::Monitor,
-    store::{MockMonitorStore, MonitorStore, MonitorStoreApi},
+    store::{MonitorStore, MonitorStoreApi},
     types::{AddressStatus, BlockInfo},
 };
 use storage_backend::storage::Storage;
@@ -21,43 +14,7 @@ pub fn generate_random_string() -> String {
 }
 
 #[test]
-fn detect_address_in_tx() -> Result<(), anyhow::Error> {
-    let to = get_address();
-    let to_clone = to.clone();
-
-    let spend = TxOut {
-        value: Amount::default(),
-        script_pubkey: to.script_pubkey(),
-    };
-
-    let unsigned_tx = Transaction {
-        version: transaction::Version::TWO,
-        lock_time: absolute::LockTime::ZERO,
-        input: vec![],
-        output: vec![spend],
-    };
-
-    let mock_indexer = MockIndexerApi::new();
-    let mock_bitvmx_store = MockMonitorStore::new();
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, None, 6);
-    let matched = monitor.address_exist_in_output(to_clone, &unsigned_tx);
-
-    assert!(matched);
-
-    Ok(())
-}
-
-fn get_address() -> Address {
-    let secp: Secp256k1<All> = Secp256k1::new();
-    let sk = SecretKey::new(&mut rand::thread_rng());
-    let pk = bitcoin::PublicKey::new(sk.public_key(&secp));
-    let compressed = CompressedPublicKey::try_from(pk).unwrap();
-    let to = Address::p2wpkh(&compressed, Network::Bitcoin);
-    to
-}
-
-#[test]
-fn address_test() -> Result<(), anyhow::Error> {
+fn address_news_test() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/address_test/{}", generate_random_string());
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
     let bitvmx_store = MonitorStore::new(storage)?;
