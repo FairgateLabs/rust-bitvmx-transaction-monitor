@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::str::FromStr;
 
 use crate::errors::MonitorError;
 use crate::store::{MonitorStore, MonitorStoreApi};
@@ -440,7 +441,7 @@ where
 
         for address in addresses {
             for tx in full_block.txs.iter() {
-                let matched_with_the_address = self.address_exist_in_output(address.clone(), tx);
+                let matched_with_the_address = self.address_exist_in_tx(address.clone(), tx);
 
                 if matched_with_the_address {
                     let confirmations = self.current_height - full_block.height + 1;
@@ -460,27 +461,61 @@ where
         Ok(())
     }
 
-    pub fn extract_op_return_data(script: &Script) -> Option<Vec<u8>> {
+    pub fn extract_output_data(script: &Script) -> Vec<Vec<u8>> {
         // Iterate over script instructions to find pushed data
         let instructions = script.instructions_minimal();
-        for inst in instructions.flatten() {
+        let mut result = Vec::new();
+       
+       for inst in instructions.flatten() {
             if let Instruction::PushBytes(data) = inst {
-                return Some(data.as_bytes().to_vec()); // Return the pushed data
+                result.push(data.as_bytes().to_vec());
             }
         }
-        None // No valid data found in the OP_RETURN
+
+         result
     }
 
     /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
-    pub fn is_valid_op_return_data(data: &[u8]) -> bool {
+    pub fn is_valid_op_return_data(data: Vec<Vec<u8>>) -> bool {
         // Expected OP_RETURN format: "RSK_PEGIN N A R"
-        let content = String::from_utf8_lossy(data);
-        let parts: Vec<&str> = content.split_whitespace().collect();
-        parts.len() == 4 && parts[0] == "RSK_PEGIN"
+        if data.len() != 4 {
+            return false;
+        }
+
+        // First part should be "RSK_PEGIN"
+        let first_part = String::from_utf8_lossy(&data[0]);
+        if first_part != "RSK_PEGIN" {
+            return false;
+        }
+
+        // Second part should be a number for the packet number
+        let second_part = String::from_utf8_lossy(&data[1]);
+        if second_part.parse::<u64>().is_err() {
+            return false;
+        }
+
+        // Third part should be RSK address
+        let third_part = String::from_utf8_lossy(&data[2]);
+        if !Self::is_valid_rsk_address(&third_part) {
+            return false;
+        }
+
+        // Fourth part should be Bitcoin address
+        let fourth_part = String::from_utf8_lossy(&data[3]);
+        if  Address::from_str(&fourth_part).is_err() {
+            return false;
+        }
+
+        true
     }
 
-    /// Checks if the given address exists in the transaction outputs.
-    pub fn address_exist_in_output(&self, address: Address, tx: &Transaction) -> bool {
+    pub fn is_valid_rsk_address(address: &str) -> bool {
+        address.starts_with("0x") && address.len() == 42 && address[2..].chars().all(|c| c.is_ascii_hexdigit())
+    }
+    /// Checks if the given address exists in the first transaction output.
+    /// And if the second output is a valid OP_RETURN.
+    pub fn address_exist_in_tx(&self, address: Address, tx: &Transaction) -> bool {
+       
         // Ensure at least 2 outputs exist
         if tx.output.len() < 2 {
             return false;
@@ -488,7 +523,6 @@ where
 
         // Check the first output for the matching address
         let mut first_output_match = false;
-        let mut second_output_match = false;
 
         if let Some(first_output) = tx.output.first() {
             if let Ok(output_address) =
@@ -500,18 +534,22 @@ where
             }
         }
 
+        if !first_output_match {
+            return false;
+        }
+
         // Check the second output for the OP_RETURN structure
         if let Some(op_return_output) = tx.output.get(1) {
             if op_return_output.script_pubkey.is_op_return() {
-                if let Some(data) = Self::extract_op_return_data(&op_return_output.script_pubkey) {
-                    if Self::is_valid_op_return_data(&data) {
-                        second_output_match = true; // OP_RETURN has valid format
-                    }
+                 let data =  Self::extract_output_data(&op_return_output.script_pubkey);
+
+                if Self::is_valid_op_return_data(data) {
+                    return true; // OP_RETURN has valid format
                 }
             }
         }
 
-        first_output_match && second_output_match
+       false
     }
 
     pub fn get_instance_news(
