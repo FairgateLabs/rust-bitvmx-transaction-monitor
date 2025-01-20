@@ -13,6 +13,7 @@ use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
+use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use log::info;
 use mockall::automock;
@@ -30,14 +31,12 @@ where
 
 impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
     pub fn new_with_paths(
-        node_rpc_url: &str,
-        rpc_user: &str,
-        rpc_pass: &str,
+        rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
-        let bitcoin_client = BitcoinClient::new(node_rpc_url, rpc_user, rpc_pass)?;
+        let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
@@ -57,14 +56,12 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
     }
 
     pub fn new_with_paths_and_rpc_details(
-        rpc_url: &str,
-        rpc_user: &str,
-        rpc_pass: &str,
+        rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         checkpoint: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
-        let bitcoin_client = BitcoinClient::new(rpc_url, rpc_user, rpc_pass)?;
+        let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
