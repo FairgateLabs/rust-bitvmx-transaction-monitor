@@ -7,7 +7,7 @@ use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     bitvmx_instances_example::get_bitvmx_instances_example, config::ConfigMonitor, monitor::Monitor,
 };
-use log::info;
+use tracing::info;
 use std::{path::PathBuf, rc::Rc, sync::mpsc::channel, thread, time::Duration};
 use storage_backend::storage::Storage;
 
@@ -17,11 +17,18 @@ fn main() -> Result<()> {
     ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
         .expect("Error setting Ctrl-C handler");
 
-    env_logger::init();
-
     let config = settings::load::<ConfigMonitor>()?;
 
-    println!("{:?}", config);
+    let log_level = match config.log_level {
+        Some(level) => {
+            level.parse().unwrap_or(tracing::Level::INFO)   
+        },
+        None => tracing::Level::INFO,     
+    };
+
+    tracing_subscriber::fmt()
+        .with_max_level(log_level)
+        .init();
 
     let bitcoin_client =
         BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
