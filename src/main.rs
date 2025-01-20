@@ -23,8 +23,7 @@ fn main() -> Result<()> {
 
     println!("{:?}", config);
 
-    let bitcoin_client =
-        BitcoinClient::new(&config.rpc.url, &config.rpc.username, &config.rpc.password)?;
+    let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
     let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
     let network = bitcoin_client.get_blockchain_info()?;
 
@@ -33,9 +32,7 @@ fn main() -> Result<()> {
 
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(config.db_file_path))?);
     let mut monitor = Monitor::new_with_paths(
-        &config.rpc.url,
-        &config.rpc.username,
-        &config.rpc.password,
+        &config.rpc,
         storage,
         config.checkpoint_height,
         config.confirmation_threshold,
