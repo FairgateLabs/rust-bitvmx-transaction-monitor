@@ -4,7 +4,7 @@ use crate::{
 };
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use log::warn;
+use tracing::warn;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};

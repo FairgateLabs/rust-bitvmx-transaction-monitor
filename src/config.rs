@@ -15,4 +15,6 @@ pub struct ConfigMonitor {
     pub db_file_path: String,
 
     pub rpc: RpcConfig,
+
+    pub log_level: Option<String>,
 }

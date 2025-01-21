@@ -15,7 +15,7 @@ use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
-use log::info;
+use tracing::info;
 use mockall::automock;
 use storage_backend::storage::Storage;
 pub struct Monitor<I, B>
