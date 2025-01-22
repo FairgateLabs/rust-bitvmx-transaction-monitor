@@ -15,9 +15,9 @@ use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
-use tracing::info;
 use mockall::automock;
 use storage_backend::storage::Storage;
+use tracing::info;
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -25,7 +25,6 @@ where
 {
     pub indexer: I,
     pub bitvmx_store: B,
-    current_height: BlockHeight,
     confirmation_threshold: u32,
 }
 
@@ -50,7 +49,7 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
             bitvmx_store,
             Some(current_height),
             confirmation_threshold,
-        );
+        )?;
 
         Ok(monitor)
     }
@@ -75,7 +74,7 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
             bitvmx_store,
             Some(current_height),
             confirmation_threshold,
-        );
+        )?;
 
         Ok(monitor)
     }
@@ -88,7 +87,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(bool)`: Returns true if the monitor is ready and synced, false otherwise.
     /// - `Err`: If there was an error checking the sync status.
-    fn is_ready(&mut self) -> Result<bool, MonitorError>;
+    fn is_ready(&self) -> Result<bool, MonitorError>;
 
     /// Processes one tick of the monitor's operation.
     ///
@@ -98,13 +97,13 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the tick operation completed successfully.
     /// - `Err`: If there was an error during processing.
-    fn tick(&mut self) -> Result<(), MonitorError>;
+    fn tick(&self) -> Result<(), MonitorError>;
 
     /// Gets the current block height that the monitor has processed.
     ///
     /// # Returns
     /// The current block height as a `BlockHeight`.
-    fn get_current_height(&self) -> BlockHeight;
+    fn get_current_height(&self) -> Result<BlockHeight, MonitorError>;
 
     /// Saves multiple instances for monitoring.
     ///
@@ -230,11 +229,11 @@ pub trait MonitorApi {
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
-    fn tick(&mut self) -> Result<(), MonitorError> {
+    fn tick(&self) -> Result<(), MonitorError> {
         self.tick()
     }
 
-    fn get_current_height(&self) -> BlockHeight {
+    fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
         self.get_current_height()
     }
 
@@ -242,6 +241,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         &self,
         instances: Vec<InstanceData>,
     ) -> Result<(), MonitorError> {
+        let current_height = self.get_current_height()?;
+
         let bitvmx_instances: Vec<BitvmxInstance> = instances
             .into_iter()
             .map(|instance_data| {
@@ -253,7 +254,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
                 BitvmxInstance {
                     id: instance_data.instance_id,
                     txs,
-                    start_height: self.current_height,
+                    start_height: current_height,
                 }
             })
             .collect();
@@ -299,8 +300,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.get_instance_tx_status(tx_id)
     }
 
-    fn is_ready(&mut self) -> Result<bool, MonitorError> {
-        let current_height = self.get_current_height();
+    fn is_ready(&self) -> Result<bool, MonitorError> {
+        let current_height = self.get_current_height()?;
         let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
         info!("Monitor is ready? {}", current_height == blockchain_height);
         Ok(current_height == blockchain_height)
@@ -336,15 +337,17 @@ where
         bitvmx_store: B,
         current_height: Option<BlockHeight>,
         confirmation_threshold: u32,
-    ) -> Self {
+    ) -> Result<Self, MonitorError> {
         let current_height = current_height.unwrap_or(0);
+        bitvmx_store
+            .set_current_block_height(current_height)
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
 
-        Self {
+        Ok(Self {
             indexer,
             bitvmx_store,
-            current_height,
             confirmation_threshold,
-        }
+        })
     }
 
     pub fn save_instances_for_tracking(
@@ -379,12 +382,15 @@ where
         Ok(instances)
     }
 
-    pub fn get_current_height(&self) -> BlockHeight {
-        self.current_height
+    pub fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
+        self.bitvmx_store
+            .get_current_block_height()
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
     }
 
-    pub fn tick(&mut self) -> Result<(), MonitorError> {
-        let new_height = self.indexer.tick(&self.current_height)?;
+    pub fn tick(&self) -> Result<(), MonitorError> {
+        let current_height = self.get_current_height()?;
+        let new_height = self.indexer.tick(&current_height)?;
 
         let best_block = self.indexer.get_best_block()?;
 
@@ -425,7 +431,7 @@ where
             }
         }
 
-        self.current_height = new_height;
+        self.bitvmx_store.set_current_block_height(new_height)?;
 
         self.detect_addresses_in_transactions(best_full_block)?;
 
@@ -440,7 +446,7 @@ where
                 let matched_with_the_address = self.is_a_pegin_tx(address.clone(), tx);
 
                 if matched_with_the_address {
-                    let confirmations = self.current_height - full_block.height + 1;
+                    let confirmations = self.get_current_height()? - full_block.height + 1;
 
                     self.bitvmx_store.update_address_news(
                         address.clone(),

@@ -66,8 +66,11 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
 
     // Create a mock monitor to test address detection
     let mock_indexer = MockIndexerApi::new();
-    let mock_store = MockMonitorStore::new();
-    let monitor = Monitor::new(mock_indexer, mock_store, None, 6);
+    let mut mock_store = MockMonitorStore::new();
+    mock_store.expect_set_current_block_height().returning(|_| Ok(()));
+    
+    let monitor = Monitor::new(mock_indexer, mock_store, None, 6)?;
+
 
     // Validate that the committee address (N) is detected
     assert!(monitor.is_a_pegin_tx(committee_n.clone(), &pegin_tx));

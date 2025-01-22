@@ -4,10 +4,10 @@ use crate::{
 };
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use tracing::warn;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
+use tracing::warn;
 
 pub struct MonitorStore {
     store: Rc<Storage>,
@@ -21,6 +21,10 @@ enum AddressKey {
     Address(Address),
     AddressList,
     AddressNews,
+}
+
+enum BlockchainKey {
+    CurrentBlockHeight,
 }
 
 pub trait MonitorStoreApi {
@@ -67,6 +71,9 @@ pub trait MonitorStoreApi {
     ) -> Result<(), MonitorStoreError>;
     fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorStoreError>;
     fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorStoreError>;
+
+    fn get_current_block_height(&self) -> Result<BlockHeight, MonitorStoreError>;
+    fn set_current_block_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
 }
 
 impl MonitorStore {
@@ -89,6 +96,13 @@ impl MonitorStore {
             AddressKey::AddressList => format!("{prefix}/address/list"),
             AddressKey::Address(address) => format!("{prefix}/address/{}", address),
             AddressKey::AddressNews => format!("{prefix}/address/news"),
+        }
+    }
+
+    fn get_blockchain_key(&self, key: BlockchainKey) -> String {
+        let prefix = "monitor";
+        match key {
+            BlockchainKey::CurrentBlockHeight => format!("{prefix}/blockchain/current_block_height"),
         }
     }
 
@@ -204,6 +218,22 @@ impl MonitorStore {
 
 #[automock]
 impl MonitorStoreApi for MonitorStore {
+    fn get_current_block_height(&self) -> Result<BlockHeight, MonitorStoreError> {
+        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
+        let last_block_height = self
+            .store
+            .get::<_, BlockHeight>(&last_block_height_key)?
+            .unwrap_or_default();
+
+        Ok(last_block_height)
+    }
+
+    fn set_current_block_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError> {
+        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
+        self.store.set(last_block_height_key, height, None)?;
+        Ok(())
+    }
+
     fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
         self.get_instances()
     }
