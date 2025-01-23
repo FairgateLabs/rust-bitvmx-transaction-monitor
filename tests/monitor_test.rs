@@ -1,4 +1,4 @@
-use bitcoin::{absolute::LockTime, BlockHash, Transaction};
+use bitcoin::{absolute::LockTime, transaction::Version, BlockHash, Transaction};
 use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
@@ -259,3 +259,96 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
 
     Ok(())
 }
+
+#[test]
+fn detect_addresses_in_transactions() -> Result<(), anyhow::Error> {
+    let mut mock_indexer = MockIndexerApi::new();
+    let mut mock_bitvmx_store = MockMonitorStore::new();
+
+    let block = FullBlock {
+        height: 150,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::from_time(1653195600).unwrap(),
+            input: vec![],
+            output: vec![],
+        }],
+        orphan: false,
+    };
+    let tx_mock = block.txs[0].clone();
+    let block_hash_bytes_as_u32 = u32::from_be_bytes(block.hash[..4].try_into().unwrap());
+    let block_prev_hash = block.prev_hash.clone();
+    
+    let mock_address_unchecked = bitcoin::Address::from_str("bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080")
+    .expect("Failed to parse Bech32 address for regtest");
+
+    let mock_address = mock_address_unchecked.assume_checked();
+
+    mock_indexer
+    .expect_get_best_block()
+    .returning(move || Ok(Some(block.clone())));
+
+    mock_indexer
+    .expect_tick()
+    .with(eq(149))
+    .returning(|_| Ok(149)); 
+
+
+    mock_bitvmx_store
+        .expect_get_addresses()
+        .returning(|| Ok(vec![]));
+
+    mock_bitvmx_store
+        .expect_update_address_news()
+        .with(
+            eq(mock_address),
+            eq(tx_mock),
+            eq(block_hash_bytes_as_u32),
+            eq(block_prev_hash),
+            eq(false),
+            eq(1),
+        )
+        .times(1)
+        .returning(|_, _, _, _, _, _| Ok(()));
+
+    let mut monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(149), 6);
+
+    monitor.tick()?;
+
+    assert_eq!(monitor.get_current_height(), 150);
+
+    Ok(())
+}
+
+/*
+#[test]
+fn acknowledge_instance_tx_news() -> Result<(), anyhow::Error> {
+    let mut mock_indexer = MockIndexerApi::new();
+    let mut mock_bitvmx_store = MockMonitorStore::new();
+
+    let instance_id = 3;
+    let tx_id = BlockHash::from_str(
+        "000000000000000000000000000000000000000000000000000000000000abcd",
+    )?;
+
+    mock_bitvmx_store
+        .expect_acknowledge_instance_tx_news()
+        .with(eq(instance_id), eq(tx_id))
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(100), 6);
+
+    monitor.acknowledge_instance_tx_news(instance_id, tx_id)?;
+
+    Ok(())
+}
+    */
