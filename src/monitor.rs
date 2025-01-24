@@ -7,6 +7,7 @@ use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
     TransactionStore,
 };
+use bitcoin::hex::DisplayHex;
 use bitcoin::script::Instruction;
 use bitcoin::{Address, Network, Script, Transaction, Txid};
 use bitcoin_indexer::indexer::IndexerApi;
@@ -18,6 +19,7 @@ use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use mockall::automock;
 use storage_backend::storage::Storage;
 use tracing::info;
+
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -489,15 +491,16 @@ where
         if first_part != "RSK_PEGIN" {
             return false;
         }
-
+       
         // Second part should be a number for the packet number
-        let second_part = String::from_utf8_lossy(&data[1]);
-        if second_part.parse::<u64>().is_err() {
+        if data[1].len() != 8 {
             return false;
         }
 
+        //TODO: validate packet number
+
         // Third part should be RSK address
-        let third_part = String::from_utf8_lossy(&data[2]);
+        let third_part = data[2].as_hex().to_string();
         if !Self::is_valid_rsk_address(&third_part) {
             return false;
         }
@@ -508,13 +511,12 @@ where
             return false;
         }
 
-        true
+        return true;
     }
 
     pub fn is_valid_rsk_address(address: &str) -> bool {
-        address.starts_with("0x")
-            && address.len() == 42
-            && address[2..].chars().all(|c| c.is_ascii_hexdigit())
+            address.len() == 40 &&
+            address.chars().all(|c| c.is_ascii_hexdigit())
     }
 
     /// Validates if a transaction is a valid peg-in transaction by checking:
