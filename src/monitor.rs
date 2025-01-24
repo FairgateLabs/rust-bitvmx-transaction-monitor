@@ -485,25 +485,25 @@ where
         if data.len() != 4 {
             return false;
         }
-        println!("valid data len");
+
         // First part should be "RSK_PEGIN"
         let first_part = String::from_utf8_lossy(&data[0]);
         if first_part != "RSK_PEGIN" {
             return false;
         }
-
+       
         // Second part should be a number for the packet number
         if data[1].len() != 8 {
             return false;
         }
-        let second_part = u64::from_be_bytes(data[1].as_slice().try_into().unwrap());
+
+        //TODO: validate packet number
 
         // Third part should be RSK address
         let third_part = data[2].as_hex().to_string();
         if !Self::is_valid_rsk_address(&third_part) {
             return false;
         }
-
 
         // Fourth part should be Bitcoin address
         let fourth_part = String::from_utf8_lossy(&data[3]);

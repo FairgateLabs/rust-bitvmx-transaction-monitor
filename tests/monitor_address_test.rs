@@ -61,14 +61,12 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
         input: vec![], // Inputs would be added by the user
         output: vec![taproot_output.clone(), op_return_output.clone()],
     };
-    println!("=======PegInTx raw: {}", pegin_tx.raw_hex());
 
+    println!("=======PegInTx raw: {}", pegin_tx.raw_hex());
     println!("======= txId: {}", pegin_tx.compute_txid());
     println!("======= wTxId: {}", pegin_tx.compute_wtxid());
-
     println!("======= taproot_output: amount:{} size:{} script_pubkey:{}", taproot_output.value, taproot_output.size(), taproot_output.script_pubkey.as_bytes().to_hex_string(bitcoin::hex::Case::Lower));
     println!("======= op_return_output: amount:{} size:{} script_pubkey:{}, script_pubkey_hex:{}", op_return_output.value, op_return_output.size(), op_return_output.script_pubkey, op_return_output.script_pubkey.as_bytes().to_hex_string(bitcoin::hex::Case::Lower));
-
 
     // Create a mock monitor to test address detection
     let mock_indexer = MockIndexerApi::new();
@@ -76,7 +74,6 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
     mock_store.expect_set_current_block_height().returning(|_| Ok(()));
     
     let monitor = Monitor::new(mock_indexer, mock_store, None, 6)?;
-
 
     // Validate that the committee address (N) is detected
     assert!(monitor.is_a_pegin_tx(committee_n.clone(), &pegin_tx));
