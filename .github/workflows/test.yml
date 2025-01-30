@@ -30,6 +30,16 @@ jobs:
         ref: main
         path: rust-bitvmx-workspace # Store in $GITHUB_WORKSPACE/other-repo
         submodules: true
+    
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          rust-bitvmx-workspace/rust-bitvmx-transaction-monitor/target
+          rust-bitvmx-workspace/rust-bitvmx-transaction-monitor/Cargo.lock
+        key: ${{ runner.os }}-cargo-${{ hashFiles('rust-bitvmx-workspace/rust-bitvmx-transaction-monitor/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
         
     - name: Build project
       run: |
@@ -83,5 +93,5 @@ jobs:
       if: github.event_name == 'pull_request'
       with:
         ignore_empty: true
-        recreate: true        
-        path: code-coverage-results.md  
+        recreate: true
+        path: code-coverage-results.md
