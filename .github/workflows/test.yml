@@ -93,5 +93,5 @@ jobs:
       if: github.event_name == 'pull_request'
       with:
         ignore_empty: true
-        recreate: true        
-        path: code-coverage-results.md  
+        recreate: true
+        path: code-coverage-results.md
