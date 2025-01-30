@@ -20,12 +20,7 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
     // Generate reimbursement address (R)
     let sk_reimburse = SecretKey::new(&mut thread_rng());
     let pk_reimburse = PublicKey::from_secret_key(&secp, &sk_reimburse);
-    let reimbursement_addr = Address::p2tr(
-        &secp,
-        pk_reimburse.x_only_public_key().0,
-        None,
-        Network::Bitcoin,
-    );
+    let reimbursement_xpk = pk_reimburse.x_only_public_key().0;
 
     // Create the taproot output
     let taproot_output = TxOut {
@@ -37,20 +32,20 @@ fn test_pegin_address_detection1() -> Result<(), anyhow::Error> {
     let mut rootstock_address = [0u8; 20];
     rootstock_address.copy_from_slice(Vec::from_hex("7ac5496aee77c1ba1f0854206a26dda82a81d6d8").unwrap().as_slice());
 
-    let reimbursement_addr_data = reimbursement_addr.to_string();
-    let mut reimbursement_addr_bytes = [0u8; 62];
-    let bytes = reimbursement_addr_data.as_bytes();
-    reimbursement_addr_bytes[..bytes.len()].copy_from_slice(bytes);
+    let mut data = [0u8; 69];
+    data.copy_from_slice([
+        b"RSK_PEGIN".as_slice(),
+        &packet_number.to_be_bytes(),
+        &rootstock_address,
+        &reimbursement_xpk.serialize()
+    ].concat().as_slice());
 
     // Create the OP_RETURN output
     let op_return_output = TxOut {
         value: Amount::ZERO,
         script_pubkey: Builder::new()
             .push_opcode(OP_RETURN)
-            .push_slice(b"RSK_PEGIN")
-            .push_slice(packet_number.to_be_bytes()) // packet_number
-            .push_slice(rootstock_address)
-            .push_slice(reimbursement_addr_bytes)
+            .push_slice(&data)
             .into_script(),
     };
 
