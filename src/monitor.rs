@@ -1,14 +1,12 @@
 use std::rc::Rc;
-use std::str::FromStr;
-
 use crate::errors::MonitorError;
 use crate::store::{MonitorStore, MonitorStoreApi};
 use crate::types::{
     AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
     TransactionStore,
 };
-use bitcoin::hex::DisplayHex;
 use bitcoin::script::Instruction;
+use bitcoin::secp256k1::ffi::{secp256k1_context_no_precomp, secp256k1_xonly_pubkey_parse, XOnlyPublicKey};
 use bitcoin::{Address, Network, Script, Transaction, Txid};
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
@@ -481,35 +479,55 @@ where
 
     /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
     pub fn is_valid_op_return_data(data: Vec<Vec<u8>>) -> bool {
+        if data.len() != 1 {
+            return false;
+        }
+        let rest = &data[0];
         // Expected OP_RETURN format: "RSK_PEGIN N A R"
-        if data.len() != 4 {
+        if rest.len() != 69 {
             return false;
         }
-
         // First part should be "RSK_PEGIN"
-        let first_part = String::from_utf8_lossy(&data[0]);
-        if first_part != "RSK_PEGIN" {
-            return false;
-        }
-       
-        // Second part should be a number for the packet number
-        if data[1].len() != 8 {
+        let (first_part, rest) = rest.split_at(9);
+        if String::from_utf8_lossy(first_part) != "RSK_PEGIN" {
             return false;
         }
 
-        //TODO: validate packet number
+        // Second part should be a number for the packet number (8 bytes)
+        let (second_part, rest) = rest.split_at(8);
+        if second_part.len() != 8 {
+            return false;
+        }
+        // let _packet_number = u64::from_be_bytes(second_part.try_into().unwrap());
 
-        // Third part should be RSK address
-        let third_part = data[2].as_hex().to_string();
-        if !Self::is_valid_rsk_address(&third_part) {
+        // Third part should be RSK address (20 bytes)
+        let (third_part, rest) = rest.split_at(20);
+        if third_part.len() != 20 {
+            return false;
+        }
+        if !Self::is_valid_rsk_address(&hex::encode(third_part)) {
             return false;
         }
 
-        // Fourth part should be Bitcoin address
-        let fourth_part = String::from_utf8_lossy(&data[3]);
-        if Address::from_str(&fourth_part).is_err() {
+        // Fourth part should be Bitcoin xOnlyPublicKey (32 bytes)
+        let fourth_part = rest;
+        if fourth_part.len() != 32 {
             return false;
         }
+
+        // Fourth part should be Bitcoin xOnlyPublicKey
+        unsafe {
+            let mut x_only_public_key = XOnlyPublicKey::new();
+            let fourth_part = secp256k1_xonly_pubkey_parse(
+                secp256k1_context_no_precomp,
+                &mut x_only_public_key as *mut _,
+                fourth_part.as_ptr(),
+            );
+            println!("fourth_part {}", fourth_part);
+            if fourth_part != 1 {
+                return false;
+            }
+        };
 
         return true;
     }
