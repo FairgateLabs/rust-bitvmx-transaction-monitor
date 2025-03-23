@@ -12,15 +12,7 @@ pub struct TransactionStore {
     pub tx: Option<Transaction>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-
-pub struct AddressStatus {
-    pub tx: Option<Transaction>,
-    pub block_info: Option<BlockInfo>,
-    pub confirmations: u32,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionStatus {
     pub tx_id: Txid,
     pub tx: Option<Transaction>,
@@ -29,6 +21,14 @@ pub struct TransactionStatus {
 }
 
 impl TransactionStatus {
+    pub fn new(tx: Transaction, block_info: Option<BlockInfo>) -> Self {
+        Self {
+            tx_id: tx.compute_txid(),
+            tx: Some(tx),
+            block_info,
+            confirmations: 0,
+        }
+    }
     pub fn is_confirmed(&self) -> bool {
         self.block_info.is_some() && self.confirmations > 0
     }
@@ -49,6 +49,16 @@ pub struct BlockInfo {
     pub block_height: BlockHeight,
     pub block_hash: BlockHash,
     pub is_orphan: bool,
+}
+
+impl BlockInfo {
+    pub fn new(block_height: BlockHeight, block_hash: BlockHash, is_orphan: bool) -> Self {
+        Self {
+            block_height,
+            block_hash,
+            is_orphan,
+        }
+    }
 }
 
 pub struct BlockAgragatedInfo {

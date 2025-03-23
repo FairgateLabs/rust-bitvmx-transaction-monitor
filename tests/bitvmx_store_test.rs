@@ -115,7 +115,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
     let bitvmx_store = MonitorStore::new(storage)?;
 
     bitvmx_store.save_instances(&instances)?;
-    bitvmx_store.save_transaction(instances[0].id, &tx_id_to_add)?;
+    bitvmx_store.save_instance_transaction(instances[0].id, &tx_id_to_add)?;
 
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
 
