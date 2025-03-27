@@ -39,10 +39,6 @@ fn no_instances() -> Result<(), anyhow::Error> {
         .expect_get_best_block()
         .returning(move || Ok(Some(best_block_100.clone())));
 
-    mock_bitvmx_store
-        .expect_get_addresses()
-        .returning(|| Ok(vec![]));
-
     // Return an empty bitvmx array
     mock_bitvmx_store
         .expect_get_instances_ready_to_track()
@@ -53,8 +49,12 @@ fn no_instances() -> Result<(), anyhow::Error> {
     // Then we never call update_bitvmx_tx_confirmations
     mock_bitvmx_store.expect_update_instance_news().times(0);
 
-    mock_bitvmx_store.expect_set_current_block_height().returning(|_| Ok(()));
-    mock_bitvmx_store.expect_get_current_block_height().returning(|| Ok(100));
+    mock_bitvmx_store
+        .expect_set_current_block_height()
+        .returning(|_| Ok(()));
+    mock_bitvmx_store
+        .expect_get_current_block_height()
+        .returning(|| Ok(100));
 
     let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_100_height), 6)?;
 
@@ -166,11 +166,11 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     mock_bitvmx_store.expect_update_instance_news().times(0);
 
     mock_bitvmx_store
-        .expect_get_addresses()
-        .returning(|| Ok(vec![]));
-
-    mock_bitvmx_store.expect_set_current_block_height().returning(|_| Ok(()));
-    mock_bitvmx_store.expect_get_current_block_height().returning(|| Ok(200));
+        .expect_set_current_block_height()
+        .returning(|_| Ok(()));
+    mock_bitvmx_store
+        .expect_get_current_block_height()
+        .returning(|| Ok(200));
 
     let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_height_200), 6)?;
 
@@ -246,15 +246,15 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         .times(1)
         .returning(move |_| Ok(instances.clone()));
 
-    mock_bitvmx_store
-        .expect_get_addresses()
-        .returning(|| Ok(vec![]));
-
     // Do no Increase confirmations given the block is the same were was found
     mock_bitvmx_store.expect_update_instance_news().times(0);
 
-    mock_bitvmx_store.expect_set_current_block_height().returning(|_| Ok(()));
-    mock_bitvmx_store.expect_get_current_block_height().returning(|| Ok(200));
+    mock_bitvmx_store
+        .expect_set_current_block_height()
+        .returning(|_| Ok(()));
+    mock_bitvmx_store
+        .expect_get_current_block_height()
+        .returning(|| Ok(200));
 
     let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_height_200), 6)?;
 

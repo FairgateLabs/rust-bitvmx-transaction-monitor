@@ -1,12 +1,12 @@
-use std::rc::Rc;
 use crate::errors::MonitorError;
 use crate::store::{MonitorStore, MonitorStoreApi};
 use crate::types::{
-    AddressStatus, BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus,
-    TransactionStore,
+    BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus, TransactionStore,
 };
 use bitcoin::script::Instruction;
-use bitcoin::secp256k1::ffi::{secp256k1_context_no_precomp, secp256k1_xonly_pubkey_parse, XOnlyPublicKey};
+use bitcoin::secp256k1::ffi::{
+    secp256k1_context_no_precomp, secp256k1_xonly_pubkey_parse, XOnlyPublicKey,
+};
 use bitcoin::{Address, Network, Script, Transaction, Txid};
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
@@ -15,6 +15,7 @@ use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use mockall::automock;
+use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::info;
 
@@ -153,16 +154,6 @@ pub trait MonitorApi {
     /// - `Err`: If there was an error retrieving the instances.
     fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorError>;
 
-    /// Saves an address to be monitored for transactions.
-    ///
-    /// # Arguments
-    /// * `address` - Bitcoin address to monitor
-    ///
-    /// # Returns
-    /// - `Ok(())`: If the address was saved successfully.
-    /// - `Err`: If there was an error saving the address.
-    fn save_address_for_tracking(&self, address: Address) -> Result<(), MonitorError>;
-
     /// Gets status updates for transactions belonging to monitored instances.
     ///
     /// # Returns
@@ -202,12 +193,12 @@ pub trait MonitorApi {
         tx_id: &Txid,
     ) -> Result<Option<TransactionStatus>, MonitorError>;
 
-    /// Gets status updates for monitored addresses.
+    /// Gets status updates for monitored transactions that .
     ///
     /// # Returns
-    /// - `Ok(Vec<(Address, Vec<AddressStatus>)>)`: Vector of address/status pairs.
+    /// - `Ok(Vec<TransactionStatus>)`: Vector of transaction statuses that match with our needs.
     /// - `Err`: If there was an error retrieving the updates.
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorError>;
+    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorError>;
 
     /// Acknowledges that an address status update has been processed.
     ///
@@ -217,7 +208,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the acknowledgment was successful.
     /// - `Err`: If there was an error processing the acknowledgment.
-    fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorError>;
+    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorError>;
 
     /// Gets the configured confirmation threshold that determines when a transaction is considered final.
     /// This threshold represents the minimum number of blocks that must be mined on top of the block
@@ -303,7 +294,6 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     fn is_ready(&self) -> Result<bool, MonitorError> {
         let current_height = self.get_current_height()?;
         let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
-        info!("Monitor is ready? {}", current_height == blockchain_height);
         Ok(current_height == blockchain_height)
     }
 
@@ -311,18 +301,13 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.confirmation_threshold
     }
 
-    fn save_address_for_tracking(&self, address: Address) -> Result<(), MonitorError> {
-        self.bitvmx_store.save_address(address)?;
-        Ok(())
+    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorError> {
+        let tx_news = self.bitvmx_store.get_single_tx_news()?;
+        Ok(tx_news)
     }
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorError> {
-        let address_news = self.bitvmx_store.get_address_news()?;
-        Ok(address_news)
-    }
-
-    fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorError> {
-        self.bitvmx_store.acknowledge_address_news(address)?;
+    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorError> {
+        self.bitvmx_store.acknowledge_tx_news(tx_id)?;
         Ok(())
     }
 }
@@ -364,7 +349,8 @@ where
         instance_id: InstanceId,
         tx_id: Txid,
     ) -> Result<(), MonitorError> {
-        self.bitvmx_store.save_transaction(instance_id, &tx_id)?;
+        self.bitvmx_store
+            .save_instance_transaction(instance_id, &tx_id)?;
         Ok(())
     }
 
@@ -433,31 +419,22 @@ where
 
         self.bitvmx_store.set_current_block_height(new_height)?;
 
-        self.detect_addresses_in_transactions(best_full_block)?;
+        self.detect_txs_in_block(best_full_block)?;
 
         Ok(())
     }
 
-    fn detect_addresses_in_transactions(&self, full_block: FullBlock) -> Result<(), MonitorError> {
-        let addresses = self.bitvmx_store.get_addresses()?;
+    fn detect_txs_in_block(&self, full_block: FullBlock) -> Result<(), MonitorError> {
+        for tx in full_block.txs.iter() {
+            let is_pegin = self.is_a_pegin_tx(tx);
 
-        for address in addresses {
-            for tx in full_block.txs.iter() {
-                let matched_with_the_address = self.is_a_pegin_tx(address.clone(), tx);
-
-                if matched_with_the_address {
-                    let confirmations = self.get_current_height()? - full_block.height + 1;
-
-                    self.bitvmx_store.update_address_news(
-                        address.clone(),
-                        tx,
-                        full_block.height,
-                        full_block.hash,
-                        full_block.orphan,
-                        confirmations,
-                    )?;
-                }
+            if is_pegin {
+                let block_info =
+                    BlockInfo::new(full_block.height, full_block.hash, full_block.orphan);
+                self.bitvmx_store.save_tx(tx, block_info)?;
             }
+
+            //TODO: detect other txs that we need to track here...
         }
 
         Ok(())
@@ -529,12 +506,11 @@ where
             }
         };
 
-        return true;
+        true
     }
 
     pub fn is_valid_rsk_address(address: &str) -> bool {
-            address.len() == 40 &&
-            address.chars().all(|c| c.is_ascii_hexdigit())
+        address.len() == 40 && address.chars().all(|c| c.is_ascii_hexdigit())
     }
 
     /// Validates if a transaction is a valid peg-in transaction by checking:
@@ -544,7 +520,7 @@ where
     ///    - Packet number
     ///    - RSK destination address
     ///    - Bitcoin reimbursement address (R)
-    pub fn is_a_pegin_tx(&self, address: Address, tx: &Transaction) -> bool {
+    pub fn is_a_pegin_tx(&self, tx: &Transaction) -> bool {
         // Ensure at least 2 outputs exist
         if tx.output.len() < 2 {
             return false;
@@ -555,12 +531,8 @@ where
 
         if let Some(first_output) = tx.output.first() {
             //TODO: get Network::Bitcoin from configuration.
-            if let Ok(output_address) =
-                Address::from_script(&first_output.script_pubkey, Network::Bitcoin)
-            {
-                if output_address == address {
-                    first_output_match = true;
-                }
+            if Address::from_script(&first_output.script_pubkey, Network::Bitcoin).is_ok() {
+                first_output_match = true;
             }
         }
 
@@ -626,15 +598,14 @@ where
     ) -> Result<Option<TransactionStatus>, MonitorError> {
         let tx_status = self.indexer.get_tx(tx_id)?;
 
-        let tx_status_response = tx_status.map(|tx_status| TransactionStatus {
-            tx_id: tx_status.tx.compute_txid(),
-            tx: Some(tx_status.tx),
-            block_info: Some(BlockInfo {
-                block_height: tx_status.block_height,
-                block_hash: tx_status.block_hash,
-                is_orphan: tx_status.orphan,
-            }),
-            confirmations: tx_status.confirmations,
+        let tx_status_response = tx_status.map(|tx_status| {
+            let block_info = Some(BlockInfo::new(
+                tx_status.block_height,
+                tx_status.block_hash,
+                tx_status.orphan,
+            ));
+
+            TransactionStatus::new(tx_status.tx, block_info)
         });
 
         Ok(tx_status_response)

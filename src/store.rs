@@ -1,8 +1,8 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{AddressStatus, BitvmxInstance, BlockInfo, InstanceId, TransactionStore},
+    types::{BitvmxInstance, BlockInfo, InstanceId, TransactionStatus, TransactionStore},
 };
-use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Transaction, Txid};
+use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use std::rc::Rc;
@@ -17,10 +17,10 @@ enum InstanceKey {
     InstanceList,
     InstanceNews,
 }
-enum AddressKey {
-    Address(Address),
-    AddressList,
-    AddressNews,
+enum TransactionKey {
+    Transaction(Txid),
+    TransactionList,
+    TransactionNews,
 }
 
 enum BlockchainKey {
@@ -37,8 +37,11 @@ pub trait MonitorStoreApi {
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
     fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError>;
-    fn save_transaction(&self, instance_id: InstanceId, tx: &Txid)
-        -> Result<(), MonitorStoreError>;
+    fn save_instance_transaction(
+        &self,
+        instance_id: InstanceId,
+        tx: &Txid,
+    ) -> Result<(), MonitorStoreError>;
     fn remove_transaction(
         &self,
         instance_id: InstanceId,
@@ -57,20 +60,10 @@ pub trait MonitorStoreApi {
         tx: &Txid,
     ) -> Result<(), MonitorStoreError>;
 
-    //Address Methods
-    fn get_addresses(&self) -> Result<Vec<Address>, MonitorStoreError>;
-    fn save_address(&self, address: Address) -> Result<(), MonitorStoreError>;
-    fn update_address_news(
-        &self,
-        address: Address,
-        tx: &Transaction,
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        orphan: bool,
-        confirmations: u32,
-    ) -> Result<(), MonitorStoreError>;
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorStoreError>;
-    fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorStoreError>;
+    //Transaction Methods
+    fn save_tx(&self, tx: &Transaction, block_info: BlockInfo) -> Result<(), MonitorStoreError>;
+    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorStoreError>;
+    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorStoreError>;
 
     fn get_current_block_height(&self) -> Result<BlockHeight, MonitorStoreError>;
     fn set_current_block_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
@@ -84,25 +77,27 @@ impl MonitorStore {
     fn get_instance_key(&self, key: InstanceKey) -> String {
         let prefix = "monitor";
         match key {
-            InstanceKey::Instance(instance_id) => format!("{prefix}/instance/{}", instance_id),
             InstanceKey::InstanceList => format!("{prefix}/instance/list"),
+            InstanceKey::Instance(instance_id) => format!("{prefix}/instance/{}", instance_id),
             InstanceKey::InstanceNews => format!("{prefix}/instance/news"),
         }
     }
 
-    fn get_address_key(&self, key: AddressKey) -> String {
+    fn get_tx_key(&self, key: TransactionKey) -> String {
         let prefix = "monitor";
         match key {
-            AddressKey::AddressList => format!("{prefix}/address/list"),
-            AddressKey::Address(address) => format!("{prefix}/address/{}", address),
-            AddressKey::AddressNews => format!("{prefix}/address/news"),
+            TransactionKey::TransactionList => format!("{prefix}/tx/list"),
+            TransactionKey::Transaction(tx_id) => format!("{prefix}/tx/{}", tx_id),
+            TransactionKey::TransactionNews => format!("{prefix}/tx/news"),
         }
     }
 
     fn get_blockchain_key(&self, key: BlockchainKey) -> String {
         let prefix = "monitor";
         match key {
-            BlockchainKey::CurrentBlockHeight => format!("{prefix}/blockchain/current_block_height"),
+            BlockchainKey::CurrentBlockHeight => {
+                format!("{prefix}/blockchain/current_block_height")
+            }
         }
     }
 
@@ -251,27 +246,28 @@ impl MonitorStoreApi for MonitorStore {
         }
     }
 
-    fn get_address_news(&self) -> Result<Vec<(Address, Vec<AddressStatus>)>, MonitorStoreError> {
-        let address_news_key = self.get_address_key(AddressKey::AddressNews);
-        let address_news = self
+    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorStoreError> {
+        let tx_news_key = self.get_tx_key(TransactionKey::TransactionNews);
+        let tx_news = self
             .store
-            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)?
+            .get::<_, Vec<Txid>>(&tx_news_key)?
             .unwrap_or_else(Vec::new);
 
-        let mut address_txs = Vec::new();
-        for address in address_news {
-            let address_news_key =
-                self.get_address_key(AddressKey::Address(address.clone().assume_checked()));
+        let mut txs = Vec::new();
 
-            let address_status = self
+        for tx in tx_news {
+            let tx_news_key = self.get_tx_key(TransactionKey::Transaction(tx));
+
+            let tx_status = self
                 .store
-                .get::<&str, Vec<AddressStatus>>(&address_news_key)?
-                .unwrap_or_else(Vec::new);
+                .get::<&str, TransactionStatus>(&tx_news_key)
+                .unwrap()
+                .unwrap();
 
-            address_txs.push((address.assume_checked(), address_status));
+            txs.push(tx_status);
         }
 
-        Ok(address_txs)
+        Ok(txs)
     }
 
     fn acknowledge_instance_tx_news(
@@ -344,7 +340,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn save_transaction(
+    fn save_instance_transaction(
         &self,
         instance_id: InstanceId,
         tx_id: &Txid,
@@ -359,80 +355,34 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn save_address(&self, address: Address) -> Result<(), MonitorStoreError> {
-        let address_list_key = self.get_address_key(AddressKey::AddressList);
-        let mut addresses = self
+    fn save_tx(&self, tx: &Transaction, block_info: BlockInfo) -> Result<(), MonitorStoreError> {
+        // Save the transaction status
+        let tx_key = self.get_tx_key(TransactionKey::Transaction(tx.compute_txid()));
+        let tx_status = TransactionStatus::new(tx.clone(), Some(block_info));
+        self.store.set(&tx_key, tx_status, None)?;
+
+        // Update the transaction news
+        let txs_news_key = self.get_tx_key(TransactionKey::TransactionNews);
+        let mut txs = self
             .store
-            .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)?
+            .get::<_, Vec<Txid>>(&txs_news_key)?
             .unwrap_or_else(Vec::new);
 
-        if !addresses.iter().any(|a| a == address.as_unchecked()) {
-            addresses.push(address.as_unchecked().clone());
-
-            self.store.set(&address_list_key, &addresses, None)?;
+        if !txs.iter().any(|tx_id| tx_id == &tx.compute_txid()) {
+            txs.push(tx.compute_txid());
+            self.store.set(&txs_news_key, &txs, None)?;
         }
 
-        Ok(())
-    }
-
-    fn update_address_news(
-        &self,
-        address: Address,
-        tx: &Transaction,
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        orphan: bool,
-        confirmations: u32,
-    ) -> Result<(), MonitorStoreError> {
-        let address_key = self.get_address_key(AddressKey::Address(address.clone()));
-
-        let mut address_status = self
+        // Save tx in list
+        let txs_list_key = self.get_tx_key(TransactionKey::TransactionList);
+        let mut txs = self
             .store
-            .get::<&str, Vec<AddressStatus>>(&address_key)?
+            .get::<_, Vec<Txid>>(&txs_list_key)?
             .unwrap_or_else(Vec::new);
-
-        let block_info = Some(BlockInfo {
-            block_height,
-            block_hash,
-            is_orphan: orphan,
-        });
-
-        address_status.push(AddressStatus {
-            tx: Some(tx.clone()),
-            block_info,
-            confirmations,
-        });
-
-        self.store.set(&address_key, address_status, None)?;
-
-        let address_news_key = self.get_address_key(AddressKey::AddressNews);
-        let mut addresses = self
-            .store
-            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)
-            .unwrap_or(None)
-            .unwrap_or_else(Vec::new);
-
-        if !addresses.iter().any(|a| a == address.as_unchecked()) {
-            addresses.push(address.as_unchecked().clone());
-            self.store.set(&address_news_key, &addresses, None)?;
-        }
+        txs.push(tx.compute_txid());
+        self.store.set(&txs_list_key, &txs, None)?;
 
         Ok(())
-    }
-
-    fn get_addresses(&self) -> Result<Vec<Address>, MonitorStoreError> {
-        let address_list_key = self.get_address_key(AddressKey::AddressList);
-        let addresses = self
-            .store
-            .get::<&str, Vec<Address<NetworkUnchecked>>>(&address_list_key)?
-            .unwrap_or_else(Vec::new);
-
-        let addreses_checked: Vec<Address> = addresses
-            .iter()
-            .map(|a| a.clone().assume_checked())
-            .collect();
-
-        Ok(addreses_checked)
     }
 
     fn remove_transaction(
@@ -470,21 +420,16 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn acknowledge_address_news(&self, address: Address) -> Result<(), MonitorStoreError> {
-        let address_news_key = self.get_address_key(AddressKey::AddressNews);
-        let mut address_news = self
+    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorStoreError> {
+        let tx_news_key = self.get_tx_key(TransactionKey::TransactionNews);
+        let mut tx_news = self
             .store
-            .get::<_, Vec<Address<NetworkUnchecked>>>(&address_news_key)?
+            .get::<_, Vec<Txid>>(&tx_news_key)?
             .unwrap_or_default();
 
-        let address_checked: Vec<Address> = address_news
-            .iter()
-            .map(|a| a.clone().assume_checked())
-            .collect();
-
-        if let Some(pos) = address_checked.iter().position(|a| a == &address) {
-            address_news.remove(pos);
-            self.store.set(&address_news_key, &address_news, None)?;
+        if let Some(pos) = tx_news.iter().position(|a| a == &tx_id) {
+            tx_news.remove(pos);
+            self.store.set(&tx_news_key, &tx_news, None)?;
         }
 
         Ok(())
