@@ -248,23 +248,29 @@ impl MonitorStoreApi for MonitorStore {
 
     fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorStoreError> {
         let tx_news_key = self.get_tx_key(TransactionKey::TransactionNews);
-        let tx_news = self
+        let tx_ids = self
             .store
             .get::<_, Vec<Txid>>(&tx_news_key)?
             .unwrap_or_else(Vec::new);
 
         let mut txs = Vec::new();
 
-        for tx in tx_news {
+        for tx in tx_ids {
             let tx_news_key = self.get_tx_key(TransactionKey::Transaction(tx));
 
-            let tx_status = self
-                .store
-                .get::<&str, TransactionStatus>(&tx_news_key)
-                .unwrap()
-                .unwrap();
+            let tx_status = self.store.get::<&str, TransactionStatus>(&tx_news_key)?;
 
-            txs.push(tx_status);
+            if let Some(mut tx_status) = tx_status {
+                let current_height = self.get_current_block_height()?;
+
+                tx_status.confirmations = current_height
+                    .saturating_sub(tx_status.block_info.clone().unwrap().block_height)
+                    + 1;
+
+                txs.push(tx_status);
+            } else {
+                warn!("No tx status found for tx {}", tx);
+            }
         }
 
         Ok(txs)
