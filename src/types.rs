@@ -85,7 +85,7 @@ pub enum AcknowledgeNewsType {
     GroupTransaction(Id, Txid),
     SingleTransaction(Txid),
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid),
+    SpendingUTXOTransaction(Txid, u32),
 }
 
 pub type Id = Uuid;

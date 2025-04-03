@@ -26,13 +26,14 @@ enum BlockchainKey {
     CurrentBlockHeight,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TransactionToMonitorType {
     GroupTransaction(Id, Txid),
     SingleTransaction(Txid),
     RskPeginTransaction,
     SpendingUTXOTransaction(Txid, u32),
 }
-
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TransactionMonitoredType {
     GroupTransaction(Id, Txid),
     SingleTransaction(Txid),
@@ -218,7 +219,7 @@ impl MonitorStoreApi for MonitorStore {
     fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError> {
         match data {
             TransactionMonitoredType::GroupTransaction(id, tx_id) => {
-                let group_news_key = self.get_key(TransactionKey::GroupTransactionList);
+                let group_news_key = self.get_key(TransactionKey::GroupTransactionNews);
                 let mut group_news = self
                     .store
                     .get::<_, Vec<(Id, Vec<Txid>)>>(&group_news_key)?
@@ -235,7 +236,7 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&group_news_key, &group_news, None)?;
             }
             TransactionMonitoredType::SingleTransaction(tx_id) => {
-                let single_news_key = self.get_key(TransactionKey::SingleTransactionList);
+                let single_news_key = self.get_key(TransactionKey::SingleTransactionNews);
                 let mut single_news = self
                     .store
                     .get::<_, Vec<Txid>>(&single_news_key)?
@@ -248,7 +249,7 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&single_news_key, &single_news, None)?;
             }
             TransactionMonitoredType::RskPeginTransaction(tx_id) => {
-                let rsk_news_key = self.get_key(TransactionKey::RskPeginTransaction);
+                let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
                 let mut rsk_news = self
                     .store
                     .get::<_, Vec<Txid>>(&rsk_news_key)?
@@ -261,7 +262,7 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
             TransactionMonitoredType::SpendingUTXOTransaction(tx_id, utxo_index) => {
-                let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+                let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
                     .get::<_, Vec<(Txid, u32)>>(&utxo_news_key)?
@@ -318,14 +319,14 @@ impl MonitorStoreApi for MonitorStore {
                 rsk_news.retain(|tx| tx != &tx_id);
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
-            AcknowledgeNewsType::SpendingUTXOTransaction(tx_id) => {
+            AcknowledgeNewsType::SpendingUTXOTransaction(tx_id, utxo_index) => {
                 let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
                     .get::<_, Vec<(Txid, u32)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                utxo_news.retain(|(tx, _)| tx != &tx_id);
+                utxo_news.retain(|(tx, utxo_i)| tx != &tx_id || utxo_i != &utxo_index);
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
         }
