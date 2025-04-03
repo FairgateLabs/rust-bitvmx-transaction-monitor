@@ -8,9 +8,8 @@ use bitcoin::{
     transaction::Version,
 };
 use bitcoin::{Address, Amount, Network, Transaction, TxOut};
-use bitcoin_indexer::indexer::MockIndexerApi;
 use bitcoincore_rpc::RawTx;
-use bitvmx_transaction_monitor::{monitor::Monitor, store::MockMonitorStore};
+use bitvmx_transaction_monitor::rsk_helper::is_a_pegin_tx;
 
 #[test]
 fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
@@ -118,17 +117,8 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
             .to_hex_string(bitcoin::hex::Case::Lower)
     );
 
-    // Create a mock monitor to test address detection
-    let mock_indexer = MockIndexerApi::new();
-    let mut mock_store = MockMonitorStore::new();
-    mock_store
-        .expect_set_current_block_height()
-        .returning(|_| Ok(()));
-
-    let monitor = Monitor::new(mock_indexer, mock_store, None, 6)?;
-
     // Validate that the committee address (N) is detected
-    assert!(monitor.is_a_pegin_tx(&pegin_tx));
+    assert!(is_a_pegin_tx(&pegin_tx));
 
     Ok(())
 }
