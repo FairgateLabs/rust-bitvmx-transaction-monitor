@@ -16,6 +16,9 @@ pub enum MonitorError {
 
     #[error("Unexpected error: {0}")]
     UnexpectedError(String),
+
+    #[error("Transaction not found: {0}")]
+    TransactionNotFound(String),
 }
 
 #[derive(Error, Debug)]

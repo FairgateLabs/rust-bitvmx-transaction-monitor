@@ -1,6 +1,8 @@
 use crate::errors::MonitorError;
 use crate::rsk_helper::is_a_pegin_tx;
-use crate::store::{MonitorStore, MonitorStoreApi};
+use crate::store::{
+    MonitorStore, MonitorStoreApi, TransactionMonitoredType, TransactionToMonitorType,
+};
 use crate::types::{BlockInfo, Id, MonitorNewType, TransactionMonitorType, TransactionStatus};
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::IndexerApi;
@@ -162,10 +164,10 @@ pub trait MonitorApi {
     /// * `tx_id` - Hash of the transaction to check
     ///
     /// # Returns
-    /// - `Ok(Some(TransactionStatus))`: Current status if the transaction is found
-    /// - `Ok(None)`: If the transaction is not found
+    /// - `Ok(TransactionStatus)`: Current status of the transaction
+    /// - `Err(MonitorError::TransactionNotFound)`: If the transaction is not found
     /// - `Err`: If there was an error retrieving the status
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError>;
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
@@ -179,7 +181,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
 
     fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError> {
         let bitcoind_height = self.indexer.bitcoin_client.get_best_block()?;
-        self.save(data, bitcoind_height)
+        self.save_monitor(data, bitcoind_height)
     }
 
     fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
@@ -190,7 +192,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.acknowledge_news(instance_id, tx_id)
     }
 
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError> {
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
         self.get_tx_status(tx_id)
     }
 
@@ -228,7 +230,7 @@ where
         })
     }
 
-    pub fn save(
+    pub fn save_monitor(
         &self,
         data: TransactionMonitorType,
         start_monitoring: BlockHeight,
@@ -237,24 +239,6 @@ where
 
         Ok(())
     }
-
-    // pub fn save_transaction_for_tracking(
-    //     &self,
-    //     instance_id: Id,
-    //     tx_id: Txid,
-    // ) -> Result<(), MonitorError> {
-    //     self.store.save_instance_transaction(instance_id, &tx_id)?;
-    //     Ok(())
-    // }
-
-    // fn remove_transaction_for_tracking(
-    //     &self,
-    //     instance_id: Id,
-    //     tx_id: Txid,
-    // ) -> Result<(), MonitorError> {
-    //     self.store.remove_transaction(instance_id, &tx_id)?;
-    //     Ok(())
-    // }
 
     pub fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
         self.store
@@ -265,7 +249,6 @@ where
     pub fn tick(&self) -> Result<(), MonitorError> {
         let current_height = self.get_current_height()?;
         let new_height = self.indexer.tick(&current_height)?;
-
         let best_block = self.indexer.get_best_block()?;
 
         if best_block.is_none() {
@@ -273,65 +256,94 @@ where
         }
 
         let best_full_block = best_block.unwrap();
+        let best_block_height = best_full_block.height;
 
         // Get operations that have already started
-        let data = self
-            .store
-            .get_txs_ready_to_monitor(best_full_block.height)?;
+        let txs_types = self.store.get_txs_ready_to_monitor(best_block_height)?;
 
         // Count existing operations get all thansaction that meet next rules:
-        for instance in data {
-            for tx_instance in instance.txs {
-                // if Trasanction is None, means it was not mined.
-                let tx_info = self.indexer.get_tx(&tx_instance.tx_id)?;
+        for tx_type in txs_types {
+            match tx_type {
+                TransactionToMonitorType::GroupTransaction(id, tx_id) => {
+                    let tx_info = self.indexer.get_tx(&tx_id)?;
 
-                if let Some(_tx_info) = tx_info {
-                    if best_full_block.height > _tx_info.block_height
-                        && (best_full_block.height - _tx_info.block_height)
-                            <= self.confirmation_threshold
-                    {
-                        self.store
-                            .update_instance_news(instance.id, tx_instance.tx_id)?;
+                    if let Some(tx) = tx_info {
+                        if best_block_height > tx.block_height
+                            && (best_block_height - tx.block_height) <= self.confirmation_threshold
+                        {
+                            self.store
+                                .update_news(TransactionMonitoredType::GroupTransaction(
+                                    id, tx_id,
+                                ))?;
 
-                        info!(
-                                    "Update confirmation for bitvmx intance: {} | tx_id: {} | at height: {} | confirmations: {}", 
-                                    instance.id,
-                                    tx_instance.tx_id,
-                                    best_full_block.height,
-                                    best_full_block.height - _tx_info.block_height + 1,
-                                );
+                            info!(
+                                "Update confirmation for group: {} | tx_id: {} | at height: {} | confirmations: {}", 
+                                id,
+                                tx_id,
+                                best_block_height,
+                                best_block_height - tx.block_height + 1,
+                            );
+                        }
                     }
+                }
+                TransactionToMonitorType::SingleTransaction(tx_id) => {
+                    let tx_info = self.indexer.get_tx(&tx_id)?;
+
+                    if let Some(tx) = tx_info {
+                        if best_block_height > tx.block_height
+                            && (best_block_height - tx.block_height) <= self.confirmation_threshold
+                        {
+                            self.store
+                                .update_news(TransactionMonitoredType::SingleTransaction(tx_id))?;
+
+                            info!(
+                                "Update confirmation for single tx: {} | at height: {} | confirmations: {}", 
+                                tx_id,
+                                best_block_height,
+                                best_block_height - tx.block_height + 1,
+                            );
+                        }
+                    }
+                }
+                TransactionToMonitorType::RskPeginTransaction => {
+                    let txs_ids = self.detect_rsk_pegin_txs(best_full_block.clone())?;
+
+                    for tx_id in txs_ids {
+                        self.store
+                            .update_news(TransactionMonitoredType::RskPeginTransaction(tx_id))?;
+
+                        if let Some(tx) = self.indexer.get_tx(&tx_id)? {
+                            info!(
+                                "Update confirmation for RSK pegin tx: {} | at height: {} | confirmations: {}", 
+                                tx_id,
+                                best_block_height,
+                                best_block_height - tx.block_height + 1,
+                            );
+                        }
+                    }
+                }
+
+                TransactionToMonitorType::SpendingUTXOTransaction(_tx_id, _utxo_index) => {
+                    // TODO: detect spending utxo txs here
                 }
             }
         }
 
         self.store.set_current_block_height(new_height)?;
 
-        self.detect_txs_in_block(best_full_block)?;
-
         Ok(())
     }
 
-    fn detect_txs_in_block(&self, full_block: FullBlock) -> Result<(), MonitorError> {
+    fn detect_rsk_pegin_txs(&self, full_block: FullBlock) -> Result<Vec<Txid>, MonitorError> {
+        let mut txs_ids = Vec::new();
+
         for tx in full_block.txs.iter() {
-            let is_pegin = is_a_pegin_tx(tx);
-
-            if is_pegin {
-                let block_info =
-                    BlockInfo::new(full_block.height, full_block.hash, full_block.orphan);
-                self.store.save_tx(tx, block_info)?;
+            if is_a_pegin_tx(tx) {
+                txs_ids.push(tx.compute_txid());
             }
-
-            // TODO: detect spending utxo txs here
-            // let is_spending_utxo = is_spending_utxo_tx(tx);
-            // if is_spending_utxo {
-            //     let block_info =
-            //         BlockInfo::new(full_block.height, full_block.hash, full_block.orphan);
-            //     self.bitvmx_store.save_tx(tx, block_info)?;
-            // }
         }
 
-        Ok(())
+        Ok(txs_ids)
     }
 
     pub fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
@@ -339,24 +351,32 @@ where
 
         let mut return_news = Vec::new();
 
-        for news in news_list {
-            let mut return_tx = Vec::new();
+        for news in news {
+            let tx_id = match &news {
+                TransactionMonitoredType::GroupTransaction(_, tx_id) => tx_id,
+                TransactionMonitoredType::SingleTransaction(tx_id) => tx_id,
+                TransactionMonitoredType::RskPeginTransaction(tx_id) => tx_id,
+                TransactionMonitoredType::SpendingUTXOTransaction(tx_id, _) => tx_id,
+            };
 
-            for tx_id in txs {
-                if let Ok(Some(status)) = self.get_tx_status(&tx_id) {
-                    return_tx.push(status);
-                } else {
-                    return Err(MonitorError::UnexpectedError(format!(
-                        "Transaction not found: {}",
-                        tx_id
-                    )));
+            let status = self.get_tx_status(tx_id)?;
+
+            match news {
+                TransactionMonitoredType::GroupTransaction(id, _) => {
+                    return_news.push(MonitorNewType::GroupTransaction(id, status));
+                }
+                TransactionMonitoredType::SingleTransaction(_) => {
+                    return_news.push(MonitorNewType::SingleTransaction(status));
+                }
+                TransactionMonitoredType::RskPeginTransaction(_) => {
+                    return_news.push(MonitorNewType::RskPeginTransaction(status));
+                }
+                TransactionMonitoredType::SpendingUTXOTransaction(_, utxo_index) => {
+                    return_news.push(MonitorNewType::SpendingUTXOTransaction(utxo_index, status));
                 }
             }
-
-            if !return_tx.is_empty() {
-                return_news.push((instance_id, return_tx));
-            }
         }
+
         Ok(return_news)
     }
 
@@ -365,19 +385,20 @@ where
         Ok(())
     }
 
-    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError> {
-        let tx_status = self.indexer.get_tx(tx_id)?;
+    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
+        let tx_status = self
+            .indexer
+            .get_tx(tx_id)?
+            .ok_or_else(|| MonitorError::TransactionNotFound(tx_id.to_string()))?;
 
-        let tx_status_response = tx_status.map(|tx_status| {
-            let block_info = Some(BlockInfo::new(
-                tx_status.block_height,
-                tx_status.block_hash,
-                tx_status.orphan,
-            ));
+        let block_info = Some(BlockInfo::new(
+            tx_status.block_height,
+            tx_status.block_hash,
+            tx_status.orphan,
+        ));
 
-            TransactionStatus::new(tx_status.tx, block_info)
-        });
+        let return_tx_status = TransactionStatus::new(tx_status.tx, block_info);
 
-        Ok(tx_status_response)
+        Ok(return_tx_status)
     }
 }

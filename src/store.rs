@@ -29,11 +29,18 @@ enum BlockchainKey {
     CurrentBlockHeight,
 }
 
-enum TransactionMonitorStoreType {
+pub enum TransactionToMonitorType {
+    GroupTransaction(Id, Txid),
+    SingleTransaction(Txid),
+    RskPeginTransaction,
+    SpendingUTXOTransaction(Txid, u32),
+}
+
+pub enum TransactionMonitoredType {
     GroupTransaction(Id, Txid),
     SingleTransaction(Txid),
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid),
+    SpendingUTXOTransaction(Txid, u32),
 }
 
 pub trait MonitorStoreApi {
@@ -42,7 +49,7 @@ pub trait MonitorStoreApi {
     fn get_txs_ready_to_monitor(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<TransactionMonitorStoreType>, MonitorStoreError>;
+    ) -> Result<Vec<TransactionToMonitorType>, MonitorStoreError>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
     fn save(
@@ -57,8 +64,8 @@ pub trait MonitorStoreApi {
     ) -> Result<(), MonitorStoreError>;
     fn remove_transaction(&self, instance_id: Id, tx: &Txid) -> Result<(), MonitorStoreError>;
 
-    fn update_instance_news(&self, instance_id: Id, txid: Txid) -> Result<(), MonitorStoreError>;
-    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorStoreError>;
+    fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError>;
+    fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError>;
     fn acknowledge_news(&self, instance_id: Id, tx: &Txid) -> Result<(), MonitorStoreError>;
 
     //Transaction Methods
@@ -223,11 +230,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
-        self.get_instances()
-    }
-
-    fn get_news(&self) -> Result<Vec<(Id, Vec<Txid>)>, MonitorStoreError> {
+    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let instance_news = self
             .store
@@ -299,7 +302,7 @@ impl MonitorStoreApi for MonitorStore {
     fn get_txs_ready_to_monitor(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
+    ) -> Result<Vec<TransactionToMonitorType>, MonitorStoreError> {
         // This method will return bitvmx instances excluding the onces are not ready to track
         let mut bitvmx_instances = self.get_instances()?;
         bitvmx_instances.retain(|i| (i.start_height <= current_height));
@@ -381,11 +384,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn remove_transaction(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorStoreError> {
-        self.remove_instance_tx(instance_id, tx_id)
-    }
-
-    fn update_instance_news(&self, instance_id: Id, txid: Txid) -> Result<(), MonitorStoreError> {
+    fn update_news(&self, data: TransactionToMonitorType) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let mut instance_news = self
             .store

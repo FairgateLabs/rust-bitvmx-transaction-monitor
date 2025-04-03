@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     )?;
 
     let bitvmx_instances = get_bitvmx_instances_example();
-    monitor.save(bitvmx_instances)?;
+    monitor.monitor(bitvmx_instances)?;
 
     let mut prev_height = 0;
 

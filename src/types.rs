@@ -1,4 +1,4 @@
-use bitcoin::{BlockHash, Transaction, Txid};
+use bitcoin::{BlockHash, OutPoint, Transaction, Txid};
 use bitcoin_indexer::{indexer::Indexer, store::IndexerStore};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use serde::{Deserialize, Serialize};
@@ -73,13 +73,13 @@ pub enum TransactionMonitorType {
     GroupTransaction(Id, Vec<Txid>),
     SingleTransaction(Txid),
     RskPeginTransaction,
-    SpendingUTXOTransaction(Txid, Number),
+    SpendingUTXOTransaction(Txid, u32),
 }
 pub enum MonitorNewType {
     GroupTransaction(Id, TransactionStatus),
     SingleTransaction(TransactionStatus),
     RskPeginTransaction(TransactionStatus),
-    SpendingUTXOTransaction(TransactionStatus),
+    SpendingUTXOTransaction(u32, TransactionStatus),
 }
 
 pub enum AcknowledgeNewType {

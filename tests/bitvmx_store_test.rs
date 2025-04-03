@@ -77,14 +77,14 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
 
     bitvmx_store.save(&instances)?;
 
-    let instances = bitvmx_store.get_txs_ready_to_monitor(0)?;
+    let instances = bitvmx_store.get_ready_monitors(0)?;
 
     assert_eq!(instances.len(), 0);
 
-    let instances = bitvmx_store.get_txs_ready_to_monitor(50)?;
+    let instances = bitvmx_store.get_ready_monitors(50)?;
     assert_eq!(instances.len(), 0);
 
-    let instances = bitvmx_store.get_txs_ready_to_monitor(2000)?;
+    let instances = bitvmx_store.get_ready_monitors(2000)?;
 
     assert_eq!(instances.len(), 2);
 
@@ -117,7 +117,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
     bitvmx_store.save(&instances)?;
     bitvmx_store.save_instance_transaction(instances[0].id, &tx_id_to_add)?;
 
-    let instances = bitvmx_store.get_txs_ready_to_monitor(100000)?;
+    let instances = bitvmx_store.get_ready_monitors(100000)?;
 
     assert_eq!(instances[0].txs.len(), 2);
 
@@ -177,7 +177,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     bitvmx_store.save(&instances)?;
 
     // update the tx with a confirmation
-    bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
+    bitvmx_store.update_news(instances[0].id, tx.compute_txid())?;
 
     //get and check news
     let instance_news = bitvmx_store.get_news()?;
@@ -188,7 +188,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     assert!(instance_news[0].1.contains(&tx.compute_txid()));
 
     // update the tx with a confirmation in another block
-    bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
+    bitvmx_store.update_news(instances[0].id, tx.compute_txid())?;
 
     // Get the news
     let instance_news = bitvmx_store.get_news()?;
@@ -206,7 +206,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 0);
 
     //update tx with a confirmation in another block
-    bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
+    bitvmx_store.update_news(instances[0].id, tx.compute_txid())?;
 
     // Get the news
     let instance_news = bitvmx_store.get_news()?;
@@ -285,13 +285,13 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     assert_eq!(instance_news.len(), 0);
 
     // Update transactions in both instances
-    bitvmx_store.update_instance_news(instance_id_1, tx_3.compute_txid())?;
-    bitvmx_store.update_instance_news(instance_id_1, tx_1.compute_txid())?;
-    bitvmx_store.update_instance_news(instance_id_2, tx_2.compute_txid())?;
+    bitvmx_store.update_news(instance_id_1, tx_3.compute_txid())?;
+    bitvmx_store.update_news(instance_id_1, tx_1.compute_txid())?;
+    bitvmx_store.update_news(instance_id_2, tx_2.compute_txid())?;
     // update each tx with confirms
-    bitvmx_store.update_instance_news(instance_id_1, tx_1.compute_txid())?;
-    bitvmx_store.update_instance_news(instance_id_2, tx_2.compute_txid())?;
-    bitvmx_store.update_instance_news(instance_id_1, tx_3.compute_txid())?;
+    bitvmx_store.update_news(instance_id_1, tx_1.compute_txid())?;
+    bitvmx_store.update_news(instance_id_2, tx_2.compute_txid())?;
+    bitvmx_store.update_news(instance_id_1, tx_3.compute_txid())?;
 
     // Get and verify news
     let instance_news = bitvmx_store.get_news()?;
