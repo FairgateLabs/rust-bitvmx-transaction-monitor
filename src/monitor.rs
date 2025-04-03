@@ -1,9 +1,9 @@
 use crate::errors::MonitorError;
 use crate::rsk_helper::is_a_pegin_tx;
-use crate::store::{
-    MonitorStore, MonitorStoreApi, TransactionMonitoredType, TransactionToMonitorType,
+use crate::store::{MonitorStore, MonitorStoreApi, TransactionMonitoredType};
+use crate::types::{
+    AcknowledgeNewsType, BlockInfo, MonitorNewType, TransactionMonitorType, TransactionStatus,
 };
-use crate::types::{BlockInfo, Id, MonitorNewType, TransactionMonitorType, TransactionStatus};
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
@@ -150,13 +150,16 @@ pub trait MonitorApi {
     /// to remove it from the pending updates queue.
     ///
     /// # Arguments
-    /// * `instance_id` - ID of the instance the transaction belongs to
-    /// * `tx_id` - Hash of the transaction that was processed
+    /// * `data` - The type of monitoring to perform, which can be:
+    ///   - GroupTransaction: Monitor multiple transactions for a given group
+    ///   - SingleTransaction: Monitor a single transaction
+    ///   - RskPeginTransaction: Monitor RSK pegin transactions
+    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
     ///
     /// # Returns
     /// - `Ok(())`: If the update was successfully acknowledged
     /// - `Err`: If there was an error processing the acknowledgment
-    fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError>;
+    fn acknowledge_news(&self, data: AcknowledgeNewsType) -> Result<(), MonitorError>;
 
     /// Gets the current status of a specific transaction.
     ///
@@ -176,7 +179,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
-        self.get_current_height()
+        self.get_monitor_height()
     }
 
     fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError> {
@@ -188,8 +191,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.get_news()
     }
 
-    fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError> {
-        self.acknowledge_news(instance_id, tx_id)
+    fn acknowledge_news(&self, data: AcknowledgeNewsType) -> Result<(), MonitorError> {
+        self.acknowledge_news(data)
     }
 
     fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
@@ -197,7 +200,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn is_ready(&self) -> Result<bool, MonitorError> {
-        let current_height = self.get_current_height()?;
+        let current_height = self.get_monitor_height()?;
         let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
         Ok(current_height == blockchain_height)
     }
@@ -220,7 +223,7 @@ where
     ) -> Result<Self, MonitorError> {
         let current_height = current_height.unwrap_or(0);
         bitvmx_store
-            .set_current_block_height(current_height)
+            .set_monitor_height(current_height)
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
 
         Ok(Self {
@@ -235,19 +238,19 @@ where
         data: TransactionMonitorType,
         start_monitoring: BlockHeight,
     ) -> Result<(), MonitorError> {
-        self.store.save(data, start_monitoring)?;
+        self.store.save_monitor(data, start_monitoring)?;
 
         Ok(())
     }
 
-    pub fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
+    pub fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
         self.store
-            .get_current_block_height()
+            .get_monitor_height()
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
     }
 
     pub fn tick(&self) -> Result<(), MonitorError> {
-        let current_height = self.get_current_height()?;
+        let current_height = self.get_monitor_height()?;
         let new_height = self.indexer.tick(&current_height)?;
         let best_block = self.indexer.get_best_block()?;
 
@@ -258,35 +261,35 @@ where
         let best_full_block = best_block.unwrap();
         let best_block_height = best_full_block.height;
 
-        // Get operations that have already started
-        let txs_types = self.store.get_txs_ready_to_monitor(best_block_height)?;
+        let txs_types = self.store.get_monitors(best_block_height)?;
 
-        // Count existing operations get all thansaction that meet next rules:
         for tx_type in txs_types {
             match tx_type {
-                TransactionToMonitorType::GroupTransaction(id, tx_id) => {
-                    let tx_info = self.indexer.get_tx(&tx_id)?;
+                TransactionMonitorType::GroupTransaction(id, tx_ids) => {
+                    for tx_id in tx_ids {
+                        let tx_info = self.indexer.get_tx(&tx_id)?;
 
-                    if let Some(tx) = tx_info {
-                        if best_block_height > tx.block_height
-                            && (best_block_height - tx.block_height) <= self.confirmation_threshold
-                        {
-                            self.store
-                                .update_news(TransactionMonitoredType::GroupTransaction(
-                                    id, tx_id,
-                                ))?;
+                        if let Some(tx) = tx_info {
+                            if best_block_height > tx.block_height
+                                && (best_block_height - tx.block_height)
+                                    <= self.confirmation_threshold
+                            {
+                                self.store.update_news(
+                                    TransactionMonitoredType::GroupTransaction(id, tx_id),
+                                )?;
 
-                            info!(
-                                "Update confirmation for group: {} | tx_id: {} | at height: {} | confirmations: {}", 
-                                id,
-                                tx_id,
-                                best_block_height,
-                                best_block_height - tx.block_height + 1,
-                            );
+                                info!(
+                                    "Update confirmation for group: {} | tx_id: {} | at height: {} | confirmations: {}", 
+                                    id,
+                                    tx_id,
+                                    best_block_height,
+                                    best_block_height - tx.block_height + 1,
+                                );
+                            }
                         }
                     }
                 }
-                TransactionToMonitorType::SingleTransaction(tx_id) => {
+                TransactionMonitorType::SingleTransaction(tx_id) => {
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
@@ -305,7 +308,7 @@ where
                         }
                     }
                 }
-                TransactionToMonitorType::RskPeginTransaction => {
+                TransactionMonitorType::RskPeginTransaction => {
                     let txs_ids = self.detect_rsk_pegin_txs(best_full_block.clone())?;
 
                     for tx_id in txs_ids {
@@ -323,13 +326,13 @@ where
                     }
                 }
 
-                TransactionToMonitorType::SpendingUTXOTransaction(_tx_id, _utxo_index) => {
+                TransactionMonitorType::SpendingUTXOTransaction(_tx_id, _utxo_index) => {
                     // TODO: detect spending utxo txs here
                 }
             }
         }
 
-        self.store.set_current_block_height(new_height)?;
+        self.store.set_monitor_height(new_height)?;
 
         Ok(())
     }
@@ -380,8 +383,8 @@ where
         Ok(return_news)
     }
 
-    pub fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError> {
-        self.store.acknowledge_news(instance_id, tx_id)?;
+    pub fn acknowledge_news(&self, data: AcknowledgeNewsType) -> Result<(), MonitorError> {
+        self.store.acknowledge_news(data)?;
         Ok(())
     }
 

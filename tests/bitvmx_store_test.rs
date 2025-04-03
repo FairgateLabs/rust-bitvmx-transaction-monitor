@@ -71,20 +71,21 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
         "test_outputs/test_one",
     ))?);
+
     let bitvmx_store = MonitorStore::new(storage)?;
 
     let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
 
-    bitvmx_store.save(&instances)?;
+    bitvmx_store.save_monitor(&instances)?;
 
-    let instances = bitvmx_store.get_ready_monitors(0)?;
+    let instances = bitvmx_store.get_monitors(0)?;
 
     assert_eq!(instances.len(), 0);
 
-    let instances = bitvmx_store.get_ready_monitors(50)?;
+    let instances = bitvmx_store.get_monitors(50)?;
     assert_eq!(instances.len(), 0);
 
-    let instances = bitvmx_store.get_ready_monitors(2000)?;
+    let instances = bitvmx_store.get_monitors(2000)?;
 
     assert_eq!(instances.len(), 2);
 
@@ -114,10 +115,10 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
     ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
 
-    bitvmx_store.save(&instances)?;
+    bitvmx_store.save_monitor(&instances)?;
     bitvmx_store.save_instance_transaction(instances[0].id, &tx_id_to_add)?;
 
-    let instances = bitvmx_store.get_ready_monitors(100000)?;
+    let instances = bitvmx_store.get_monitors(100000)?;
 
     assert_eq!(instances[0].txs.len(), 2);
 
@@ -174,7 +175,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     }];
 
     // Add the instance to the store
-    bitvmx_store.save(&instances)?;
+    bitvmx_store.save_monitor(&instances)?;
 
     // update the tx with a confirmation
     bitvmx_store.update_news(instances[0].id, tx.compute_txid())?;
@@ -278,7 +279,7 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     ];
 
     // Save instances
-    bitvmx_store.save(&instances)?;
+    bitvmx_store.save_monitor(&instances)?;
 
     // Verify no news initially
     let instance_news = bitvmx_store.get_news()?;
@@ -349,7 +350,7 @@ fn remove_instance() -> Result<(), anyhow::Error> {
     }];
 
     // Save instances
-    bitvmx_store.save(&instances)?;
+    bitvmx_store.save_monitor(&instances)?;
 
     Ok(())
 }

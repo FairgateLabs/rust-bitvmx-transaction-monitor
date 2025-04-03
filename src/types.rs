@@ -1,8 +1,7 @@
-use bitcoin::{BlockHash, OutPoint, Transaction, Txid};
+use bitcoin::{BlockHash, Transaction, Txid};
 use bitcoin_indexer::{indexer::Indexer, store::IndexerStore};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use serde::{Deserialize, Serialize};
-use serde_json::Number;
 use uuid::Uuid;
 
 use crate::{monitor::Monitor, store::MonitorStore};
@@ -82,7 +81,7 @@ pub enum MonitorNewType {
     SpendingUTXOTransaction(u32, TransactionStatus),
 }
 
-pub enum AcknowledgeNewType {
+pub enum AcknowledgeNewsType {
     GroupTransaction(Id, Txid),
     SingleTransaction(Txid),
     RskPeginTransaction(Txid),
