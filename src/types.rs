@@ -2,6 +2,7 @@ use bitcoin::{BlockHash, Transaction, Txid};
 use bitcoin_indexer::{indexer::Indexer, store::IndexerStore};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use serde::{Deserialize, Serialize};
+use serde_json::Number;
 use uuid::Uuid;
 
 use crate::{monitor::Monitor, store::MonitorStore};
@@ -68,25 +69,26 @@ pub struct BlockAgragatedInfo {
     pub is_orphan: bool,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct BitvmxInstance {
-    //bitvmx instance id
-    pub id: InstanceId,
-
-    //bitvmx linked transactions data + speed up transactions data
-    pub txs: Vec<TransactionStore>,
-
-    //First height to start searching the bitvmx instance in the blockchain
-    pub start_height: BlockHeight,
+pub enum TransactionMonitorType {
+    GroupTransaction(Id, Vec<Txid>),
+    SingleTransaction(Txid),
+    RskPeginTransaction,
+    SpendingUTXOTransaction(Txid, Number),
 }
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct InstanceData {
-    //bitvmx instance id
-    pub instance_id: InstanceId,
-
-    //bitvmx linked transactions data
-    pub txs: Vec<Txid>,
+pub enum MonitorNewType {
+    GroupTransaction(Id, Vec<TransactionStatus>),
+    SingleTransaction(TransactionStatus),
+    RskPeginTransaction(TransactionStatus),
+    SpendingUTXOTransaction(TransactionStatus),
 }
 
-pub type InstanceId = Uuid;
+pub enum AcknowledgeNewType {
+    GroupTransaction(Id, Txid),
+    SingleTransaction(Txid),
+    RskPeginTransaction(Txid),
+    SpendingUTXOTransaction(Txid),
+}
+
+pub type Id = Uuid;
+
 pub type MonitorType = Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore>;

@@ -1,13 +1,8 @@
 use crate::errors::MonitorError;
+use crate::rsk_helper::is_a_pegin_tx;
 use crate::store::{MonitorStore, MonitorStoreApi};
-use crate::types::{
-    BitvmxInstance, BlockInfo, InstanceData, InstanceId, TransactionStatus, TransactionStore,
-};
-use bitcoin::script::Instruction;
-use bitcoin::secp256k1::ffi::{
-    secp256k1_context_no_precomp, secp256k1_xonly_pubkey_parse, XOnlyPublicKey,
-};
-use bitcoin::{Address, Network, Script, Transaction, Txid};
+use crate::types::{BlockInfo, Id, MonitorNewType, TransactionMonitorType, TransactionStatus};
+use bitcoin::Txid;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
@@ -86,137 +81,91 @@ pub trait MonitorApi {
     /// Checks if the monitor is ready and fully synced with the blockchain.
     ///
     /// # Returns
-    /// - `Ok(bool)`: Returns true if the monitor is ready and synced, false otherwise.
-    /// - `Err`: If there was an error checking the sync status.
+    /// - `Ok(true)`: If the monitor is fully synced with the blockchain
+    /// - `Ok(false)`: If the monitor is still syncing blocks
+    /// - `Err`: If there was an error checking the sync status
     fn is_ready(&self) -> Result<bool, MonitorError>;
 
     /// Processes one tick of the monitor's operation.
     ///
-    /// This method monitors transaction statuses for stored instances and checks for confirmations.
-    /// It also triggers the indexer to continue syncing if not yet synchronized with the blockchain.
+    /// This method:
+    /// - Checks for new blocks and updates the monitor's state
+    /// - Updates confirmation counts for tracked transactions
+    /// - Detects new transactions that need to be monitored
+    /// - Triggers the indexer to continue syncing if needed
     ///
     /// # Returns
-    /// - `Ok(())`: If the tick operation completed successfully.
-    /// - `Err`: If there was an error during processing.
+    /// - `Ok(())`: If the tick completed successfully
+    /// - `Err`: If there was an error during processing
     fn tick(&self) -> Result<(), MonitorError>;
 
     /// Gets the current block height that the monitor has processed.
     ///
     /// # Returns
-    /// The current block height as a `BlockHeight`.
-    fn get_current_height(&self) -> Result<BlockHeight, MonitorError>;
+    /// - `Ok(BlockHeight)`: The height of the last processed block
+    /// - `Err`: If there was an error retrieving the height
+    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError>;
 
-    /// Saves multiple instances for monitoring.
+    /// Gets the configured confirmation threshold for transactions.
+    ///
+    /// The confirmation threshold determines when a transaction is considered final.
+    /// A transaction needs this many confirmations (blocks mined on top of its block)
+    /// before the monitor considers it irreversible.
+    ///
+    /// # Returns
+    /// The number of confirmations required for finality
+    fn get_confirmation_threshold(&self) -> u32;
+
+    /// Starts monitoring transactions based on the provided monitor type.
     ///
     /// # Arguments
-    /// * `instances` - Vector of instance data to be tracked
+    /// * `data` - The type of monitoring to perform, which can be:
+    ///   - GroupTransaction: Monitor multiple transactions for a given group
+    ///   - SingleTransaction: Monitor a single transaction
+    ///   - RskPeginTransaction: Monitor RSK pegin transactions
+    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
     ///
     /// # Returns
-    /// - `Ok(())`: If instances were saved successfully.
-    /// - `Err`: If there was an error saving the instances.
-    fn save_instances_for_tracking(&self, instances: Vec<InstanceData>)
-        -> Result<(), MonitorError>;
+    /// - `Ok(())`: If monitoring was set up successfully
+    /// - `Err`: If there was an error setting up monitoring
+    fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError>;
 
-    /// Saves a single transaction to be monitored for a specific instance.
+    /// Gets status updates for monitored transactions.
     ///
-    /// # Arguments
-    /// * `instance_id` - ID of the instance the transaction belongs to
-    /// * `tx_id` - Transaction ID to monitor
-    ///
-    /// # Returns
-    /// - `Ok(())`: If the transaction was saved successfully.
-    /// - `Err`: If there was an error saving the transaction.
-    fn save_transaction_for_tracking(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-    ) -> Result<(), MonitorError>;
-
-    /// Removes a transaction from being monitored for a specific instance.
-    ///
-    /// # Arguments
-    /// * `instance_id` - ID of the instance the transaction belongs to
-    /// * `tx_id` - Transaction ID to stop monitoring
+    /// Returns updates for transactions that have had status changes, such as:
+    /// - New confirmations
+    /// - Becoming orphaned
+    /// - Being included in a block
     ///
     /// # Returns
-    /// - `Ok(())`: If the transaction was removed successfully.
-    /// - `Err`: If there was an error removing the transaction.
-    fn remove_transaction_for_tracking(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-    ) -> Result<(), MonitorError>;
-
-    /// Gets all instances currently being tracked.
-    ///
-    /// # Returns
-    /// - `Ok(Vec<BitvmxInstance>)`: Vector of all tracked instances.
-    /// - `Err`: If there was an error retrieving the instances.
-    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorError>;
-
-    /// Gets status updates for transactions belonging to monitored instances.
-    ///
-    /// # Returns
-    /// - `Ok(Vec<(InstanceId, Vec<TransactionStatus>)>)`: Vector of tuples containing:
-    ///   - `InstanceId`: The BitVMX instance ID
-    ///   - `Vec<TransactionStatus>`: Vector of status updates for the instance's transactions
-    /// - `Err`: If there was an error retrieving the updates.
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>, MonitorError>;
+    /// - `Ok(Vec<MonitorNewType>)`: List of status updates grouped by monitor type
+    /// - `Err`: If there was an error retrieving updates
+    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError>;
 
     /// Acknowledges that a transaction status update has been processed.
     ///
-    /// This removes the status update from the pending news queue.
+    /// After processing a status update from get_news(), this method should be called
+    /// to remove it from the pending updates queue.
     ///
     /// # Arguments
     /// * `instance_id` - ID of the instance the transaction belongs to
-    /// * `tx_id` - Transaction ID that was processed
+    /// * `tx_id` - Hash of the transaction that was processed
     ///
     /// # Returns
-    /// - `Ok(())`: If the acknowledgment was successful.
-    /// - `Err`: If there was an error processing the acknowledgment.
-    fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorError>;
+    /// - `Ok(())`: If the update was successfully acknowledged
+    /// - `Err`: If there was an error processing the acknowledgment
+    fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError>;
 
     /// Gets the current status of a specific transaction.
     ///
     /// # Arguments
-    /// * `tx_id` - Transaction ID to check
+    /// * `tx_id` - Hash of the transaction to check
     ///
     /// # Returns
-    /// - `Ok(Option<TransactionStatus>)`: The transaction's status if found.
-    /// - `Err`: If there was an error retrieving the status.
-    fn get_instance_tx_status(
-        &self,
-        tx_id: &Txid,
-    ) -> Result<Option<TransactionStatus>, MonitorError>;
-
-    /// Gets status updates for monitored transactions that .
-    ///
-    /// # Returns
-    /// - `Ok(Vec<TransactionStatus>)`: Vector of transaction statuses that match with our needs.
-    /// - `Err`: If there was an error retrieving the updates.
-    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorError>;
-
-    /// Acknowledges that an address status update has been processed.
-    ///
-    /// # Arguments
-    /// * `address` - The address whose updates were processed
-    ///
-    /// # Returns
-    /// - `Ok(())`: If the acknowledgment was successful.
-    /// - `Err`: If there was an error processing the acknowledgment.
-    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorError>;
-
-    /// Gets the configured confirmation threshold that determines when a transaction is considered final.
-    /// This threshold represents the minimum number of blocks that must be mined on top of the block
-    /// containing the transaction before it is treated as irreversible.
-    ///
-    /// # Returns
-    /// The confirmation threshold as a u32.
-    fn get_confirmation_threshold(&self) -> u32;
+    /// - `Ok(Some(TransactionStatus))`: Current status if the transaction is found
+    /// - `Ok(None)`: If the transaction is not found
+    /// - `Err`: If there was an error retrieving the status
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError>;
 }
 
 impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
@@ -224,71 +173,25 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.tick()
     }
 
-    fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
+    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
         self.get_current_height()
     }
 
-    fn save_instances_for_tracking(
-        &self,
-        instances: Vec<InstanceData>,
-    ) -> Result<(), MonitorError> {
+    fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError> {
         let current_height = self.get_current_height()?;
-
-        let bitvmx_instances: Vec<BitvmxInstance> = instances
-            .into_iter()
-            .map(|instance_data| {
-                let txs = instance_data
-                    .txs
-                    .into_iter()
-                    .map(|tx_id| TransactionStore { tx_id, tx: None })
-                    .collect();
-                BitvmxInstance {
-                    id: instance_data.instance_id,
-                    txs,
-                    start_height: current_height,
-                }
-            })
-            .collect();
-
-        self.save_instances_for_tracking(bitvmx_instances)
-    }
-    fn save_transaction_for_tracking(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-    ) -> Result<(), MonitorError> {
-        self.save_transaction_for_tracking(instance_id, tx_id)
+        self.save(data, current_height)
     }
 
-    fn remove_transaction_for_tracking(
-        &self,
-        instance_id: InstanceId,
-        tx_id: Txid,
-    ) -> Result<(), MonitorError> {
-        self.remove_transaction_for_tracking(instance_id, tx_id)
+    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
+        self.get_news()
     }
 
-    fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorError> {
-        self.get_instances_for_tracking()
+    fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError> {
+        self.acknowledge_news(instance_id, tx_id)
     }
 
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>, MonitorError> {
-        self.get_instance_news()
-    }
-
-    fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorError> {
-        self.acknowledge_instance_tx_news(instance_id, tx_id)
-    }
-
-    fn get_instance_tx_status(
-        &self,
-        tx_id: &Txid,
-    ) -> Result<Option<TransactionStatus>, MonitorError> {
-        self.get_instance_tx_status(tx_id)
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError> {
+        self.get_tx_status(tx_id)
     }
 
     fn is_ready(&self) -> Result<bool, MonitorError> {
@@ -299,16 +202,6 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
 
     fn get_confirmation_threshold(&self) -> u32 {
         self.confirmation_threshold
-    }
-
-    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorError> {
-        let tx_news = self.bitvmx_store.get_single_tx_news()?;
-        Ok(tx_news)
-    }
-
-    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorError> {
-        self.bitvmx_store.acknowledge_tx_news(tx_id)?;
-        Ok(())
     }
 }
 
@@ -335,18 +228,19 @@ where
         })
     }
 
-    pub fn save_instances_for_tracking(
+    pub fn save(
         &self,
-        instances: Vec<BitvmxInstance>,
+        data: TransactionMonitorType,
+        current_height: BlockHeight,
     ) -> Result<(), MonitorError> {
-        self.bitvmx_store.save_instances(&instances)?;
+        self.bitvmx_store.save_instances(&data, current_height)?;
 
         Ok(())
     }
 
     pub fn save_transaction_for_tracking(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
     ) -> Result<(), MonitorError> {
         self.bitvmx_store
@@ -356,16 +250,11 @@ where
 
     fn remove_transaction_for_tracking(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: Txid,
     ) -> Result<(), MonitorError> {
         self.bitvmx_store.remove_transaction(instance_id, &tx_id)?;
         Ok(())
-    }
-
-    pub fn get_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorError> {
-        let instances = self.bitvmx_store.get_all_instances_for_tracking()?;
-        Ok(instances)
     }
 
     pub fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
@@ -426,7 +315,7 @@ where
 
     fn detect_txs_in_block(&self, full_block: FullBlock) -> Result<(), MonitorError> {
         for tx in full_block.txs.iter() {
-            let is_pegin = self.is_a_pegin_tx(tx);
+            let is_pegin = is_a_pegin_tx(tx);
 
             if is_pegin {
                 let block_info =
@@ -440,133 +329,17 @@ where
         Ok(())
     }
 
-    pub fn extract_output_data(script: &Script) -> Vec<Vec<u8>> {
-        // Iterate over script instructions to find pushed data
-        let instructions = script.instructions_minimal();
-        let mut result = Vec::new();
+    pub fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
+        let news = self.bitvmx_store.get_news()?;
 
-        for inst in instructions.flatten() {
-            if let Instruction::PushBytes(data) = inst {
-                result.push(data.as_bytes().to_vec());
-            }
-        }
+        let mut return_news = Vec::new();
 
-        result
-    }
-
-    /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
-    pub fn is_valid_op_return_data(data: Vec<Vec<u8>>) -> bool {
-        if data.len() != 1 {
-            return false;
-        }
-        let rest = &data[0];
-        // Expected OP_RETURN format: "RSK_PEGIN N A R"
-        if rest.len() != 69 {
-            return false;
-        }
-        // First part should be "RSK_PEGIN"
-        let (first_part, rest) = rest.split_at(9);
-        if String::from_utf8_lossy(first_part) != "RSK_PEGIN" {
-            return false;
-        }
-
-        // Second part should be a number for the packet number (8 bytes)
-        let (second_part, rest) = rest.split_at(8);
-        if second_part.len() != 8 {
-            return false;
-        }
-        // let _packet_number = u64::from_be_bytes(second_part.try_into().unwrap());
-
-        // Third part should be RSK address (20 bytes)
-        let (third_part, rest) = rest.split_at(20);
-        if third_part.len() != 20 {
-            return false;
-        }
-        if !Self::is_valid_rsk_address(&hex::encode(third_part)) {
-            return false;
-        }
-
-        // Fourth part should be Bitcoin xOnlyPublicKey (32 bytes)
-        let fourth_part = rest;
-        if fourth_part.len() != 32 {
-            return false;
-        }
-
-        // Fourth part should be Bitcoin xOnlyPublicKey
-        unsafe {
-            let mut x_only_public_key = XOnlyPublicKey::new();
-            let fourth_part = secp256k1_xonly_pubkey_parse(
-                secp256k1_context_no_precomp,
-                &mut x_only_public_key as *mut _,
-                fourth_part.as_ptr(),
-            );
-            println!("fourth_part {}", fourth_part);
-            if fourth_part != 1 {
-                return false;
-            }
-        };
-
-        true
-    }
-
-    pub fn is_valid_rsk_address(address: &str) -> bool {
-        address.len() == 40 && address.chars().all(|c| c.is_ascii_hexdigit())
-    }
-
-    /// Validates if a transaction is a valid peg-in transaction by checking:
-    /// 1. The first output matches the given committee address (N)
-    /// 2. The second output is a valid OP_RETURN containing:
-    ///    - "RSK_PEGIN" identifier
-    ///    - Packet number
-    ///    - RSK destination address
-    ///    - Bitcoin reimbursement address (R)
-    pub fn is_a_pegin_tx(&self, tx: &Transaction) -> bool {
-        // Ensure at least 2 outputs exist
-        if tx.output.len() < 2 {
-            return false;
-        }
-
-        // Check the first output for the matching address
-        let mut first_output_match = false;
-
-        if let Some(first_output) = tx.output.first() {
-            //TODO: get Network::Bitcoin from configuration.
-            if Address::from_script(&first_output.script_pubkey, Network::Bitcoin).is_ok() {
-                first_output_match = true;
-            }
-        }
-
-        if !first_output_match {
-            return false;
-        }
-
-        // Check the second output for the OP_RETURN structure
-        if let Some(op_return_output) = tx.output.get(1) {
-            if op_return_output.script_pubkey.is_op_return() {
-                let data = Self::extract_output_data(&op_return_output.script_pubkey);
-
-                if Self::is_valid_op_return_data(data) {
-                    return true; // OP_RETURN has valid format
-                }
-            }
-        }
-
-        false
-    }
-
-    pub fn get_instance_news(
-        &self,
-    ) -> Result<Vec<(InstanceId, Vec<TransactionStatus>)>, MonitorError> {
-        let instances = self.bitvmx_store.get_instance_news()?;
-
-        let mut news = Vec::new();
-
-        for (instance_id, txs) in instances {
-            let mut tx_responses = Vec::new();
+        for news in news_list {
+            let mut return_tx = Vec::new();
 
             for tx_id in txs {
-                if let Ok(Some(status)) = self.get_instance_tx_status(&tx_id) {
-                    tx_responses.push(status);
+                if let Ok(Some(status)) = self.get_tx_status(&tx_id) {
+                    return_tx.push(status);
                 } else {
                     return Err(MonitorError::UnexpectedError(format!(
                         "Transaction not found: {}",
@@ -575,27 +348,19 @@ where
                 }
             }
 
-            if !tx_responses.is_empty() {
-                news.push((instance_id, tx_responses));
+            if !return_tx.is_empty() {
+                return_news.push((instance_id, return_tx));
             }
         }
-        Ok(news)
+        Ok(return_news)
     }
 
-    pub fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorError> {
-        self.bitvmx_store
-            .acknowledge_instance_tx_news(instance_id, tx_id)?;
+    pub fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError> {
+        self.bitvmx_store.acknowledge_news(instance_id, tx_id)?;
         Ok(())
     }
 
-    pub fn get_instance_tx_status(
-        &self,
-        tx_id: &Txid,
-    ) -> Result<Option<TransactionStatus>, MonitorError> {
+    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<Option<TransactionStatus>, MonitorError> {
         let tx_status = self.indexer.get_tx(tx_id)?;
 
         let tx_status_response = tx_status.map(|tx_status| {

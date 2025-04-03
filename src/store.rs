@@ -1,6 +1,8 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{BitvmxInstance, BlockInfo, InstanceId, TransactionStatus, TransactionStore},
+    types::{
+        BlockInfo, Id, MonitorNewType, TransactionMonitorType, TransactionStatus, TransactionStore,
+    },
 };
 use bitcoin::{Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
@@ -13,7 +15,7 @@ pub struct MonitorStore {
     store: Rc<Storage>,
 }
 enum InstanceKey {
-    Instance(InstanceId),
+    Instance(Id),
     InstanceList,
     InstanceNews,
 }
@@ -36,29 +38,21 @@ pub trait MonitorStoreApi {
     ) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
-    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError>;
+    fn save(
+        &self,
+        data: TransactionMonitorType,
+        current_height: BlockHeight,
+    ) -> Result<(), MonitorStoreError>;
     fn save_instance_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx: &Txid,
     ) -> Result<(), MonitorStoreError>;
-    fn remove_transaction(
-        &self,
-        instance_id: InstanceId,
-        tx: &Txid,
-    ) -> Result<(), MonitorStoreError>;
+    fn remove_transaction(&self, instance_id: Id, tx: &Txid) -> Result<(), MonitorStoreError>;
 
-    fn update_instance_news(
-        &self,
-        instance_id: InstanceId,
-        txid: Txid,
-    ) -> Result<(), MonitorStoreError>;
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError>;
-    fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx: &Txid,
-    ) -> Result<(), MonitorStoreError>;
+    fn update_instance_news(&self, instance_id: Id, txid: Txid) -> Result<(), MonitorStoreError>;
+    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorStoreError>;
+    fn acknowledge_news(&self, instance_id: Id, tx: &Txid) -> Result<(), MonitorStoreError>;
 
     //Transaction Methods
     fn save_tx(&self, tx: &Transaction, block_info: BlockInfo) -> Result<(), MonitorStoreError>;
@@ -101,10 +95,7 @@ impl MonitorStore {
         }
     }
 
-    fn get_instance(
-        &self,
-        instance_id: InstanceId,
-    ) -> Result<Option<BitvmxInstance>, MonitorStoreError> {
+    fn get_instance(&self, instance_id: Id) -> Result<Option<BitvmxInstance>, MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
         let instance = self.store.get::<&str, BitvmxInstance>(&instance_key)?;
 
@@ -113,7 +104,7 @@ impl MonitorStore {
 
     fn save_instance_tx(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_status: &TransactionStore,
     ) -> Result<(), MonitorStoreError> {
         let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
@@ -146,11 +137,7 @@ impl MonitorStore {
         Ok(())
     }
 
-    fn remove_instance_tx(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
+    fn remove_instance_tx(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         // Retrieve the instance using the instance_id
         let instance = self.get_instance(instance_id)?;
 
@@ -191,7 +178,7 @@ impl MonitorStore {
         let instances_key = self.get_instance_key(InstanceKey::InstanceList);
         let all_instance_ids = self
             .store
-            .get::<_, Vec<InstanceId>>(instances_key)?
+            .get::<_, Vec<Id>>(instances_key)?
             .unwrap_or_default();
 
         for id in all_instance_ids {
@@ -233,11 +220,11 @@ impl MonitorStoreApi for MonitorStore {
         self.get_instances()
     }
 
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError> {
+    fn get_news(&self) -> Result<Vec<(Id, Vec<Txid>)>, MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let instance_news = self
             .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)
+            .get::<_, Vec<(Id, Vec<Txid>)>>(&instance_news_key)
             .unwrap_or_default();
 
         match instance_news {
@@ -276,16 +263,12 @@ impl MonitorStoreApi for MonitorStore {
         Ok(txs)
     }
 
-    fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
+    fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
 
         let mut instances_news = self
             .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .get::<_, Vec<(Id, Vec<Txid>)>>(&instance_news_key)?
             .unwrap_or_default();
 
         if let Some(index) = instances_news.iter().position(|(id, _)| *id == instance_id) {
@@ -317,7 +300,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(bitvmx_instances)
     }
 
-    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError> {
+    fn save(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError> {
         for instance in instances {
             self.save_instance(instance)?;
         }
@@ -334,7 +317,7 @@ impl MonitorStoreApi for MonitorStore {
         let instances_key = self.get_instance_key(InstanceKey::InstanceList);
         let mut all_instances = self
             .store
-            .get::<_, Vec<InstanceId>>(&instances_key)
+            .get::<_, Vec<Id>>(&instances_key)
             .unwrap_or_default()
             .unwrap_or_default();
 
@@ -348,7 +331,7 @@ impl MonitorStoreApi for MonitorStore {
 
     fn save_instance_transaction(
         &self,
-        instance_id: InstanceId,
+        instance_id: Id,
         tx_id: &Txid,
     ) -> Result<(), MonitorStoreError> {
         let tx_data = TransactionStore {
@@ -391,23 +374,15 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn remove_transaction(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
+    fn remove_transaction(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorStoreError> {
         self.remove_instance_tx(instance_id, tx_id)
     }
 
-    fn update_instance_news(
-        &self,
-        instance_id: InstanceId,
-        txid: Txid,
-    ) -> Result<(), MonitorStoreError> {
+    fn update_instance_news(&self, instance_id: Id, txid: Txid) -> Result<(), MonitorStoreError> {
         let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
         let mut instance_news = self
             .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .get::<_, Vec<(Id, Vec<Txid>)>>(&instance_news_key)?
             .unwrap_or_default();
 
         // Find the index of the instance in the news

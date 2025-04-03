@@ -75,7 +75,7 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
 
     let instances: Vec<BitvmxInstance> = get_all_mock_bitvmx_instances();
 
-    bitvmx_store.save_instances(&instances)?;
+    bitvmx_store.save(&instances)?;
 
     let instances = bitvmx_store.get_instances_ready_to_track(0)?;
 
@@ -114,7 +114,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
     ))?);
     let bitvmx_store = MonitorStore::new(storage)?;
 
-    bitvmx_store.save_instances(&instances)?;
+    bitvmx_store.save(&instances)?;
     bitvmx_store.save_instance_transaction(instances[0].id, &tx_id_to_add)?;
 
     let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
@@ -148,9 +148,9 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
 
     let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
     //remove all the news
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_2, &tx.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_2, &tx.compute_txid())?;
 
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
 
     //assert There is no news
     assert_eq!(instance_news.len(), 0);
@@ -174,13 +174,13 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     }];
 
     // Add the instance to the store
-    bitvmx_store.save_instances(&instances)?;
+    bitvmx_store.save(&instances)?;
 
     // update the tx with a confirmation
     bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
 
     //get and check news
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
     assert_eq!(instance_news.len(), 1);
     //check news is the instance with id 2 and tx with id tx_id
     assert_eq!(instance_news[0].0, instance_id_2);
@@ -191,7 +191,7 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
 
     // Get the news
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
 
     assert_eq!(instance_news.len(), 1);
     //check news is the instance with id 2 and tx with id tx_id
@@ -200,16 +200,16 @@ fn get_instance_news() -> Result<(), anyhow::Error> {
     //assert!(instance_news[0].1[0], &tx_id);
 
     //remove news
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_2, &tx.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_2, &tx.compute_txid())?;
 
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
     assert_eq!(instance_news.len(), 0);
 
     //update tx with a confirmation in another block
     bitvmx_store.update_instance_news(instances[0].id, tx.compute_txid())?;
 
     // Get the news
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
     assert_eq!(instance_news.len(), 1);
     //check news is the instance with id 2 and tx with id tx_id
     assert_eq!(instance_news[0].0, instance_id_2);
@@ -248,9 +248,9 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     let instance_id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
     let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
     //remove all the news
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_1, &tx_1.compute_txid())?;
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_1, &tx_3.compute_txid())?;
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_2, &tx_2.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_1, &tx_1.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_1, &tx_3.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_2, &tx_2.compute_txid())?;
 
     let instances = vec![
         BitvmxInstance {
@@ -278,10 +278,10 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     ];
 
     // Save instances
-    bitvmx_store.save_instances(&instances)?;
+    bitvmx_store.save(&instances)?;
 
     // Verify no news initially
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
     assert_eq!(instance_news.len(), 0);
 
     // Update transactions in both instances
@@ -294,14 +294,14 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     bitvmx_store.update_instance_news(instance_id_1, tx_3.compute_txid())?;
 
     // Get and verify news
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
     assert_eq!(instance_news.len(), 2);
 
     // Acknowledge news for instance 1
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_2, &tx_2.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_2, &tx_2.compute_txid())?;
 
     // Verify only news for instance 2 remains
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
 
     assert_eq!(instance_news.len(), 1);
     assert_eq!(instance_news[0].0, instance_id_1);
@@ -310,11 +310,11 @@ fn get_instance_news_multiple_instances() -> Result<(), anyhow::Error> {
     assert!(instance_news[0].1.contains(&tx_3.compute_txid()));
 
     // Acknowledge news for instance 2
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_1, &tx_1.compute_txid())?;
-    bitvmx_store.acknowledge_instance_tx_news(instance_id_1, &tx_3.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_1, &tx_1.compute_txid())?;
+    bitvmx_store.acknowledge_news(instance_id_1, &tx_3.compute_txid())?;
 
     // Verify no news remains
-    let instance_news = bitvmx_store.get_instance_news()?;
+    let instance_news = bitvmx_store.get_news()?;
     assert_eq!(instance_news.len(), 0);
 
     Ok(())
@@ -349,7 +349,7 @@ fn remove_instance() -> Result<(), anyhow::Error> {
     }];
 
     // Save instances
-    bitvmx_store.save_instances(&instances)?;
+    bitvmx_store.save(&instances)?;
 
     Ok(())
 }

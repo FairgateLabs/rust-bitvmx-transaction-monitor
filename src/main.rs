@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     )?;
 
     let bitvmx_instances = get_bitvmx_instances_example();
-    monitor.save_instances_for_tracking(bitvmx_instances)?;
+    monitor.save(bitvmx_instances)?;
 
     let mut prev_height = 0;
 
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
         }
 
         let current_height = monitor.get_current_height()?;
-        
+
         if prev_height == current_height && prev_height > 0 {
             info!("Waitting for a new block...");
             thread::sleep(Duration::from_secs(10));
