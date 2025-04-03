@@ -1,7 +1,7 @@
 use bitcoin::{absolute::LockTime, Transaction, Txid};
 use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi},
-    types::{BitvmxInstance, TransactionStore},
+    types::TransactionStore,
 };
 use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;

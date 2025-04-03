@@ -68,6 +68,7 @@ pub struct BlockAgragatedInfo {
     pub is_orphan: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum TransactionMonitorType {
     GroupTransaction(Id, Vec<Txid>),
     SingleTransaction(Txid),
