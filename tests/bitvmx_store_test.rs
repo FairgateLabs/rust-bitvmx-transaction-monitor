@@ -77,14 +77,14 @@ fn get_bitvmx_instances() -> Result<(), anyhow::Error> {
 
     bitvmx_store.save(&instances)?;
 
-    let instances = bitvmx_store.get_instances_ready_to_track(0)?;
+    let instances = bitvmx_store.get_txs_ready_to_monitor(0)?;
 
     assert_eq!(instances.len(), 0);
 
-    let instances = bitvmx_store.get_instances_ready_to_track(50)?;
+    let instances = bitvmx_store.get_txs_ready_to_monitor(50)?;
     assert_eq!(instances.len(), 0);
 
-    let instances = bitvmx_store.get_instances_ready_to_track(2000)?;
+    let instances = bitvmx_store.get_txs_ready_to_monitor(2000)?;
 
     assert_eq!(instances.len(), 2);
 
@@ -117,7 +117,7 @@ fn save_tx_for_tranking() -> Result<(), anyhow::Error> {
     bitvmx_store.save(&instances)?;
     bitvmx_store.save_instance_transaction(instances[0].id, &tx_id_to_add)?;
 
-    let instances = bitvmx_store.get_instances_ready_to_track(100000)?;
+    let instances = bitvmx_store.get_txs_ready_to_monitor(100000)?;
 
     assert_eq!(instances[0].txs.len(), 2);
 

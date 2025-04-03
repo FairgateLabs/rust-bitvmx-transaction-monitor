@@ -29,13 +29,20 @@ enum BlockchainKey {
     CurrentBlockHeight,
 }
 
-pub trait MonitorStoreApi {
-    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
+enum TransactionMonitorStoreType {
+    GroupTransaction(Id, Txid),
+    SingleTransaction(Txid),
+    RskPeginTransaction(Txid),
+    SpendingUTXOTransaction(Txid),
+}
 
-    fn get_instances_ready_to_track(
+pub trait MonitorStoreApi {
+    // fn get_all_instances_for_tracking(&self) -> Result<Vec<Bitvmx   Instance>, MonitorStoreError>;
+
+    fn get_txs_ready_to_monitor(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
+    ) -> Result<Vec<TransactionMonitorStoreType>, MonitorStoreError>;
 
     fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
     fn save(
@@ -137,40 +144,40 @@ impl MonitorStore {
         Ok(())
     }
 
-    fn remove_instance_tx(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorStoreError> {
-        // Retrieve the instance using the instance_id
-        let instance = self.get_instance(instance_id)?;
+    // fn remove_instance_tx(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorStoreError> {
+    //     // Retrieve the instance using the instance_id
+    //     let instance = self.get_instance(instance_id)?;
 
-        match instance {
-            Some(mut _instance) => {
-                // Find the index of the transaction to remove from the instance's txs list
-                if let Some(pos) = _instance
-                    .txs
-                    .iter()
-                    .position(|tx_old| tx_old.tx_id == *tx_id)
-                {
-                    // Remove the transaction from the list of transactions
-                    _instance.txs.remove(pos);
+    //     match instance {
+    //         Some(mut _instance) => {
+    //             // Find the index of the transaction to remove from the instance's txs list
+    //             if let Some(pos) = _instance
+    //                 .txs
+    //                 .iter()
+    //                 .position(|tx_old| tx_old.tx_id == *tx_id)
+    //             {
+    //                 // Remove the transaction from the list of transactions
+    //                 _instance.txs.remove(pos);
 
-                    // Update the instance in the store after removal
-                    self.save_instance(&_instance)?;
-                } else {
-                    return Err(MonitorStoreError::UnexpectedError(format!(
-                        "Transaction with id {} not found in instance {}",
-                        tx_id, instance_id
-                    )));
-                }
-            }
-            None => {
-                return Err(MonitorStoreError::UnexpectedError(format!(
-                    "Instance {} not found",
-                    instance_id
-                )));
-            }
-        }
+    //                 // Update the instance in the store after removal
+    //                 self.save_instance(&_instance)?;
+    //             } else {
+    //                 return Err(MonitorStoreError::UnexpectedError(format!(
+    //                     "Transaction with id {} not found in instance {}",
+    //                     tx_id, instance_id
+    //                 )));
+    //             }
+    //         }
+    //         None => {
+    //             return Err(MonitorStoreError::UnexpectedError(format!(
+    //                 "Instance {} not found",
+    //                 instance_id
+    //             )));
+    //         }
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     fn get_instances(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
         let mut instances = Vec::<BitvmxInstance>::new();
@@ -289,7 +296,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn get_instances_ready_to_track(
+    fn get_txs_ready_to_monitor(
         &self,
         current_height: BlockHeight,
     ) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {

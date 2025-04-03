@@ -20,7 +20,7 @@ where
     B: MonitorStoreApi,
 {
     pub indexer: I,
-    pub bitvmx_store: B,
+    pub store: B,
     confirmation_threshold: u32,
 }
 
@@ -178,8 +178,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError> {
-        let current_height = self.get_current_height()?;
-        self.save(data, current_height)
+        let bitcoind_height = self.indexer.bitcoin_client.get_best_block()?;
+        self.save(data, bitcoind_height)
     }
 
     fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
@@ -223,7 +223,7 @@ where
 
         Ok(Self {
             indexer,
-            bitvmx_store,
+            store: bitvmx_store,
             confirmation_threshold,
         })
     }
@@ -231,34 +231,33 @@ where
     pub fn save(
         &self,
         data: TransactionMonitorType,
-        current_height: BlockHeight,
+        start_monitoring: BlockHeight,
     ) -> Result<(), MonitorError> {
-        self.bitvmx_store.save_instances(&data, current_height)?;
+        self.store.save(data, start_monitoring)?;
 
         Ok(())
     }
 
-    pub fn save_transaction_for_tracking(
-        &self,
-        instance_id: Id,
-        tx_id: Txid,
-    ) -> Result<(), MonitorError> {
-        self.bitvmx_store
-            .save_instance_transaction(instance_id, &tx_id)?;
-        Ok(())
-    }
+    // pub fn save_transaction_for_tracking(
+    //     &self,
+    //     instance_id: Id,
+    //     tx_id: Txid,
+    // ) -> Result<(), MonitorError> {
+    //     self.store.save_instance_transaction(instance_id, &tx_id)?;
+    //     Ok(())
+    // }
 
-    fn remove_transaction_for_tracking(
-        &self,
-        instance_id: Id,
-        tx_id: Txid,
-    ) -> Result<(), MonitorError> {
-        self.bitvmx_store.remove_transaction(instance_id, &tx_id)?;
-        Ok(())
-    }
+    // fn remove_transaction_for_tracking(
+    //     &self,
+    //     instance_id: Id,
+    //     tx_id: Txid,
+    // ) -> Result<(), MonitorError> {
+    //     self.store.remove_transaction(instance_id, &tx_id)?;
+    //     Ok(())
+    // }
 
     pub fn get_current_height(&self) -> Result<BlockHeight, MonitorError> {
-        self.bitvmx_store
+        self.store
             .get_current_block_height()
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
     }
@@ -276,12 +275,12 @@ where
         let best_full_block = best_block.unwrap();
 
         // Get operations that have already started
-        let instances = self
-            .bitvmx_store
-            .get_instances_ready_to_track(best_full_block.height)?;
+        let data = self
+            .store
+            .get_txs_ready_to_monitor(best_full_block.height)?;
 
         // Count existing operations get all thansaction that meet next rules:
-        for instance in instances {
+        for instance in data {
             for tx_instance in instance.txs {
                 // if Trasanction is None, means it was not mined.
                 let tx_info = self.indexer.get_tx(&tx_instance.tx_id)?;
@@ -291,7 +290,7 @@ where
                         && (best_full_block.height - _tx_info.block_height)
                             <= self.confirmation_threshold
                     {
-                        self.bitvmx_store
+                        self.store
                             .update_instance_news(instance.id, tx_instance.tx_id)?;
 
                         info!(
@@ -306,7 +305,7 @@ where
             }
         }
 
-        self.bitvmx_store.set_current_block_height(new_height)?;
+        self.store.set_current_block_height(new_height)?;
 
         self.detect_txs_in_block(best_full_block)?;
 
@@ -320,17 +319,23 @@ where
             if is_pegin {
                 let block_info =
                     BlockInfo::new(full_block.height, full_block.hash, full_block.orphan);
-                self.bitvmx_store.save_tx(tx, block_info)?;
+                self.store.save_tx(tx, block_info)?;
             }
 
-            //TODO: detect other txs that we need to track here...
+            // TODO: detect spending utxo txs here
+            // let is_spending_utxo = is_spending_utxo_tx(tx);
+            // if is_spending_utxo {
+            //     let block_info =
+            //         BlockInfo::new(full_block.height, full_block.hash, full_block.orphan);
+            //     self.bitvmx_store.save_tx(tx, block_info)?;
+            // }
         }
 
         Ok(())
     }
 
     pub fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
-        let news = self.bitvmx_store.get_news()?;
+        let news = self.store.get_news()?;
 
         let mut return_news = Vec::new();
 
@@ -356,7 +361,7 @@ where
     }
 
     pub fn acknowledge_news(&self, instance_id: Id, tx_id: &Txid) -> Result<(), MonitorError> {
-        self.bitvmx_store.acknowledge_news(instance_id, tx_id)?;
+        self.store.acknowledge_news(instance_id, tx_id)?;
         Ok(())
     }
 

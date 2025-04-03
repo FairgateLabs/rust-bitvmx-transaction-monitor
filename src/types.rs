@@ -76,7 +76,7 @@ pub enum TransactionMonitorType {
     SpendingUTXOTransaction(Txid, Number),
 }
 pub enum MonitorNewType {
-    GroupTransaction(Id, Vec<TransactionStatus>),
+    GroupTransaction(Id, TransactionStatus),
     SingleTransaction(TransactionStatus),
     RskPeginTransaction(TransactionStatus),
     SpendingUTXOTransaction(TransactionStatus),
