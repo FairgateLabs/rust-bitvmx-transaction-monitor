@@ -6,7 +6,6 @@ use bitvmx_transaction_monitor::{
 };
 use mockall::predicate::*;
 use std::str::FromStr;
-use uuid::Uuid;
 
 #[test]
 fn no_monitors() -> Result<(), anyhow::Error> {
