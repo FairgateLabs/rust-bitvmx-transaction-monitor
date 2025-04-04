@@ -82,7 +82,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
             prev_height = current_height;
         }
 
-        monitor.tick().context("Fail to detect instances")?;
+        monitor.tick()?;
     }
 
     Ok(())

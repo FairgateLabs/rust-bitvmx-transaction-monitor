@@ -286,7 +286,6 @@ impl MonitorStoreApi for MonitorStore {
         &self,
         current_height: BlockHeight,
     ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError> {
-        // This method will return bitvmx instances excluding the onces are not ready to track
         let mut monitors = Vec::<(TransactionMonitorType, BlockHeight)>::new();
 
         let single_tx_key = self.get_key(TransactionKey::SingleTransactionList);
