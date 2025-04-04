@@ -2,7 +2,7 @@ use bitcoin::{absolute::LockTime, BlockHash, Transaction};
 use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
-    monitor::Monitor, store::MockMonitorStore, types::TransactionMonitorType,
+    monitor::Monitor, store::MockMonitorStore, types::TransactionMonitor,
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -95,11 +95,11 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
 
     let monitors = vec![
         (
-            TransactionMonitorType::SingleTransaction(tx.compute_txid()),
+            TransactionMonitor::SingleTransaction(tx.compute_txid()),
             180,
         ),
         (
-            TransactionMonitorType::SingleTransaction(tx_to_seen.compute_txid()),
+            TransactionMonitor::SingleTransaction(tx_to_seen.compute_txid()),
             180,
         ),
     ];
@@ -197,7 +197,7 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     };
 
     let monitors = vec![(
-        TransactionMonitorType::SingleTransaction(tx_to_seen.compute_txid()),
+        TransactionMonitor::SingleTransaction(tx_to_seen.compute_txid()),
         180,
     )];
 

@@ -69,20 +69,20 @@ pub struct BlockAgragatedInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransactionMonitorType {
+pub enum TransactionMonitor {
     GroupTransaction(Id, Vec<Txid>),
     SingleTransaction(Txid),
     RskPeginTransaction,
     SpendingUTXOTransaction(Txid, u32),
 }
-pub enum MonitorNewType {
+pub enum TransactionNews {
     GroupTransaction(Id, TransactionStatus),
     SingleTransaction(TransactionStatus),
     RskPeginTransaction(TransactionStatus),
     SpendingUTXOTransaction(u32, TransactionStatus),
 }
 
-pub enum AcknowledgeNewsType {
+pub enum AcknowledgeTransactionNews {
     GroupTransaction(Id, Txid),
     SingleTransaction(Txid),
     RskPeginTransaction(Txid),

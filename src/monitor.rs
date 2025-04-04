@@ -2,7 +2,7 @@ use crate::errors::MonitorError;
 use crate::rsk_helper::is_a_pegin_tx;
 use crate::store::{MonitorStore, MonitorStoreApi, TransactionMonitoredType};
 use crate::types::{
-    AcknowledgeNewsType, BlockInfo, MonitorNewType, TransactionMonitorType, TransactionStatus,
+    AcknowledgeTransactionNews, BlockInfo, TransactionMonitor, TransactionNews, TransactionStatus,
 };
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::IndexerApi;
@@ -130,7 +130,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If monitoring was set up successfully
     /// - `Err`: If there was an error setting up monitoring
-    fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError>;
+    fn monitor(&self, data: TransactionMonitor) -> Result<(), MonitorError>;
 
     /// Gets status updates for monitored transactions.
     ///
@@ -142,7 +142,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(Vec<MonitorNewType>)`: List of status updates grouped by monitor type
     /// - `Err`: If there was an error retrieving updates
-    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError>;
+    fn get_news(&self) -> Result<Vec<TransactionNews>, MonitorError>;
 
     /// Acknowledges that a transaction status update has been processed.
     ///
@@ -159,7 +159,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the update was successfully acknowledged
     /// - `Err`: If there was an error processing the acknowledgment
-    fn acknowledge_news(&self, data: AcknowledgeNewsType) -> Result<(), MonitorError>;
+    fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorError>;
 
     /// Gets the current status of a specific transaction.
     ///
@@ -182,16 +182,16 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.get_monitor_height()
     }
 
-    fn monitor(&self, data: TransactionMonitorType) -> Result<(), MonitorError> {
+    fn monitor(&self, data: TransactionMonitor) -> Result<(), MonitorError> {
         let bitcoind_height = self.indexer.bitcoin_client.get_best_block()?;
         self.save_monitor(data, bitcoind_height)
     }
 
-    fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
+    fn get_news(&self) -> Result<Vec<TransactionNews>, MonitorError> {
         self.get_news()
     }
 
-    fn acknowledge_news(&self, data: AcknowledgeNewsType) -> Result<(), MonitorError> {
+    fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorError> {
         self.acknowledge_news(data)
     }
 
@@ -235,7 +235,7 @@ where
 
     pub fn save_monitor(
         &self,
-        data: TransactionMonitorType,
+        data: TransactionMonitor,
         start_monitoring: BlockHeight,
     ) -> Result<(), MonitorError> {
         self.store.save_monitor(data, start_monitoring)?;
@@ -265,7 +265,7 @@ where
 
         for tx_type in txs_types {
             match tx_type {
-                TransactionMonitorType::GroupTransaction(id, tx_ids) => {
+                TransactionMonitor::GroupTransaction(id, tx_ids) => {
                     for tx_id in tx_ids {
                         let tx_info = self.indexer.get_tx(&tx_id)?;
 
@@ -289,7 +289,7 @@ where
                         }
                     }
                 }
-                TransactionMonitorType::SingleTransaction(tx_id) => {
+                TransactionMonitor::SingleTransaction(tx_id) => {
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
@@ -308,7 +308,7 @@ where
                         }
                     }
                 }
-                TransactionMonitorType::RskPeginTransaction => {
+                TransactionMonitor::RskPeginTransaction => {
                     let txs_ids = self.detect_rsk_pegin_txs(best_full_block.clone())?;
 
                     for tx_id in txs_ids {
@@ -326,7 +326,7 @@ where
                     }
                 }
 
-                TransactionMonitorType::SpendingUTXOTransaction(_tx_id, _utxo_index) => {
+                TransactionMonitor::SpendingUTXOTransaction(_tx_id, _utxo_index) => {
                     // TODO: detect spending utxo txs here
                 }
             }
@@ -349,7 +349,7 @@ where
         Ok(txs_ids)
     }
 
-    pub fn get_news(&self) -> Result<Vec<MonitorNewType>, MonitorError> {
+    pub fn get_news(&self) -> Result<Vec<TransactionNews>, MonitorError> {
         let news = self.store.get_news()?;
 
         let mut return_news = Vec::new();
@@ -366,16 +366,16 @@ where
 
             match news {
                 TransactionMonitoredType::GroupTransaction(id, _) => {
-                    return_news.push(MonitorNewType::GroupTransaction(id, status));
+                    return_news.push(TransactionNews::GroupTransaction(id, status));
                 }
                 TransactionMonitoredType::SingleTransaction(_) => {
-                    return_news.push(MonitorNewType::SingleTransaction(status));
+                    return_news.push(TransactionNews::SingleTransaction(status));
                 }
                 TransactionMonitoredType::RskPeginTransaction(_) => {
-                    return_news.push(MonitorNewType::RskPeginTransaction(status));
+                    return_news.push(TransactionNews::RskPeginTransaction(status));
                 }
                 TransactionMonitoredType::SpendingUTXOTransaction(_, utxo_index) => {
-                    return_news.push(MonitorNewType::SpendingUTXOTransaction(utxo_index, status));
+                    return_news.push(TransactionNews::SpendingUTXOTransaction(utxo_index, status));
                 }
             }
         }
@@ -383,7 +383,7 @@ where
         Ok(return_news)
     }
 
-    pub fn acknowledge_news(&self, data: AcknowledgeNewsType) -> Result<(), MonitorError> {
+    pub fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorError> {
         self.store.acknowledge_news(data)?;
         Ok(())
     }

@@ -1,4 +1,4 @@
-use anyhow::{Context, Ok, Result};
+use anyhow::{Ok, Result};
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     types::BlockHeight,
@@ -7,7 +7,7 @@ use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::ConfigMonitor,
     monitor::{Monitor, MonitorApi},
-    types::TransactionMonitorType,
+    types::TransactionMonitor,
 };
 use std::{path::PathBuf, rc::Rc, sync::mpsc::channel, thread, time::Duration};
 use storage_backend::storage::Storage;
@@ -62,7 +62,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         config.monitor.confirmation_threshold,
     )?;
 
-    let group_monitor = TransactionMonitorType::GroupTransaction(Uuid::new_v4(), vec![]);
+    let group_monitor = TransactionMonitor::GroupTransaction(Uuid::new_v4(), vec![]);
     monitor.monitor(group_monitor)?;
 
     let mut prev_height = 0;

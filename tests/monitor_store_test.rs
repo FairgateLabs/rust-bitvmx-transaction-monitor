@@ -46,18 +46,18 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     };
 
     // Test get_monitors and save_monitor with all transaction types
-    use bitvmx_transaction_monitor::types::TransactionMonitorType;
+    use bitvmx_transaction_monitor::types::TransactionMonitor;
     use uuid::Uuid;
 
     // 1. Test SingleTransaction
-    let single_tx_monitor = TransactionMonitorType::SingleTransaction(tx1.compute_txid());
+    let single_tx_monitor = TransactionMonitor::SingleTransaction(tx1.compute_txid());
     store.save_monitor(single_tx_monitor.clone(), 100)?;
     let monitors = store.get_monitors(0)?;
     assert_eq!(monitors.len(), 0);
     let monitors = store.get_monitors(100)?;
     assert!(matches!(
         monitors[0],
-        TransactionMonitorType::SingleTransaction(tx_id) if tx_id == tx1.compute_txid()
+        TransactionMonitor::SingleTransaction(tx_id) if tx_id == tx1.compute_txid()
     ));
     store.remove_monitor(single_tx_monitor.clone())?;
     let monitors = store.get_monitors(100)?;
@@ -65,37 +65,36 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
 
     // 2. Test GroupTransaction
     let group_id = Uuid::new_v4();
-    let group_tx_monitor =
-        TransactionMonitorType::GroupTransaction(group_id, vec![tx2.compute_txid()]);
+    let group_tx_monitor = TransactionMonitor::GroupTransaction(group_id, vec![tx2.compute_txid()]);
     store.save_monitor(group_tx_monitor.clone(), 200)?;
     let monitors = store.get_monitors(200)?;
     assert!(matches!(
         monitors[0].clone(),
-        TransactionMonitorType::GroupTransaction(id, tx_ids) if id == group_id && tx_ids.contains(&tx2.compute_txid())
+        TransactionMonitor::GroupTransaction(id, tx_ids) if id == group_id && tx_ids.contains(&tx2.compute_txid())
     ));
     store.remove_monitor(group_tx_monitor.clone())?;
     let monitors = store.get_monitors(200)?;
     assert_eq!(monitors.len(), 0);
 
     // 3. Test RskPeginTransaction
-    let rsk_monitor = TransactionMonitorType::RskPeginTransaction;
+    let rsk_monitor = TransactionMonitor::RskPeginTransaction;
     store.save_monitor(rsk_monitor.clone(), 300)?;
     let monitors = store.get_monitors(300)?;
     assert!(matches!(
         monitors[0].clone(),
-        TransactionMonitorType::RskPeginTransaction
+        TransactionMonitor::RskPeginTransaction
     ));
     store.remove_monitor(rsk_monitor.clone())?;
     let monitors = store.get_monitors(300)?;
     assert_eq!(monitors.len(), 0);
 
     // 4. Test SpendingUTXOTransaction
-    let utxo_monitor = TransactionMonitorType::SpendingUTXOTransaction(tx3.compute_txid(), 1);
+    let utxo_monitor = TransactionMonitor::SpendingUTXOTransaction(tx3.compute_txid(), 1);
     store.save_monitor(utxo_monitor.clone(), 400)?;
     let monitors = store.get_monitors(400)?;
     assert!(matches!(
     monitors[0].clone(),
-    TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index) if tx_id == tx3.compute_txid() && utxo_index == 1
+    TransactionMonitor::SpendingUTXOTransaction(tx_id, utxo_index) if tx_id == tx3.compute_txid() && utxo_index == 1
         ));
     store.remove_monitor(utxo_monitor.clone())?;
     let monitors = store.get_monitors(400)?;
