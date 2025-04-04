@@ -18,15 +18,31 @@ pub struct TransactionStatus {
     pub tx: Option<Transaction>,
     pub block_info: Option<BlockInfo>,
     pub confirmations: u32,
+    pub status: TransactionBlockchainStatus,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub enum TransactionBlockchainStatus {
+    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
+    Orphan,
+    // Represents a transaction that has been successfully confirmed by the network
+    Confirmed,
+    // Represents when the transaction was confirmed an amount of blocks
+    Finalized,
 }
 
 impl TransactionStatus {
-    pub fn new(tx: Transaction, block_info: Option<BlockInfo>) -> Self {
+    pub fn new(
+        tx: Transaction,
+        block_info: Option<BlockInfo>,
+        status: TransactionBlockchainStatus,
+    ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
             tx: Some(tx),
             block_info,
             confirmations: 0,
+            status,
         }
     }
     pub fn is_confirmed(&self) -> bool {

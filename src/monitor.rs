@@ -2,7 +2,8 @@ use crate::errors::MonitorError;
 use crate::rsk_helper::is_a_pegin_tx;
 use crate::store::{MonitorStore, MonitorStoreApi, TransactionMonitoredType};
 use crate::types::{
-    AcknowledgeTransactionNews, BlockInfo, TransactionMonitor, TransactionNews, TransactionStatus,
+    AcknowledgeTransactionNews, BlockInfo, TransactionBlockchainStatus, TransactionMonitor,
+    TransactionNews, TransactionStatus,
 };
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::IndexerApi;
@@ -400,7 +401,15 @@ where
             tx_status.orphan,
         ));
 
-        let return_tx_status = TransactionStatus::new(tx_status.tx, block_info);
+        let status = if tx_status.orphan {
+            TransactionBlockchainStatus::Orphan
+        } else if tx_status.block_height >= self.confirmation_threshold {
+            TransactionBlockchainStatus::Finalized
+        } else {
+            TransactionBlockchainStatus::Confirmed
+        };
+
+        let return_tx_status = TransactionStatus::new(tx_status.tx, block_info, status);
 
         Ok(return_tx_status)
     }
