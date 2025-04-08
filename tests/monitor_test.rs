@@ -2,7 +2,9 @@ use bitcoin::{absolute::LockTime, BlockHash, Transaction};
 use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
-    monitor::Monitor, store::MockMonitorStore, types::TransactionMonitor,
+    monitor::Monitor,
+    store::{MockMonitorStore, TransactionMonitorType},
+    types::{ExtraData, TransactionMonitor},
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -95,11 +97,11 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
 
     let monitors = vec![
         (
-            TransactionMonitor::SingleTransaction(tx.compute_txid()),
+            TransactionMonitor::Transactions(vec![tx.compute_txid()], ExtraData::None),
             180,
         ),
         (
-            TransactionMonitor::SingleTransaction(tx_to_seen.compute_txid()),
+            TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], ExtraData::None),
             180,
         ),
     ];
@@ -134,11 +136,29 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
         .expect_get_best_block()
         .returning(move || Ok(Some(block_200.clone())));
 
+    // Convert TransactionMonitor to TransactionMonitorType for the mock
+    let monitor_types = monitors
+        .iter()
+        .map(|(monitor, _)| match monitor {
+            TransactionMonitor::Transactions(txids, extra_data) => {
+                TransactionMonitorType::Transaction(txids[0], extra_data.clone())
+            }
+            TransactionMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
+                TransactionMonitorType::SpendingUTXOTransaction(
+                    *txid,
+                    *utxo_index,
+                    extra_data.clone(),
+                )
+            }
+            TransactionMonitor::RskPeginTransaction => TransactionMonitorType::RskPeginTransaction,
+        })
+        .collect::<Vec<_>>();
+
     mock_monitor_store
         .expect_get_monitors()
         .with(eq(block_height_200))
         .times(1)
-        .returning(move |_| Ok(monitors.iter().map(|(t, _)| t.clone()).collect()));
+        .returning(move |_| Ok(monitor_types.clone()));
 
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
@@ -197,7 +217,7 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     };
 
     let monitors = vec![(
-        TransactionMonitor::SingleTransaction(tx_to_seen.compute_txid()),
+        TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], ExtraData::None),
         180,
     )];
 
@@ -224,11 +244,29 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
 
+    // Convert TransactionMonitor to TransactionMonitorType for the mock
+    let monitor_types = monitors
+        .iter()
+        .map(|(monitor, _)| match monitor {
+            TransactionMonitor::Transactions(txids, extra_data) => {
+                TransactionMonitorType::Transaction(txids[0], extra_data.clone())
+            }
+            TransactionMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
+                TransactionMonitorType::SpendingUTXOTransaction(
+                    *txid,
+                    *utxo_index,
+                    extra_data.clone(),
+                )
+            }
+            TransactionMonitor::RskPeginTransaction => TransactionMonitorType::RskPeginTransaction,
+        })
+        .collect::<Vec<_>>();
+
     mock_monitor_store
         .expect_get_monitors()
         .with(eq(block_height_200))
         .times(1)
-        .returning(move |_| Ok(monitors.iter().map(|(t, _)| t.clone()).collect()));
+        .returning(move |_| Ok(monitor_types.clone()));
 
     mock_monitor_store
         .expect_set_monitor_height()

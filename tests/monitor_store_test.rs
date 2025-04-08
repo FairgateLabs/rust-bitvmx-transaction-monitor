@@ -1,5 +1,8 @@
 use bitcoin::{absolute::LockTime, key::rand, Transaction};
-use bitvmx_transaction_monitor::store::{MonitorStore, MonitorStoreApi};
+use bitvmx_transaction_monitor::{
+    store::{MonitorStore, MonitorStoreApi, TransactionMonitorType},
+    types::ExtraData,
+};
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
 
@@ -25,7 +28,6 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors(0)?;
     assert_eq!(monitors.len(), 0);
 
-    // Create test transactions
     let tx1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
@@ -50,27 +52,32 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     use uuid::Uuid;
 
     // 1. Test SingleTransaction
-    let single_tx_monitor = TransactionMonitor::SingleTransaction(tx1.compute_txid());
+    let single_tx_monitor =
+        TransactionMonitor::Transactions(vec![tx1.compute_txid()], ExtraData::None);
+
     store.save_monitor(single_tx_monitor.clone(), 100)?;
     let monitors = store.get_monitors(0)?;
     assert_eq!(monitors.len(), 0);
     let monitors = store.get_monitors(100)?;
     assert!(matches!(
         monitors[0],
-        TransactionMonitor::SingleTransaction(tx_id) if tx_id == tx1.compute_txid()
+        TransactionMonitorType::Transaction(tx_id, _) if tx_id == tx1.compute_txid()
     ));
+
     store.remove_monitor(single_tx_monitor.clone())?;
+
     let monitors = store.get_monitors(100)?;
     assert_eq!(monitors.len(), 0);
 
     // 2. Test GroupTransaction
     let group_id = Uuid::new_v4();
-    let group_tx_monitor = TransactionMonitor::GroupTransaction(group_id, vec![tx2.compute_txid()]);
+    let group_tx_monitor =
+        TransactionMonitor::Transactions(vec![tx2.compute_txid()], ExtraData::GroupId(group_id));
     store.save_monitor(group_tx_monitor.clone(), 200)?;
     let monitors = store.get_monitors(200)?;
     assert!(matches!(
         monitors[0].clone(),
-        TransactionMonitor::GroupTransaction(id, tx_ids) if id == group_id && tx_ids.contains(&tx2.compute_txid())
+        TransactionMonitorType::Transaction(tx_id, _) if tx_id == tx2.compute_txid()
     ));
     store.remove_monitor(group_tx_monitor.clone())?;
     let monitors = store.get_monitors(200)?;
@@ -82,20 +89,22 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors(300)?;
     assert!(matches!(
         monitors[0].clone(),
-        TransactionMonitor::RskPeginTransaction
+        TransactionMonitorType::RskPeginTransaction
     ));
     store.remove_monitor(rsk_monitor.clone())?;
     let monitors = store.get_monitors(300)?;
     assert_eq!(monitors.len(), 0);
 
     // 4. Test SpendingUTXOTransaction
-    let utxo_monitor = TransactionMonitor::SpendingUTXOTransaction(tx3.compute_txid(), 1);
+    let utxo_monitor =
+        TransactionMonitor::SpendingUTXOTransaction(tx3.compute_txid(), 1, ExtraData::None);
     store.save_monitor(utxo_monitor.clone(), 400)?;
     let monitors = store.get_monitors(400)?;
     assert!(matches!(
-    monitors[0].clone(),
-    TransactionMonitor::SpendingUTXOTransaction(tx_id, utxo_index) if tx_id == tx3.compute_txid() && utxo_index == 1
-        ));
+        monitors[0].clone(),
+        TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index, ExtraData::None)
+            if tx_id == tx3.compute_txid() && utxo_index == 1
+    ));
     store.remove_monitor(utxo_monitor.clone())?;
     let monitors = store.get_monitors(400)?;
     assert_eq!(monitors.len(), 0);

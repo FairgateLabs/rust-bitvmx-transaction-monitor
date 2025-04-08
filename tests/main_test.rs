@@ -1,4 +1,5 @@
 use anyhow::{Ok, Result};
+use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::{
     bitcoin_client::{BitcoinClient, BitcoinClientApi},
     types::BlockHeight,
@@ -7,9 +8,9 @@ use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::ConfigMonitor,
     monitor::{Monitor, MonitorApi},
-    types::TransactionMonitor,
+    types::{ExtraData, TransactionMonitor},
 };
-use std::{path::PathBuf, rc::Rc, sync::mpsc::channel, thread, time::Duration};
+use std::{path::PathBuf, rc::Rc, str::FromStr, sync::mpsc::channel, thread, time::Duration};
 use storage_backend::storage::Storage;
 use tracing::info;
 use uuid::Uuid;
@@ -62,7 +63,10 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         config.monitor.confirmation_threshold,
     )?;
 
-    let group_monitor = TransactionMonitor::GroupTransaction(Uuid::new_v4(), vec![]);
+    let group_id = Uuid::new_v4();
+    let txid = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
+
+    let group_monitor = TransactionMonitor::Transactions(vec![txid], ExtraData::GroupId(group_id));
     monitor.monitor(group_monitor)?;
 
     let mut prev_height = 0;

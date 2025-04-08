@@ -15,7 +15,7 @@ pub struct TransactionStore {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TransactionStatus {
     pub tx_id: Txid,
-    pub tx: Option<Transaction>,
+    pub tx: Transaction,
     pub block_info: Option<BlockInfo>,
     pub confirmations: u32,
     pub status: TransactionBlockchainStatus,
@@ -39,14 +39,32 @@ impl TransactionStatus {
     ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
-            tx: Some(tx),
+            tx,
             block_info,
             confirmations: 0,
             status,
         }
     }
+
+    pub fn is_finalized(&self, confirmation_threshold: u32) -> bool {
+        //Finalized should have:
+        //  block_info because it was mined time before.
+        //  confirmation == 0 , this is just a validation, orphan should be moved as confirmation 0.
+        //  status = Finalized
+        // TODO missing the validation of the confirmations threshold.
+        self.block_info.is_some()
+            && self.confirmations >= confirmation_threshold
+            && self.status == TransactionBlockchainStatus::Finalized
+    }
+
     pub fn is_confirmed(&self) -> bool {
-        self.block_info.is_some() && self.confirmations > 0
+        //Confirmed should have:
+        //  block_info because it was mined time before.
+        //  confirmation > 0
+        //  status = Confirmed
+        self.block_info.is_some()
+            && self.confirmations > 0
+            && self.status == TransactionBlockchainStatus::Confirmed
     }
 
     pub fn is_orphan(&self) -> bool {
@@ -54,9 +72,11 @@ impl TransactionStatus {
         //  block_info because it was mined time before.
         //  confirmation == 0 , this is just a validation, orphan should be moved as confirmation 0.
         //  is_orphan = true
+        //  status = Orphan
         self.block_info.is_some()
             && self.confirmations == 0
             && self.block_info.as_ref().unwrap().is_orphan
+            && self.status == TransactionBlockchainStatus::Orphan
     }
 }
 
@@ -86,21 +106,28 @@ pub struct BlockAgragatedInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransactionMonitor {
-    GroupTransaction(Id, Vec<Txid>),
-    SingleTransaction(Txid),
+    Transactions(Vec<Txid>, ExtraData),
+    SpendingUTXOTransaction(Txid, u32, ExtraData),
     RskPeginTransaction,
-    SpendingUTXOTransaction(Txid, u32),
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum ExtraData {
+    None,
+    GroupId(Id),
+    Context(String),
+    SpeedUp(Txid),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TransactionNews {
-    GroupTransaction(Id, TransactionStatus),
-    SingleTransaction(TransactionStatus),
-    RskPeginTransaction(TransactionStatus),
-    SpendingUTXOTransaction(u32, TransactionStatus),
+    Transaction(Txid, TransactionStatus, ExtraData),
+    SpendingUTXOTransaction(Txid, u32, TransactionStatus, ExtraData),
+    RskPeginTransaction(Txid, TransactionStatus),
 }
 
 pub enum AcknowledgeTransactionNews {
-    GroupTransaction(Id, Txid),
-    SingleTransaction(Txid),
+    Transaction(Txid),
     RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32),
 }

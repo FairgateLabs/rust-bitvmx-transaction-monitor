@@ -1,6 +1,6 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{AcknowledgeTransactionNews, Id, TransactionMonitor},
+    types::{AcknowledgeTransactionNews, ExtraData, TransactionMonitor},
 };
 use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
@@ -13,12 +13,10 @@ pub struct MonitorStore {
     store: Rc<Storage>,
 }
 enum TransactionKey {
-    GroupTransactionList,
-    SingleTransactionList,
+    TransactionList,
     RskPeginTransaction,
     SpendingUTXOTransactionList,
-    GroupTransactionNews,
-    SingleTransactionNews,
+    TransactionNews,
     RskPeginTransactionNews,
     SpendingUTXOTransactionNews,
 }
@@ -27,26 +25,25 @@ enum BlockchainKey {
     CurrentBlockHeight,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TransactionToMonitorType {
-    GroupTransaction(Id, Txid),
-    SingleTransaction(Txid),
-    RskPeginTransaction,
-    SpendingUTXOTransaction(Txid, u32),
-}
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TransactionMonitoredType {
-    GroupTransaction(Id, Txid),
-    SingleTransaction(Txid),
+    Transaction(Txid, ExtraData),
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid, u32),
+    SpendingUTXOTransaction(Txid, u32, ExtraData),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum TransactionMonitorType {
+    Transaction(Txid, ExtraData),
+    RskPeginTransaction,
+    SpendingUTXOTransaction(Txid, u32, ExtraData),
 }
 
 pub trait MonitorStoreApi {
     fn get_monitors(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<TransactionMonitor>, MonitorStoreError>;
+    ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError>;
 
     fn save_monitor(
         &self,
@@ -72,14 +69,12 @@ impl MonitorStore {
     fn get_key(&self, key: TransactionKey) -> String {
         let prefix = "monitor";
         match key {
-            TransactionKey::GroupTransactionList => format!("{prefix}/group/tx/list"),
-            TransactionKey::SingleTransactionList => format!("{prefix}/single/tx/list"),
+            TransactionKey::TransactionList => format!("{prefix}/tx/list"),
             TransactionKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
             TransactionKey::SpendingUTXOTransactionList => {
                 format!("{prefix}/spending/utxo/tx/list")
             }
-            TransactionKey::GroupTransactionNews => format!("{prefix}/group/tx/news"),
-            TransactionKey::SingleTransactionNews => format!("{prefix}/single/tx/news"),
+            TransactionKey::TransactionNews => format!("{prefix}/tx/news"),
             TransactionKey::RskPeginTransactionNews => format!("{prefix}/rsk/tx/news"),
             TransactionKey::SpendingUTXOTransactionNews => {
                 format!("{prefix}/spending/utxo/tx/news")
@@ -117,27 +112,15 @@ impl MonitorStoreApi for MonitorStore {
 
     fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError> {
         let mut news = Vec::new();
-        // Get news from each transaction type
-        let group_news_key = self.get_key(TransactionKey::GroupTransactionNews);
-        let group_news = self
+
+        let key = self.get_key(TransactionKey::TransactionNews);
+        let txs_news = self
             .store
-            .get::<_, Vec<(Id, Vec<Txid>)>>(&group_news_key)?
+            .get::<_, Vec<(Txid, ExtraData)>>(&key)?
             .unwrap_or_default();
 
-        for (id, txids) in group_news {
-            for tx_id in txids {
-                news.push(TransactionMonitoredType::GroupTransaction(id, tx_id));
-            }
-        }
-
-        let single_news_key = self.get_key(TransactionKey::SingleTransactionNews);
-        let single_news = self
-            .store
-            .get::<_, Vec<Txid>>(&single_news_key)?
-            .unwrap_or_default();
-
-        for tx_id in single_news {
-            news.push(TransactionMonitoredType::SingleTransaction(tx_id));
+        for (tx_id, extra_data) in txs_news {
+            news.push(TransactionMonitoredType::Transaction(tx_id, extra_data));
         }
 
         let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
@@ -153,12 +136,12 @@ impl MonitorStoreApi for MonitorStore {
         let spending_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
         let spending_news = self
             .store
-            .get::<_, Vec<(Txid, u32)>>(&spending_news_key)?
+            .get::<_, Vec<(Txid, u32, ExtraData)>>(&spending_news_key)?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index) in spending_news {
+        for (tx_id, utxo_index, extra_data) in spending_news {
             news.push(TransactionMonitoredType::SpendingUTXOTransaction(
-                tx_id, utxo_index,
+                tx_id, utxo_index, extra_data,
             ));
         }
 
@@ -167,35 +150,18 @@ impl MonitorStoreApi for MonitorStore {
 
     fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError> {
         match data {
-            TransactionMonitoredType::GroupTransaction(id, tx_id) => {
-                let group_news_key = self.get_key(TransactionKey::GroupTransactionNews);
-                let mut group_news = self
+            TransactionMonitoredType::Transaction(tx_id, extra_data) => {
+                let key = self.get_key(TransactionKey::TransactionNews);
+                let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Id, Vec<Txid>)>>(&group_news_key)?
+                    .get::<_, Vec<(Txid, ExtraData)>>(&key)?
                     .unwrap_or_default();
 
-                if let Some(index) = group_news.iter().position(|(group_id, _)| *group_id == id) {
-                    if !group_news[index].1.contains(&tx_id) {
-                        group_news[index].1.push(tx_id);
-                    }
-                } else {
-                    group_news.push((id, vec![tx_id]));
+                if !txs_news.contains(&(tx_id, extra_data.clone())) {
+                    txs_news.push((tx_id, extra_data.clone()));
                 }
 
-                self.store.set(&group_news_key, &group_news, None)?;
-            }
-            TransactionMonitoredType::SingleTransaction(tx_id) => {
-                let single_news_key = self.get_key(TransactionKey::SingleTransactionNews);
-                let mut single_news = self
-                    .store
-                    .get::<_, Vec<Txid>>(&single_news_key)?
-                    .unwrap_or_default();
-
-                if !single_news.contains(&tx_id) {
-                    single_news.push(tx_id);
-                }
-
-                self.store.set(&single_news_key, &single_news, None)?;
+                self.store.set(&key, &txs_news, None)?;
             }
             TransactionMonitoredType::RskPeginTransaction(tx_id) => {
                 let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
@@ -210,15 +176,15 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
-            TransactionMonitoredType::SpendingUTXOTransaction(tx_id, utxo_index) => {
+            TransactionMonitoredType::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
                 let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, ExtraData)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                if !utxo_news.contains(&(tx_id, utxo_index)) {
-                    utxo_news.push((tx_id, utxo_index));
+                if !utxo_news.contains(&(tx_id, utxo_index, extra_data.clone())) {
+                    utxo_news.push((tx_id, utxo_index, extra_data));
                 }
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
@@ -230,33 +196,15 @@ impl MonitorStoreApi for MonitorStore {
 
     fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorStoreError> {
         match data {
-            AcknowledgeTransactionNews::GroupTransaction(id, tx_id) => {
-                let group_news_key = self.get_key(TransactionKey::GroupTransactionNews);
-                let mut group_news = self
+            AcknowledgeTransactionNews::Transaction(tx_id) => {
+                let key = self.get_key(TransactionKey::TransactionNews);
+                let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Id, Vec<Txid>)>>(&group_news_key)?
+                    .get::<_, Vec<(Txid, ExtraData)>>(&key)?
                     .unwrap_or_default();
 
-                if let Some(index) = group_news.iter().position(|(group_id, _)| *group_id == id) {
-                    let (_, txs) = &mut group_news[index];
-                    txs.retain(|tx| tx != &tx_id);
-
-                    if txs.is_empty() {
-                        group_news.remove(index);
-                    }
-
-                    self.store.set(&group_news_key, &group_news, None)?;
-                }
-            }
-            AcknowledgeTransactionNews::SingleTransaction(tx_id) => {
-                let single_news_key = self.get_key(TransactionKey::SingleTransactionNews);
-                let mut single_news = self
-                    .store
-                    .get::<_, Vec<Txid>>(&single_news_key)?
-                    .unwrap_or_default();
-
-                single_news.retain(|tx| tx != &tx_id);
-                self.store.set(&single_news_key, &single_news, None)?;
+                txs_news.retain(|(tx, _)| tx != &tx_id);
+                self.store.set(&key, &txs_news, None)?;
             }
             AcknowledgeTransactionNews::RskPeginTransaction(tx_id) => {
                 let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
@@ -272,10 +220,10 @@ impl MonitorStoreApi for MonitorStore {
                 let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, ExtraData)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                utxo_news.retain(|(tx, utxo_i)| tx != &tx_id || utxo_i != &utxo_index);
+                utxo_news.retain(|(tx, utxo_i, _)| *tx != tx_id || *utxo_i != utxo_index);
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
         }
@@ -286,17 +234,20 @@ impl MonitorStoreApi for MonitorStore {
     fn get_monitors(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<TransactionMonitor>, MonitorStoreError> {
-        let mut monitors = Vec::<(TransactionMonitor, BlockHeight)>::new();
+    ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError> {
+        let mut monitors = Vec::<(TransactionMonitorType, BlockHeight)>::new();
 
-        let single_tx_key = self.get_key(TransactionKey::SingleTransactionList);
-        let single_txs = self
+        let txs_key = self.get_key(TransactionKey::TransactionList);
+        let txs = self
             .store
-            .get::<_, Vec<(Txid, BlockHeight)>>(single_tx_key)?
+            .get::<_, Vec<(Txid, ExtraData, BlockHeight)>>(txs_key)?
             .unwrap_or_default();
 
-        for (tx_id, height) in single_txs {
-            monitors.push((TransactionMonitor::SingleTransaction(tx_id), height));
+        for (tx_id, extra_data, height) in txs {
+            monitors.push((
+                TransactionMonitorType::Transaction(tx_id, extra_data),
+                height,
+            ));
         }
 
         let rsk_pegin_key = self.get_key(TransactionKey::RskPeginTransaction);
@@ -306,30 +257,23 @@ impl MonitorStoreApi for MonitorStore {
             .unwrap_or_default();
 
         if rsk_pegin_height.0 {
-            monitors.push((TransactionMonitor::RskPeginTransaction, rsk_pegin_height.1));
+            monitors.push((
+                TransactionMonitorType::RskPeginTransaction,
+                rsk_pegin_height.1,
+            ));
         }
 
         let spending_utxo_key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
         let spending_utxos = self
             .store
-            .get::<_, Vec<((Txid, u32), BlockHeight)>>(spending_utxo_key)?
+            .get::<_, Vec<(Txid, u32, ExtraData, BlockHeight)>>(spending_utxo_key)?
             .unwrap_or_default();
 
-        for ((tx_id, utxo_index), height) in spending_utxos {
+        for (tx_id, utxo_index, extra_data, height) in spending_utxos {
             monitors.push((
-                TransactionMonitor::SpendingUTXOTransaction(tx_id, utxo_index),
+                TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index, extra_data),
                 height,
             ));
-        }
-
-        let group_tx_key = self.get_key(TransactionKey::GroupTransactionList);
-        let group_txs = self
-            .store
-            .get::<_, Vec<(Id, Vec<Txid>, BlockHeight)>>(group_tx_key)?
-            .unwrap_or_default();
-
-        for (id, txids, height) in group_txs {
-            monitors.push((TransactionMonitor::GroupTransaction(id, txids), height));
         }
 
         let filtered_monitors = monitors
@@ -347,49 +291,37 @@ impl MonitorStoreApi for MonitorStore {
         start_height: BlockHeight,
     ) -> Result<(), MonitorStoreError> {
         match data {
-            TransactionMonitor::GroupTransaction(id, tx_ids) => {
-                let key = self.get_key(TransactionKey::GroupTransactionList);
+            TransactionMonitor::Transactions(tx_ids, extra_data) => {
+                let key = self.get_key(TransactionKey::TransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Id, Vec<Txid>, BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, ExtraData, BlockHeight)>>(&key)?
                     .unwrap_or_default();
 
-                if let Some(pos) = txs.iter().position(|(i, _, _)| *i == id) {
-                    for txid in tx_ids {
-                        if !txs[pos].1.contains(&txid) {
-                            txs[pos].1.push(txid);
-                        }
+                for txid in &tx_ids {
+                    if let Some(pos) = txs.iter().position(|(i, _, _)| *i == *txid) {
+                        // Update the existing entry with the new extra_data
+                        txs[pos] = (*txid, extra_data.clone(), start_height);
+                    } else {
+                        // Add a new entry if the txid doesn't exist
+                        txs.push((*txid, extra_data.clone(), start_height));
                     }
-                } else {
-                    txs.push((id, tx_ids, start_height));
                 }
 
                 self.store.set(&key, &txs, None)?;
-            }
-            TransactionMonitor::SingleTransaction(txid) => {
-                let key = self.get_key(TransactionKey::SingleTransactionList);
-                let mut txs = self
-                    .store
-                    .get::<_, Vec<(Txid, BlockHeight)>>(&key)?
-                    .unwrap_or_default();
-
-                if !txs.contains(&(txid, start_height)) {
-                    txs.push((txid, start_height));
-                    self.store.set(&key, &txs, None)?;
-                }
             }
             TransactionMonitor::RskPeginTransaction => {
                 let key = self.get_key(TransactionKey::RskPeginTransaction);
                 self.store.set(&key, (true, start_height), None)?;
             }
-            TransactionMonitor::SpendingUTXOTransaction(txid, vout) => {
+            TransactionMonitor::SpendingUTXOTransaction(txid, vout, extra_data) => {
                 let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<((Txid, u32), BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, u32, ExtraData, BlockHeight)>>(&key)?
                     .unwrap_or_default();
-                if !txs.contains(&((txid, vout), start_height)) {
-                    txs.push(((txid, vout), start_height));
+                if !txs.contains(&(txid, vout, extra_data.clone(), start_height)) {
+                    txs.push((txid, vout, extra_data.clone(), start_height));
                     self.store.set(&key, &txs, None)?;
                 }
             }
@@ -400,35 +332,33 @@ impl MonitorStoreApi for MonitorStore {
 
     fn remove_monitor(&self, data: TransactionMonitor) -> Result<(), MonitorStoreError> {
         match data {
-            TransactionMonitor::GroupTransaction(id, _) => {
-                let key = self.get_key(TransactionKey::GroupTransactionList);
+            TransactionMonitor::Transactions(tx_ids, _) => {
+                let key = self.get_key(TransactionKey::TransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Id, Vec<Txid>, BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, ExtraData, BlockHeight)>>(&key)?
                     .unwrap_or_default();
-                txs.retain(|(i, _, _)| *i != id);
+
+                // Filter out transactions that are in tx_ids
+                txs.retain(|(tx_id, _, _)| {
+                    // Keep the entry if none of its txids are in tx_ids
+                    !tx_ids.iter().any(|txid| *txid == *tx_id)
+                });
+
                 self.store.set(&key, &txs, None)?;
             }
-            TransactionMonitor::SingleTransaction(txid) => {
-                let key = self.get_key(TransactionKey::SingleTransactionList);
-                let mut txs = self
-                    .store
-                    .get::<_, Vec<(Txid, BlockHeight)>>(&key)?
-                    .unwrap_or_default();
-                txs.retain(|(i, _)| *i != txid);
-                self.store.set(&key, &txs, None)?;
-            }
+
             TransactionMonitor::RskPeginTransaction => {
                 let key = self.get_key(TransactionKey::RskPeginTransaction);
                 self.store.set(&key, (false, 0), None)?;
             }
-            TransactionMonitor::SpendingUTXOTransaction(txid, vout) => {
+            TransactionMonitor::SpendingUTXOTransaction(txid, vout, _) => {
                 let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<((Txid, u32), BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, u32, ExtraData, BlockHeight)>>(&key)?
                     .unwrap_or_default();
-                txs.retain(|(i, _)| *i != (txid, vout));
+                txs.retain(|(tx_id, utxo_index, _, _)| *tx_id != txid || *utxo_index != vout);
                 self.store.set(&key, &txs, None)?;
             }
         }

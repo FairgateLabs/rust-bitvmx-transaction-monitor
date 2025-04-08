@@ -1,6 +1,8 @@
 use crate::errors::MonitorError;
 use crate::rsk_helper::is_a_pegin_tx;
-use crate::store::{MonitorStore, MonitorStoreApi, TransactionMonitoredType};
+use crate::store::{
+    MonitorStore, MonitorStoreApi, TransactionMonitorType, TransactionMonitoredType,
+};
 use crate::types::{
     AcknowledgeTransactionNews, BlockInfo, TransactionBlockchainStatus, TransactionMonitor,
     TransactionNews, TransactionStatus,
@@ -266,31 +268,7 @@ where
 
         for tx_type in txs_types {
             match tx_type {
-                TransactionMonitor::GroupTransaction(id, tx_ids) => {
-                    for tx_id in tx_ids {
-                        let tx_info = self.indexer.get_tx(&tx_id)?;
-
-                        if let Some(tx) = tx_info {
-                            if best_block_height > tx.block_height
-                                && (best_block_height - tx.block_height)
-                                    <= self.confirmation_threshold
-                            {
-                                self.store.update_news(
-                                    TransactionMonitoredType::GroupTransaction(id, tx_id),
-                                )?;
-
-                                info!(
-                                    "Update confirmation for group: {} | tx_id: {} | at height: {} | confirmations: {}", 
-                                    id,
-                                    tx_id,
-                                    best_block_height,
-                                    best_block_height - tx.block_height + 1,
-                                );
-                            }
-                        }
-                    }
-                }
-                TransactionMonitor::SingleTransaction(tx_id) => {
+                TransactionMonitorType::Transaction(tx_id, extra_data) => {
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
@@ -298,18 +276,21 @@ where
                             && (best_block_height - tx.block_height) <= self.confirmation_threshold
                         {
                             self.store
-                                .update_news(TransactionMonitoredType::SingleTransaction(tx_id))?;
+                                .update_news(TransactionMonitoredType::Transaction(
+                                    tx_id,
+                                    extra_data.clone(),
+                                ))?;
 
                             info!(
-                                "Update confirmation for single tx: {} | at height: {} | confirmations: {}", 
-                                tx_id,
-                                best_block_height,
-                                best_block_height - tx.block_height + 1,
-                            );
+                                    "Update confirmation | tx_id: {} | at height: {} | confirmations: {}", 
+                                    tx_id,
+                                    best_block_height,
+                                    best_block_height - tx.block_height + 1,
+                                );
                         }
                     }
                 }
-                TransactionMonitor::RskPeginTransaction => {
+                TransactionMonitorType::RskPeginTransaction => {
                     let txs_ids = self.detect_rsk_pegin_txs(best_full_block.clone())?;
 
                     for tx_id in txs_ids {
@@ -327,7 +308,11 @@ where
                     }
                 }
 
-                TransactionMonitor::SpendingUTXOTransaction(_tx_id, _utxo_index) => {
+                TransactionMonitorType::SpendingUTXOTransaction(
+                    _tx_id,
+                    _utxo_index,
+                    _extra_data,
+                ) => {
                     // TODO: detect spending utxo txs here
                 }
             }
@@ -357,26 +342,28 @@ where
 
         for news in news {
             let tx_id = match &news {
-                TransactionMonitoredType::GroupTransaction(_, tx_id) => tx_id,
-                TransactionMonitoredType::SingleTransaction(tx_id) => tx_id,
+                TransactionMonitoredType::Transaction(tx_id, _) => tx_id,
                 TransactionMonitoredType::RskPeginTransaction(tx_id) => tx_id,
-                TransactionMonitoredType::SpendingUTXOTransaction(tx_id, _) => tx_id,
+                TransactionMonitoredType::SpendingUTXOTransaction(tx_id, _, _) => tx_id,
             };
 
             let status = self.get_tx_status(tx_id)?;
 
             match news {
-                TransactionMonitoredType::GroupTransaction(id, _) => {
-                    return_news.push(TransactionNews::GroupTransaction(id, status));
+                TransactionMonitoredType::Transaction(tx_id, extra_data) => {
+                    return_news.push(TransactionNews::Transaction(tx_id, status, extra_data));
                 }
-                TransactionMonitoredType::SingleTransaction(_) => {
-                    return_news.push(TransactionNews::SingleTransaction(status));
+                TransactionMonitoredType::RskPeginTransaction(tx_id) => {
+                    return_news.push(TransactionNews::RskPeginTransaction(tx_id, status));
                 }
-                TransactionMonitoredType::RskPeginTransaction(_) => {
-                    return_news.push(TransactionNews::RskPeginTransaction(status));
-                }
-                TransactionMonitoredType::SpendingUTXOTransaction(_, utxo_index) => {
-                    return_news.push(TransactionNews::SpendingUTXOTransaction(utxo_index, status));
+                TransactionMonitoredType::SpendingUTXOTransaction(
+                    tx_id,
+                    utxo_index,
+                    extra_data,
+                ) => {
+                    return_news.push(TransactionNews::SpendingUTXOTransaction(
+                        tx_id, utxo_index, status, extra_data,
+                    ));
                 }
             }
         }
