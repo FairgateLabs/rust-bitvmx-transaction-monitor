@@ -162,7 +162,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the update was successfully acknowledged
     /// - `Err`: If there was an error processing the acknowledgment
-    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorError>;
+    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorError>;
 
     /// Gets the current status of a specific transaction.
     ///
@@ -194,8 +194,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.get_news()
     }
 
-    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorError> {
-        self.acknowledge_news(data)
+    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorError> {
+        self.ack_news(data)
     }
 
     fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
@@ -371,8 +371,8 @@ where
         Ok(return_news)
     }
 
-    pub fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorError> {
-        self.store.acknowledge_news(data)?;
+    pub fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorError> {
+        self.store.ack_news(data)?;
         Ok(())
     }
 

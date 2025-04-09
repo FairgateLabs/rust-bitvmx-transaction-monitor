@@ -55,7 +55,7 @@ pub trait MonitorStoreApi {
 
     fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError>;
     fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError>;
-    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError>;
+    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError>;
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
     fn set_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
@@ -194,7 +194,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError> {
+    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError> {
         match data {
             AckTransactionNews::Transaction(tx_id) => {
                 let key = self.get_key(TransactionKey::TransactionNews);
