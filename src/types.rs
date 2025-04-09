@@ -126,7 +126,7 @@ pub enum TransactionNews {
     RskPeginTransaction(Txid, TransactionStatus),
 }
 
-pub enum AcknowledgeTransactionNews {
+pub enum AckTransactionNews {
     Transaction(Txid),
     RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32),

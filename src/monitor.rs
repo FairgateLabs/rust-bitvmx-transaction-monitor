@@ -4,7 +4,7 @@ use crate::store::{
     MonitorStore, MonitorStoreApi, TransactionMonitorType, TransactionMonitoredType,
 };
 use crate::types::{
-    AcknowledgeTransactionNews, BlockInfo, TransactionBlockchainStatus, TransactionMonitor,
+    AckTransactionNews, BlockInfo, TransactionBlockchainStatus, TransactionMonitor,
     TransactionNews, TransactionStatus,
 };
 use bitcoin::Txid;
@@ -162,7 +162,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(())`: If the update was successfully acknowledged
     /// - `Err`: If there was an error processing the acknowledgment
-    fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorError>;
+    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorError>;
 
     /// Gets the current status of a specific transaction.
     ///
@@ -194,7 +194,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
         self.get_news()
     }
 
-    fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorError> {
+    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorError> {
         self.acknowledge_news(data)
     }
 
@@ -371,7 +371,7 @@ where
         Ok(return_news)
     }
 
-    pub fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorError> {
+    pub fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorError> {
         self.store.acknowledge_news(data)?;
         Ok(())
     }

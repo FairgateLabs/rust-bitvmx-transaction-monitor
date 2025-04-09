@@ -1,6 +1,6 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{AcknowledgeTransactionNews, ExtraData, TransactionMonitor},
+    types::{AckTransactionNews, ExtraData, TransactionMonitor},
 };
 use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
@@ -55,7 +55,7 @@ pub trait MonitorStoreApi {
 
     fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError>;
     fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError>;
-    fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorStoreError>;
+    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError>;
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
     fn set_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
@@ -194,9 +194,9 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn acknowledge_news(&self, data: AcknowledgeTransactionNews) -> Result<(), MonitorStoreError> {
+    fn acknowledge_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError> {
         match data {
-            AcknowledgeTransactionNews::Transaction(tx_id) => {
+            AckTransactionNews::Transaction(tx_id) => {
                 let key = self.get_key(TransactionKey::TransactionNews);
                 let mut txs_news = self
                     .store
@@ -206,7 +206,7 @@ impl MonitorStoreApi for MonitorStore {
                 txs_news.retain(|(tx, _)| tx != &tx_id);
                 self.store.set(&key, &txs_news, None)?;
             }
-            AcknowledgeTransactionNews::RskPeginTransaction(tx_id) => {
+            AckTransactionNews::RskPeginTransaction(tx_id) => {
                 let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
                 let mut rsk_news = self
                     .store
@@ -216,7 +216,7 @@ impl MonitorStoreApi for MonitorStore {
                 rsk_news.retain(|tx| tx != &tx_id);
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
-            AcknowledgeTransactionNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
+            AckTransactionNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
                 let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
