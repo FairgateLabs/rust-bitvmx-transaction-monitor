@@ -364,7 +364,8 @@ impl MonitorStoreApi for MonitorStore {
     fn save_tx(&self, tx: &Transaction, block_info: BlockInfo) -> Result<(), MonitorStoreError> {
         // Save the transaction status
         let tx_key = self.get_tx_key(TransactionKey::Transaction(tx.compute_txid()));
-        let tx_status = TransactionStatus::new(tx.clone(), Some(block_info));
+        let confirmations = self.get_current_block_height()? - block_info.block_height + 1;
+        let tx_status = TransactionStatus::new(tx.clone(), Some(block_info), confirmations);
         self.store.set(&tx_key, tx_status, None)?;
 
         // Update the transaction news

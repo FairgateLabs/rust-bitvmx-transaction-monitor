@@ -21,12 +21,12 @@ pub struct TransactionStatus {
 }
 
 impl TransactionStatus {
-    pub fn new(tx: Transaction, block_info: Option<BlockInfo>) -> Self {
+    pub fn new(tx: Transaction, block_info: Option<BlockInfo>, confirmations: u32) -> Self {
         Self {
             tx_id: tx.compute_txid(),
             tx: Some(tx),
             block_info,
-            confirmations: 0,
+            confirmations,
         }
     }
     pub fn is_confirmed(&self) -> bool {

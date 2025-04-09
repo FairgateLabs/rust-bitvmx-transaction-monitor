@@ -605,7 +605,7 @@ where
                 tx_status.orphan,
             ));
 
-            TransactionStatus::new(tx_status.tx, block_info)
+            TransactionStatus::new(tx_status.tx, block_info, tx_status.confirmations)
         });
 
         Ok(tx_status_response)
