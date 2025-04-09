@@ -1,7 +1,7 @@
 use bitcoin::{absolute::LockTime, key::rand, Transaction};
 use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, TransactionMonitoredType},
-    types::{AcknowledgeTransactionNews, ExtraData},
+    types::{AckTransactionNews, ExtraData},
 };
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
@@ -50,7 +50,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     store.update_news(single_tx_news.clone())?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx.compute_txid()))?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
@@ -63,7 +63,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert_eq!(news[0], group_tx_news);
 
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx.compute_txid()))?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
@@ -74,9 +74,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert_eq!(news[0], rsk_tx_news);
 
-    store.acknowledge_news(AcknowledgeTransactionNews::RskPeginTransaction(
-        tx.compute_txid(),
-    ))?;
+    store.acknowledge_news(AckTransactionNews::RskPeginTransaction(tx.compute_txid()))?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
@@ -88,7 +86,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert_eq!(news[0], spending_tx_news);
 
-    store.acknowledge_news(AcknowledgeTransactionNews::SpendingUTXOTransaction(
+    store.acknowledge_news(AckTransactionNews::SpendingUTXOTransaction(
         tx.compute_txid(),
         0,
     ))?;
@@ -120,7 +118,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should still only have 1 entry
     assert_eq!(news[0], single_tx_news);
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx.compute_txid()))?;
 
     // Test duplicate group transaction news
     let group_id = Uuid::new_v4();
@@ -131,7 +129,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should have only group tx
     assert!(news.contains(&group_tx_news));
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx.compute_txid()))?;
 
     // Test duplicate RSK pegin transaction news
     let rsk_tx_news = TransactionMonitoredType::RskPeginTransaction(tx.compute_txid());
@@ -140,9 +138,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should have only RSK tx
     assert!(news.contains(&rsk_tx_news));
-    store.acknowledge_news(AcknowledgeTransactionNews::RskPeginTransaction(
-        tx.compute_txid(),
-    ))?;
+    store.acknowledge_news(AckTransactionNews::RskPeginTransaction(tx.compute_txid()))?;
 
     // Test duplicate spending UTXO transaction news
     let spending_tx_news =
@@ -152,7 +148,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should have only spending tx
     assert!(news.contains(&spending_tx_news));
-    store.acknowledge_news(AcknowledgeTransactionNews::SpendingUTXOTransaction(
+    store.acknowledge_news(AckTransactionNews::SpendingUTXOTransaction(
         tx.compute_txid(),
         0,
     ))?;
@@ -204,9 +200,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&single_tx2));
     assert!(news.contains(&single_tx3));
 
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx1.compute_txid()))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx2.compute_txid()))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx3.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx1.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx2.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx3.compute_txid()))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
@@ -233,9 +229,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&group_tx2));
     assert!(news.contains(&group_tx3));
 
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx1.compute_txid()))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx2.compute_txid()))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::Transaction(tx3.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx1.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx2.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::Transaction(tx3.compute_txid()))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
@@ -255,15 +251,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&rsk_tx2));
     assert!(news.contains(&rsk_tx3));
 
-    store.acknowledge_news(AcknowledgeTransactionNews::RskPeginTransaction(
-        tx1.compute_txid(),
-    ))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::RskPeginTransaction(
-        tx2.compute_txid(),
-    ))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::RskPeginTransaction(
-        tx3.compute_txid(),
-    ))?;
+    store.acknowledge_news(AckTransactionNews::RskPeginTransaction(tx1.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::RskPeginTransaction(tx2.compute_txid()))?;
+    store.acknowledge_news(AckTransactionNews::RskPeginTransaction(tx3.compute_txid()))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
@@ -286,15 +276,15 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&spending_tx2));
     assert!(news.contains(&spending_tx3));
 
-    store.acknowledge_news(AcknowledgeTransactionNews::SpendingUTXOTransaction(
+    store.acknowledge_news(AckTransactionNews::SpendingUTXOTransaction(
         tx1.compute_txid(),
         0,
     ))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::SpendingUTXOTransaction(
+    store.acknowledge_news(AckTransactionNews::SpendingUTXOTransaction(
         tx2.compute_txid(),
         1,
     ))?;
-    store.acknowledge_news(AcknowledgeTransactionNews::SpendingUTXOTransaction(
+    store.acknowledge_news(AckTransactionNews::SpendingUTXOTransaction(
         tx3.compute_txid(),
         2,
     ))?;
