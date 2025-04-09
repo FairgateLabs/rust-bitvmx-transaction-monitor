@@ -29,7 +29,7 @@ fn tx_news_test() -> Result<(), anyhow::Error> {
     )?;
 
     let block_info = BlockInfo {
-        block_height: 100,
+        block_height: 0,
         block_hash,
         is_orphan: false,
     };
