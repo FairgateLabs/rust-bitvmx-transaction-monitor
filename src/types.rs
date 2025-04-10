@@ -36,12 +36,13 @@ impl TransactionStatus {
         tx: Transaction,
         block_info: Option<BlockInfo>,
         status: TransactionBlockchainStatus,
+        confirmations: u32,
     ) -> Self {
         Self {
             tx_id: tx.compute_txid(),
             tx,
             block_info,
-            confirmations: 0,
+            confirmations,
             status,
         }
     }

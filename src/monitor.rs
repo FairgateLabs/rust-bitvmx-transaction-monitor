@@ -396,7 +396,8 @@ where
             TransactionBlockchainStatus::Confirmed
         };
 
-        let return_tx_status = TransactionStatus::new(tx_status.tx, block_info, status);
+        let return_tx_status =
+            TransactionStatus::new(tx_status.tx, block_info, status, tx_status.confirmations);
 
         Ok(return_tx_status)
     }
