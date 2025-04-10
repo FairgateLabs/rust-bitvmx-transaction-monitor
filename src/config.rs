@@ -3,18 +3,18 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub struct ConfigMonitor {
-    /// Path to the file containing BitVMX instances to monitor. This file is used when running
-    /// the monitor directly with `cargo run` rather than as a library.
-    pub bitvmx_file_path: String,
-
-    /// Bitcoin height to start indexing from
-    pub checkpoint_height: Option<BlockHeight>,
-
-    pub confirmation_threshold: u32,
-
-    pub db_file_path: String,
-
+    pub database: DatabaseConfig,
     pub rpc: RpcConfig,
+    pub monitor: MonitorConfig,
+}
 
-    pub log_level: Option<String>,
+#[derive(Deserialize, Debug)]
+pub struct DatabaseConfig {
+    pub file_path: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MonitorConfig {
+    pub checkpoint_height: BlockHeight,
+    pub confirmation_threshold: u32,
 }

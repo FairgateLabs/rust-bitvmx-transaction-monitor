@@ -3,17 +3,16 @@ use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
     monitor::Monitor,
-    store::MockMonitorStore,
-    types::{BitvmxInstance, TransactionStore},
+    store::{MockMonitorStore, TransactionMonitorType},
+    types::TransactionMonitor,
 };
 use mockall::predicate::*;
 use std::str::FromStr;
-use uuid::Uuid;
 
 #[test]
-fn no_instances() -> Result<(), anyhow::Error> {
+fn no_monitors() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let mut mock_bitvmx_store = MockMonitorStore::new();
+    let mut mock_monitor_store = MockMonitorStore::new();
 
     let best_block_100 = FullBlock {
         height: 100,
@@ -39,24 +38,22 @@ fn no_instances() -> Result<(), anyhow::Error> {
         .expect_get_best_block()
         .returning(move || Ok(Some(best_block_100.clone())));
 
-    // Return an empty bitvmx array
-    mock_bitvmx_store
-        .expect_get_instances_ready_to_track()
+    // Return nothing to monitor
+    mock_monitor_store
+        .expect_get_monitors()
         .with(eq(block_100_height))
         .times(1)
         .returning(|_| Ok(vec![]));
 
-    // Then we never call update_bitvmx_tx_confirmations
-    mock_bitvmx_store.expect_update_instance_news().times(0);
-
-    mock_bitvmx_store
-        .expect_set_current_block_height()
+    mock_monitor_store
+        .expect_set_monitor_height()
         .returning(|_| Ok(()));
-    mock_bitvmx_store
-        .expect_get_current_block_height()
+
+    mock_monitor_store
+        .expect_get_monitor_height()
         .returning(|| Ok(100));
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_100_height), 6)?;
+    let monitor = Monitor::new(mock_indexer, mock_monitor_store, Some(block_100_height), 6)?;
 
     monitor.tick()?;
 
@@ -64,9 +61,9 @@ fn no_instances() -> Result<(), anyhow::Error> {
 }
 
 #[test]
-fn instance_tx_detected() -> Result<(), anyhow::Error> {
+fn monitor_tx_detected() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let mut mock_bitvmx_store = MockMonitorStore::new();
+    let mut mock_monitor_store = MockMonitorStore::new();
 
     let block_200 = FullBlock {
         height: 200,
@@ -83,7 +80,6 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
     };
 
     let block_height_200 = block_200.height;
-    let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
 
     let tx_to_seen = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -98,20 +94,17 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         input: vec![],
         output: vec![],
     };
-    let instances = vec![BitvmxInstance {
-        id: instance_id_2,
-        txs: vec![
-            TransactionStore {
-                tx_id: tx.compute_txid(),
-                tx: None,
-            },
-            TransactionStore {
-                tx_id: tx_to_seen.compute_txid(),
-                tx: None,
-            },
-        ],
-        start_height: 180,
-    }];
+
+    let monitors = vec![
+        (
+            TransactionMonitor::Transactions(vec![tx.compute_txid()], String::new()),
+            180,
+        ),
+        (
+            TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
+            180,
+        ),
+    ];
 
     let hash_150 =
         BlockHash::from_str("12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
@@ -143,11 +136,29 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .expect_get_best_block()
         .returning(move || Ok(Some(block_200.clone())));
 
-    mock_bitvmx_store
-        .expect_get_instances_ready_to_track()
+    // Convert TransactionMonitor to TransactionMonitorType for the mock
+    let monitor_types = monitors
+        .iter()
+        .map(|(monitor, _)| match monitor {
+            TransactionMonitor::Transactions(txids, extra_data) => {
+                TransactionMonitorType::Transaction(txids[0], extra_data.clone())
+            }
+            TransactionMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
+                TransactionMonitorType::SpendingUTXOTransaction(
+                    *txid,
+                    *utxo_index,
+                    extra_data.clone(),
+                )
+            }
+            TransactionMonitor::RskPeginTransaction => TransactionMonitorType::RskPeginTransaction,
+        })
+        .collect::<Vec<_>>();
+
+    mock_monitor_store
+        .expect_get_monitors()
         .with(eq(block_height_200))
         .times(1)
-        .returning(move |_| Ok(instances.clone()));
+        .returning(move |_| Ok(monitor_types.clone()));
 
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
@@ -162,17 +173,15 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    // The first time was seen the tx should not call update_bitvmx_tx_confirmations
-    mock_bitvmx_store.expect_update_instance_news().times(0);
-
-    mock_bitvmx_store
-        .expect_set_current_block_height()
+    mock_monitor_store
+        .expect_set_monitor_height()
         .returning(|_| Ok(()));
-    mock_bitvmx_store
-        .expect_get_current_block_height()
+
+    mock_monitor_store
+        .expect_get_monitor_height()
         .returning(|| Ok(200));
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_height_200), 6)?;
+    let monitor = Monitor::new(mock_indexer, mock_monitor_store, Some(block_height_200), 6)?;
 
     monitor.tick()?;
 
@@ -180,9 +189,9 @@ fn instance_tx_detected() -> Result<(), anyhow::Error> {
 }
 
 #[test]
-fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Error> {
+fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let mut mock_bitvmx_store = MockMonitorStore::new();
+    let mut mock_monitor_store = MockMonitorStore::new();
 
     let block_200 = FullBlock {
         height: 200,
@@ -199,7 +208,6 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
     };
 
     let block_height_200 = block_200.height;
-    let instance_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
 
     let tx_to_seen = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -208,14 +216,10 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         output: vec![],
     };
 
-    let instances = vec![BitvmxInstance {
-        id: instance_id_2,
-        txs: vec![TransactionStore {
-            tx_id: tx_to_seen.compute_txid(),
-            tx: None,
-        }],
-        start_height: 180,
-    }];
+    let monitors = vec![(
+        TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
+        180,
+    )];
 
     mock_indexer.expect_tick().returning(move |_| Ok(201));
 
@@ -233,30 +237,46 @@ fn instance_tx_already_detected_increase_confirmation() -> Result<(), anyhow::Er
         block_height: 100,
         confirmations: 10,
     };
-    // Tx was found by the indexer and is already in the blockchain.
+
     mock_indexer
         .expect_get_tx()
         .with(eq(tx_to_seen.compute_txid()))
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    mock_bitvmx_store
-        .expect_get_instances_ready_to_track()
+    // Convert TransactionMonitor to TransactionMonitorType for the mock
+    let monitor_types = monitors
+        .iter()
+        .map(|(monitor, _)| match monitor {
+            TransactionMonitor::Transactions(txids, extra_data) => {
+                TransactionMonitorType::Transaction(txids[0], extra_data.clone())
+            }
+            TransactionMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
+                TransactionMonitorType::SpendingUTXOTransaction(
+                    *txid,
+                    *utxo_index,
+                    extra_data.clone(),
+                )
+            }
+            TransactionMonitor::RskPeginTransaction => TransactionMonitorType::RskPeginTransaction,
+        })
+        .collect::<Vec<_>>();
+
+    mock_monitor_store
+        .expect_get_monitors()
         .with(eq(block_height_200))
         .times(1)
-        .returning(move |_| Ok(instances.clone()));
+        .returning(move |_| Ok(monitor_types.clone()));
 
-    // Do no Increase confirmations given the block is the same were was found
-    mock_bitvmx_store.expect_update_instance_news().times(0);
-
-    mock_bitvmx_store
-        .expect_set_current_block_height()
+    mock_monitor_store
+        .expect_set_monitor_height()
         .returning(|_| Ok(()));
-    mock_bitvmx_store
-        .expect_get_current_block_height()
+
+    mock_monitor_store
+        .expect_get_monitor_height()
         .returning(|| Ok(200));
 
-    let monitor = Monitor::new(mock_indexer, mock_bitvmx_store, Some(block_height_200), 6)?;
+    let monitor = Monitor::new(mock_indexer, mock_monitor_store, Some(block_height_200), 6)?;
 
     monitor.tick()?;
 

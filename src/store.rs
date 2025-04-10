@@ -1,72 +1,64 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{BitvmxInstance, BlockInfo, InstanceId, TransactionStatus, TransactionStore},
+    types::{AckTransactionNews, TransactionMonitor},
 };
-use bitcoin::{Transaction, Txid};
+use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
+use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
-use tracing::warn;
 
 pub struct MonitorStore {
     store: Rc<Storage>,
 }
-enum InstanceKey {
-    Instance(InstanceId),
-    InstanceList,
-    InstanceNews,
-}
 enum TransactionKey {
-    Transaction(Txid),
     TransactionList,
+    RskPeginTransaction,
+    SpendingUTXOTransactionList,
     TransactionNews,
+    RskPeginTransactionNews,
+    SpendingUTXOTransactionNews,
 }
 
 enum BlockchainKey {
     CurrentBlockHeight,
 }
 
-pub trait MonitorStoreApi {
-    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum TransactionMonitoredType {
+    Transaction(Txid, String),
+    RskPeginTransaction(Txid),
+    SpendingUTXOTransaction(Txid, u32, String),
+}
 
-    fn get_instances_ready_to_track(
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum TransactionMonitorType {
+    Transaction(Txid, String),
+    RskPeginTransaction,
+    SpendingUTXOTransaction(Txid, u32, String),
+}
+
+pub trait MonitorStoreApi {
+    fn get_monitors(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<BitvmxInstance>, MonitorStoreError>;
+    ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError>;
 
-    fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError>;
-    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError>;
-    fn save_instance_transaction(
+    fn save_monitor(
         &self,
-        instance_id: InstanceId,
-        tx: &Txid,
-    ) -> Result<(), MonitorStoreError>;
-    fn remove_transaction(
-        &self,
-        instance_id: InstanceId,
-        tx: &Txid,
+        data: TransactionMonitor,
+        start_height: BlockHeight,
     ) -> Result<(), MonitorStoreError>;
 
-    fn update_instance_news(
-        &self,
-        instance_id: InstanceId,
-        txid: Txid,
-    ) -> Result<(), MonitorStoreError>;
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError>;
-    fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx: &Txid,
-    ) -> Result<(), MonitorStoreError>;
+    fn remove_monitor(&self, data: TransactionMonitor) -> Result<(), MonitorStoreError>;
 
-    //Transaction Methods
-    fn save_tx(&self, tx: &Transaction, block_info: BlockInfo) -> Result<(), MonitorStoreError>;
-    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorStoreError>;
-    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorStoreError>;
+    fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError>;
+    fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError>;
+    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError>;
 
-    fn get_current_block_height(&self) -> Result<BlockHeight, MonitorStoreError>;
-    fn set_current_block_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
+    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
+    fn set_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
 }
 
 impl MonitorStore {
@@ -74,21 +66,19 @@ impl MonitorStore {
         Ok(Self { store })
     }
 
-    fn get_instance_key(&self, key: InstanceKey) -> String {
-        let prefix = "monitor";
-        match key {
-            InstanceKey::InstanceList => format!("{prefix}/instance/list"),
-            InstanceKey::Instance(instance_id) => format!("{prefix}/instance/{}", instance_id),
-            InstanceKey::InstanceNews => format!("{prefix}/instance/news"),
-        }
-    }
-
-    fn get_tx_key(&self, key: TransactionKey) -> String {
+    fn get_key(&self, key: TransactionKey) -> String {
         let prefix = "monitor";
         match key {
             TransactionKey::TransactionList => format!("{prefix}/tx/list"),
-            TransactionKey::Transaction(tx_id) => format!("{prefix}/tx/{}", tx_id),
+            TransactionKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
+            TransactionKey::SpendingUTXOTransactionList => {
+                format!("{prefix}/spending/utxo/tx/list")
+            }
             TransactionKey::TransactionNews => format!("{prefix}/tx/news"),
+            TransactionKey::RskPeginTransactionNews => format!("{prefix}/rsk/tx/news"),
+            TransactionKey::SpendingUTXOTransactionNews => {
+                format!("{prefix}/spending/utxo/tx/news")
+            }
         }
     }
 
@@ -100,120 +90,11 @@ impl MonitorStore {
             }
         }
     }
-
-    fn get_instance(
-        &self,
-        instance_id: InstanceId,
-    ) -> Result<Option<BitvmxInstance>, MonitorStoreError> {
-        let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
-        let instance = self.store.get::<&str, BitvmxInstance>(&instance_key)?;
-
-        Ok(instance)
-    }
-
-    fn save_instance_tx(
-        &self,
-        instance_id: InstanceId,
-        tx_status: &TransactionStore,
-    ) -> Result<(), MonitorStoreError> {
-        let instance_key = self.get_instance_key(InstanceKey::Instance(instance_id));
-        let instance = self.store.get::<&str, BitvmxInstance>(&instance_key)?;
-
-        match instance {
-            Some(mut _instance) =>
-            // Find the index of the transaction you want to replace
-            {
-                if let Some(pos) = _instance
-                    .txs
-                    .iter()
-                    .position(|tx_old| tx_old.tx_id == tx_status.tx_id)
-                {
-                    // Replace the old transaction with the new one
-                    _instance.txs[pos] = tx_status.clone();
-                } else {
-                    _instance.txs.push(tx_status.clone());
-                }
-                self.store.set(instance_key, _instance, None)?;
-            }
-            None => {
-                return Err(MonitorStoreError::UnexpectedError(format!(
-                    "There was an error trying to save instance {}",
-                    instance_key
-                )))
-            }
-        }
-
-        Ok(())
-    }
-
-    fn remove_instance_tx(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
-        // Retrieve the instance using the instance_id
-        let instance = self.get_instance(instance_id)?;
-
-        match instance {
-            Some(mut _instance) => {
-                // Find the index of the transaction to remove from the instance's txs list
-                if let Some(pos) = _instance
-                    .txs
-                    .iter()
-                    .position(|tx_old| tx_old.tx_id == *tx_id)
-                {
-                    // Remove the transaction from the list of transactions
-                    _instance.txs.remove(pos);
-
-                    // Update the instance in the store after removal
-                    self.save_instance(&_instance)?;
-                } else {
-                    return Err(MonitorStoreError::UnexpectedError(format!(
-                        "Transaction with id {} not found in instance {}",
-                        tx_id, instance_id
-                    )));
-                }
-            }
-            None => {
-                return Err(MonitorStoreError::UnexpectedError(format!(
-                    "Instance {} not found",
-                    instance_id
-                )));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn get_instances(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
-        let mut instances = Vec::<BitvmxInstance>::new();
-
-        let instances_key = self.get_instance_key(InstanceKey::InstanceList);
-        let all_instance_ids = self
-            .store
-            .get::<_, Vec<InstanceId>>(instances_key)?
-            .unwrap_or_default();
-
-        for id in all_instance_ids {
-            let instance = self.get_instance(id)?;
-
-            match instance {
-                Some(inst) => instances.push(inst),
-                None => {
-                    return Err(MonitorStoreError::UnexpectedError(
-                        "There is an error trying to get instance".to_string(),
-                    ))
-                }
-            }
-        }
-
-        Ok(instances)
-    }
 }
 
 #[automock]
 impl MonitorStoreApi for MonitorStore {
-    fn get_current_block_height(&self) -> Result<BlockHeight, MonitorStoreError> {
+    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError> {
         let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
         let last_block_height = self
             .store
@@ -223,220 +104,263 @@ impl MonitorStoreApi for MonitorStore {
         Ok(last_block_height)
     }
 
-    fn set_current_block_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError> {
+    fn set_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError> {
         let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
         self.store.set(last_block_height_key, height, None)?;
         Ok(())
     }
 
-    fn get_all_instances_for_tracking(&self) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
-        self.get_instances()
-    }
+    fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError> {
+        let mut news = Vec::new();
 
-    fn get_instance_news(&self) -> Result<Vec<(InstanceId, Vec<Txid>)>, MonitorStoreError> {
-        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
-        let instance_news = self
+        let key = self.get_key(TransactionKey::TransactionNews);
+        let txs_news = self
             .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)
+            .get::<_, Vec<(Txid, String)>>(&key)?
             .unwrap_or_default();
 
-        match instance_news {
-            Some(news) => Ok(news),
-            None => Ok(vec![]),
-        }
-    }
-
-    fn get_single_tx_news(&self) -> Result<Vec<TransactionStatus>, MonitorStoreError> {
-        let tx_news_key = self.get_tx_key(TransactionKey::TransactionNews);
-        let tx_ids = self
-            .store
-            .get::<_, Vec<Txid>>(&tx_news_key)?
-            .unwrap_or_else(Vec::new);
-
-        let mut txs = Vec::new();
-
-        for tx in tx_ids {
-            let tx_news_key = self.get_tx_key(TransactionKey::Transaction(tx));
-
-            let tx_status = self.store.get::<&str, TransactionStatus>(&tx_news_key)?;
-
-            if let Some(mut tx_status) = tx_status {
-                let current_height = self.get_current_block_height()?;
-
-                tx_status.confirmations = current_height
-                    .saturating_sub(tx_status.block_info.clone().unwrap().block_height)
-                    + 1;
-
-                txs.push(tx_status);
-            } else {
-                warn!("No tx status found for tx {}", tx);
-            }
+        for (tx_id, extra_data) in txs_news {
+            news.push(TransactionMonitoredType::Transaction(tx_id, extra_data));
         }
 
-        Ok(txs)
-    }
-
-    fn acknowledge_instance_tx_news(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
-        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
-
-        let mut instances_news = self
+        let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
+        let rsk_news = self
             .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .get::<_, Vec<Txid>>(&rsk_news_key)?
             .unwrap_or_default();
 
-        if let Some(index) = instances_news.iter().position(|(id, _)| *id == instance_id) {
-            let (_, txs) = &mut instances_news[index];
-            txs.retain(|tx| tx != tx_id);
+        for tx_id in rsk_news {
+            news.push(TransactionMonitoredType::RskPeginTransaction(tx_id));
+        }
 
-            // If all transactions for this instance have been acknowledged, remove the instance
-            if txs.is_empty() {
-                instances_news.remove(index);
+        let spending_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
+        let spending_news = self
+            .store
+            .get::<_, Vec<(Txid, u32, String)>>(&spending_news_key)?
+            .unwrap_or_default();
+
+        for (tx_id, utxo_index, extra_data) in spending_news {
+            news.push(TransactionMonitoredType::SpendingUTXOTransaction(
+                tx_id, utxo_index, extra_data,
+            ));
+        }
+
+        Ok(news)
+    }
+
+    fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError> {
+        match data {
+            TransactionMonitoredType::Transaction(tx_id, extra_data) => {
+                let key = self.get_key(TransactionKey::TransactionNews);
+                let mut txs_news = self
+                    .store
+                    .get::<_, Vec<(Txid, String)>>(&key)?
+                    .unwrap_or_default();
+
+                if !txs_news.contains(&(tx_id, extra_data.clone())) {
+                    txs_news.push((tx_id, extra_data.clone()));
+                }
+
+                self.store.set(&key, &txs_news, None)?;
             }
+            TransactionMonitoredType::RskPeginTransaction(tx_id) => {
+                let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
+                let mut rsk_news = self
+                    .store
+                    .get::<_, Vec<Txid>>(&rsk_news_key)?
+                    .unwrap_or_default();
 
-            self.store.set(&instance_news_key, &instances_news, None)?;
-        } else {
-            // If the instance is not found in the news, we can either ignore it or log a warning
-            warn!("No news found for instance {}", instance_id);
+                if !rsk_news.contains(&tx_id) {
+                    rsk_news.push(tx_id);
+                }
+
+                self.store.set(&rsk_news_key, &rsk_news, None)?;
+            }
+            TransactionMonitoredType::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
+                let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
+                let mut utxo_news = self
+                    .store
+                    .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
+                    .unwrap_or_default();
+
+                if !utxo_news.contains(&(tx_id, utxo_index, extra_data.clone())) {
+                    utxo_news.push((tx_id, utxo_index, extra_data));
+                }
+
+                self.store.set(&utxo_news_key, &utxo_news, None)?;
+            }
         }
 
         Ok(())
     }
 
-    fn get_instances_ready_to_track(
+    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError> {
+        match data {
+            AckTransactionNews::Transaction(tx_id) => {
+                let key = self.get_key(TransactionKey::TransactionNews);
+                let mut txs_news = self
+                    .store
+                    .get::<_, Vec<(Txid, String)>>(&key)?
+                    .unwrap_or_default();
+
+                txs_news.retain(|(tx, _)| tx != &tx_id);
+                self.store.set(&key, &txs_news, None)?;
+            }
+            AckTransactionNews::RskPeginTransaction(tx_id) => {
+                let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
+                let mut rsk_news = self
+                    .store
+                    .get::<_, Vec<Txid>>(&rsk_news_key)?
+                    .unwrap_or_default();
+
+                rsk_news.retain(|tx| tx != &tx_id);
+                self.store.set(&rsk_news_key, &rsk_news, None)?;
+            }
+            AckTransactionNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
+                let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
+                let mut utxo_news = self
+                    .store
+                    .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
+                    .unwrap_or_default();
+
+                utxo_news.retain(|(tx, utxo_i, _)| *tx != tx_id || *utxo_i != utxo_index);
+                self.store.set(&utxo_news_key, &utxo_news, None)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_monitors(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<BitvmxInstance>, MonitorStoreError> {
-        // This method will return bitvmx instances excluding the onces are not ready to track
-        let mut bitvmx_instances = self.get_instances()?;
-        bitvmx_instances.retain(|i| (i.start_height <= current_height));
+    ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError> {
+        let mut monitors = Vec::<(TransactionMonitorType, BlockHeight)>::new();
 
-        Ok(bitvmx_instances)
-    }
-
-    fn save_instances(&self, instances: &[BitvmxInstance]) -> Result<(), MonitorStoreError> {
-        for instance in instances {
-            self.save_instance(instance)?;
-        }
-        Ok(())
-    }
-
-    fn save_instance(&self, instance: &BitvmxInstance) -> Result<(), MonitorStoreError> {
-        let instance_key = self.get_instance_key(InstanceKey::Instance(instance.id));
-
-        // Store the instance under its ID
-        self.store.set(instance_key, instance, None)?;
-
-        // Maintain a list of all instances
-        let instances_key = self.get_instance_key(InstanceKey::InstanceList);
-        let mut all_instances = self
+        let txs_key = self.get_key(TransactionKey::TransactionList);
+        let txs = self
             .store
-            .get::<_, Vec<InstanceId>>(&instances_key)
-            .unwrap_or_default()
+            .get::<_, Vec<(Txid, String, BlockHeight)>>(txs_key)?
             .unwrap_or_default();
 
-        if !all_instances.contains(&instance.id) {
-            all_instances.push(instance.id);
-            self.store.set(instances_key, &all_instances, None)?;
+        for (tx_id, extra_data, height) in txs {
+            monitors.push((
+                TransactionMonitorType::Transaction(tx_id, extra_data),
+                height,
+            ));
         }
 
-        Ok(())
-    }
-
-    fn save_instance_transaction(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
-        let tx_data = TransactionStore {
-            tx_id: *tx_id,
-            tx: None,
-        };
-
-        self.save_instance_tx(instance_id, &tx_data)?;
-
-        Ok(())
-    }
-
-    fn save_tx(&self, tx: &Transaction, block_info: BlockInfo) -> Result<(), MonitorStoreError> {
-        // Save the transaction status
-        let tx_key = self.get_tx_key(TransactionKey::Transaction(tx.compute_txid()));
-        let confirmations = self.get_current_block_height()? - block_info.block_height + 1;
-        let tx_status = TransactionStatus::new(tx.clone(), Some(block_info), confirmations);
-        self.store.set(&tx_key, tx_status, None)?;
-
-        // Update the transaction news
-        let txs_news_key = self.get_tx_key(TransactionKey::TransactionNews);
-        let mut txs = self
+        let rsk_pegin_key = self.get_key(TransactionKey::RskPeginTransaction);
+        let rsk_pegin_height = self
             .store
-            .get::<_, Vec<Txid>>(&txs_news_key)?
-            .unwrap_or_else(Vec::new);
-
-        if !txs.iter().any(|tx_id| tx_id == &tx.compute_txid()) {
-            txs.push(tx.compute_txid());
-            self.store.set(&txs_news_key, &txs, None)?;
-        }
-
-        // Save tx in list
-        let txs_list_key = self.get_tx_key(TransactionKey::TransactionList);
-        let mut txs = self
-            .store
-            .get::<_, Vec<Txid>>(&txs_list_key)?
-            .unwrap_or_else(Vec::new);
-        txs.push(tx.compute_txid());
-        self.store.set(&txs_list_key, &txs, None)?;
-
-        Ok(())
-    }
-
-    fn remove_transaction(
-        &self,
-        instance_id: InstanceId,
-        tx_id: &Txid,
-    ) -> Result<(), MonitorStoreError> {
-        self.remove_instance_tx(instance_id, tx_id)
-    }
-
-    fn update_instance_news(
-        &self,
-        instance_id: InstanceId,
-        txid: Txid,
-    ) -> Result<(), MonitorStoreError> {
-        let instance_news_key = self.get_instance_key(InstanceKey::InstanceNews);
-        let mut instance_news = self
-            .store
-            .get::<_, Vec<(InstanceId, Vec<Txid>)>>(&instance_news_key)?
+            .get::<_, (bool, BlockHeight)>(rsk_pegin_key)?
             .unwrap_or_default();
 
-        // Find the index of the instance in the news
-        if let Some(index) = instance_news.iter().position(|(id, _)| *id == instance_id) {
-            // If the instance exists, update its transactions
-            if !instance_news[index].1.contains(&txid) {
-                instance_news[index].1.push(txid);
+        if rsk_pegin_height.0 {
+            monitors.push((
+                TransactionMonitorType::RskPeginTransaction,
+                rsk_pegin_height.1,
+            ));
+        }
+
+        let spending_utxo_key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+        let spending_utxos = self
+            .store
+            .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(spending_utxo_key)?
+            .unwrap_or_default();
+
+        for (tx_id, utxo_index, extra_data, height) in spending_utxos {
+            monitors.push((
+                TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index, extra_data),
+                height,
+            ));
+        }
+
+        let filtered_monitors = monitors
+            .into_iter()
+            .filter(|(_, height)| *height <= current_height)
+            .map(|(monitor_type, _)| monitor_type)
+            .collect::<Vec<_>>();
+
+        Ok(filtered_monitors)
+    }
+
+    fn save_monitor(
+        &self,
+        data: TransactionMonitor,
+        start_height: BlockHeight,
+    ) -> Result<(), MonitorStoreError> {
+        match data {
+            TransactionMonitor::Transactions(tx_ids, extra_data) => {
+                let key = self.get_key(TransactionKey::TransactionList);
+                let mut txs = self
+                    .store
+                    .get::<_, Vec<(Txid, String, BlockHeight)>>(&key)?
+                    .unwrap_or_default();
+
+                for txid in &tx_ids {
+                    if let Some(pos) = txs.iter().position(|(i, _, _)| *i == *txid) {
+                        // Update the existing entry with the new extra_data
+                        txs[pos] = (*txid, extra_data.clone(), start_height);
+                    } else {
+                        // Add a new entry if the txid doesn't exist
+                        txs.push((*txid, extra_data.clone(), start_height));
+                    }
+                }
+
+                self.store.set(&key, &txs, None)?;
             }
-        } else {
-            // If the instance doesn't exist, add it with the new transaction
-            instance_news.push((instance_id, vec![txid]));
+            TransactionMonitor::RskPeginTransaction => {
+                let key = self.get_key(TransactionKey::RskPeginTransaction);
+                self.store.set(&key, (true, start_height), None)?;
+            }
+            TransactionMonitor::SpendingUTXOTransaction(txid, vout, extra_data) => {
+                let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+                let mut txs = self
+                    .store
+                    .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(&key)?
+                    .unwrap_or_default();
+                if !txs.contains(&(txid, vout, extra_data.clone(), start_height)) {
+                    txs.push((txid, vout, extra_data.clone(), start_height));
+                    self.store.set(&key, &txs, None)?;
+                }
+            }
         }
-
-        self.store.set(&instance_news_key, &instance_news, None)?;
 
         Ok(())
     }
 
-    fn acknowledge_tx_news(&self, tx_id: Txid) -> Result<(), MonitorStoreError> {
-        let tx_news_key = self.get_tx_key(TransactionKey::TransactionNews);
-        let mut tx_news = self
-            .store
-            .get::<_, Vec<Txid>>(&tx_news_key)?
-            .unwrap_or_default();
+    fn remove_monitor(&self, data: TransactionMonitor) -> Result<(), MonitorStoreError> {
+        match data {
+            TransactionMonitor::Transactions(tx_ids, _) => {
+                let key = self.get_key(TransactionKey::TransactionList);
+                let mut txs = self
+                    .store
+                    .get::<_, Vec<(Txid, String, BlockHeight)>>(&key)?
+                    .unwrap_or_default();
 
-        if let Some(pos) = tx_news.iter().position(|a| a == &tx_id) {
-            tx_news.remove(pos);
-            self.store.set(&tx_news_key, &tx_news, None)?;
+                // Filter out transactions that are in tx_ids
+                txs.retain(|(tx_id, _, _)| {
+                    // Keep the entry if none of its txids are in tx_ids
+                    !tx_ids.iter().any(|txid| *txid == *tx_id)
+                });
+
+                self.store.set(&key, &txs, None)?;
+            }
+
+            TransactionMonitor::RskPeginTransaction => {
+                let key = self.get_key(TransactionKey::RskPeginTransaction);
+                self.store.set(&key, (false, 0), None)?;
+            }
+            TransactionMonitor::SpendingUTXOTransaction(txid, vout, _) => {
+                let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+                let mut txs = self
+                    .store
+                    .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(&key)?
+                    .unwrap_or_default();
+                txs.retain(|(tx_id, utxo_index, _, _)| *tx_id != txid || *utxo_index != vout);
+                self.store.set(&key, &txs, None)?;
+            }
         }
 
         Ok(())
