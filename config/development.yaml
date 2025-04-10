@@ -6,7 +6,7 @@ rpc:
   wallet: test_wallet
 
 monitor:
-    checkpoint_height: 764
+    checkpoint_height: 1
     confirmation_threshold: 6
 
 database:

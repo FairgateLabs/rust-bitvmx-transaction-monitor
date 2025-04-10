@@ -1,6 +1,6 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{AckTransactionNews, ExtraData, TransactionMonitor},
+    types::{AckTransactionNews, TransactionMonitor},
 };
 use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
@@ -27,16 +27,16 @@ enum BlockchainKey {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TransactionMonitoredType {
-    Transaction(Txid, ExtraData),
+    Transaction(Txid, String),
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid, u32, ExtraData),
+    SpendingUTXOTransaction(Txid, u32, String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TransactionMonitorType {
-    Transaction(Txid, ExtraData),
+    Transaction(Txid, String),
     RskPeginTransaction,
-    SpendingUTXOTransaction(Txid, u32, ExtraData),
+    SpendingUTXOTransaction(Txid, u32, String),
 }
 
 pub trait MonitorStoreApi {
@@ -116,7 +116,7 @@ impl MonitorStoreApi for MonitorStore {
         let key = self.get_key(TransactionKey::TransactionNews);
         let txs_news = self
             .store
-            .get::<_, Vec<(Txid, ExtraData)>>(&key)?
+            .get::<_, Vec<(Txid, String)>>(&key)?
             .unwrap_or_default();
 
         for (tx_id, extra_data) in txs_news {
@@ -136,7 +136,7 @@ impl MonitorStoreApi for MonitorStore {
         let spending_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
         let spending_news = self
             .store
-            .get::<_, Vec<(Txid, u32, ExtraData)>>(&spending_news_key)?
+            .get::<_, Vec<(Txid, u32, String)>>(&spending_news_key)?
             .unwrap_or_default();
 
         for (tx_id, utxo_index, extra_data) in spending_news {
@@ -154,7 +154,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(TransactionKey::TransactionNews);
                 let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Txid, ExtraData)>>(&key)?
+                    .get::<_, Vec<(Txid, String)>>(&key)?
                     .unwrap_or_default();
 
                 if !txs_news.contains(&(tx_id, extra_data.clone())) {
@@ -180,7 +180,7 @@ impl MonitorStoreApi for MonitorStore {
                 let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, ExtraData)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
                 if !utxo_news.contains(&(tx_id, utxo_index, extra_data.clone())) {
@@ -200,7 +200,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(TransactionKey::TransactionNews);
                 let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Txid, ExtraData)>>(&key)?
+                    .get::<_, Vec<(Txid, String)>>(&key)?
                     .unwrap_or_default();
 
                 txs_news.retain(|(tx, _)| tx != &tx_id);
@@ -220,7 +220,7 @@ impl MonitorStoreApi for MonitorStore {
                 let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, ExtraData)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
                 utxo_news.retain(|(tx, utxo_i, _)| *tx != tx_id || *utxo_i != utxo_index);
@@ -240,7 +240,7 @@ impl MonitorStoreApi for MonitorStore {
         let txs_key = self.get_key(TransactionKey::TransactionList);
         let txs = self
             .store
-            .get::<_, Vec<(Txid, ExtraData, BlockHeight)>>(txs_key)?
+            .get::<_, Vec<(Txid, String, BlockHeight)>>(txs_key)?
             .unwrap_or_default();
 
         for (tx_id, extra_data, height) in txs {
@@ -266,7 +266,7 @@ impl MonitorStoreApi for MonitorStore {
         let spending_utxo_key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
         let spending_utxos = self
             .store
-            .get::<_, Vec<(Txid, u32, ExtraData, BlockHeight)>>(spending_utxo_key)?
+            .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(spending_utxo_key)?
             .unwrap_or_default();
 
         for (tx_id, utxo_index, extra_data, height) in spending_utxos {
@@ -295,7 +295,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(TransactionKey::TransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, ExtraData, BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, String, BlockHeight)>>(&key)?
                     .unwrap_or_default();
 
                 for txid in &tx_ids {
@@ -318,7 +318,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, u32, ExtraData, BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(&key)?
                     .unwrap_or_default();
                 if !txs.contains(&(txid, vout, extra_data.clone(), start_height)) {
                     txs.push((txid, vout, extra_data.clone(), start_height));
@@ -336,7 +336,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(TransactionKey::TransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, ExtraData, BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, String, BlockHeight)>>(&key)?
                     .unwrap_or_default();
 
                 // Filter out transactions that are in tx_ids
@@ -356,7 +356,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, u32, ExtraData, BlockHeight)>>(&key)?
+                    .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(&key)?
                     .unwrap_or_default();
                 txs.retain(|(tx_id, utxo_index, _, _)| *tx_id != txid || *utxo_index != vout);
                 self.store.set(&key, &txs, None)?;

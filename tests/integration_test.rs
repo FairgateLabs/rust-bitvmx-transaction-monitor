@@ -8,7 +8,7 @@ use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::ConfigMonitor,
     monitor::{Monitor, MonitorApi},
-    types::{ExtraData, TransactionMonitor},
+    types::TransactionMonitor,
 };
 use std::{path::PathBuf, rc::Rc, str::FromStr, sync::mpsc::channel, thread, time::Duration};
 use storage_backend::storage::Storage;
@@ -66,7 +66,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
     let group_id = Uuid::new_v4();
     let txid = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
 
-    let group_monitor = TransactionMonitor::Transactions(vec![txid], ExtraData::GroupId(group_id));
+    let group_monitor = TransactionMonitor::Transactions(vec![txid], group_id.to_string());
     monitor.monitor(group_monitor)?;
 
     let mut prev_height = 0;

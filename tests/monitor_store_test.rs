@@ -1,8 +1,5 @@
 use bitcoin::{absolute::LockTime, key::rand, Transaction};
-use bitvmx_transaction_monitor::{
-    store::{MonitorStore, MonitorStoreApi, TransactionMonitorType},
-    types::ExtraData,
-};
+use bitvmx_transaction_monitor::store::{MonitorStore, MonitorStoreApi, TransactionMonitorType};
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
 
@@ -53,7 +50,7 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
 
     // 1. Test SingleTransaction
     let single_tx_monitor =
-        TransactionMonitor::Transactions(vec![tx1.compute_txid()], ExtraData::None);
+        TransactionMonitor::Transactions(vec![tx1.compute_txid()], String::new());
 
     store.save_monitor(single_tx_monitor.clone(), 100)?;
     let monitors = store.get_monitors(0)?;
@@ -72,7 +69,7 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     // 2. Test GroupTransaction
     let group_id = Uuid::new_v4();
     let group_tx_monitor =
-        TransactionMonitor::Transactions(vec![tx2.compute_txid()], ExtraData::GroupId(group_id));
+        TransactionMonitor::Transactions(vec![tx2.compute_txid()], group_id.to_string());
     store.save_monitor(group_tx_monitor.clone(), 200)?;
     let monitors = store.get_monitors(200)?;
     assert!(matches!(
@@ -97,12 +94,12 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
 
     // 4. Test SpendingUTXOTransaction
     let utxo_monitor =
-        TransactionMonitor::SpendingUTXOTransaction(tx3.compute_txid(), 1, ExtraData::None);
+        TransactionMonitor::SpendingUTXOTransaction(tx3.compute_txid(), 1, String::new());
     store.save_monitor(utxo_monitor.clone(), 400)?;
     let monitors = store.get_monitors(400)?;
     assert!(matches!(
         monitors[0].clone(),
-        TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index, ExtraData::None)
+        TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index, _)
             if tx_id == tx3.compute_txid() && utxo_index == 1
     ));
     store.remove_monitor(utxo_monitor.clone())?;

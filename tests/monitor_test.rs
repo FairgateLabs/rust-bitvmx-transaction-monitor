@@ -4,7 +4,7 @@ use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
     monitor::Monitor,
     store::{MockMonitorStore, TransactionMonitorType},
-    types::{ExtraData, TransactionMonitor},
+    types::TransactionMonitor,
 };
 use mockall::predicate::*;
 use std::str::FromStr;
@@ -97,11 +97,11 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
 
     let monitors = vec![
         (
-            TransactionMonitor::Transactions(vec![tx.compute_txid()], ExtraData::None),
+            TransactionMonitor::Transactions(vec![tx.compute_txid()], String::new()),
             180,
         ),
         (
-            TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], ExtraData::None),
+            TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
             180,
         ),
     ];
@@ -217,7 +217,7 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     };
 
     let monitors = vec![(
-        TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], ExtraData::None),
+        TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
         180,
     )];
 

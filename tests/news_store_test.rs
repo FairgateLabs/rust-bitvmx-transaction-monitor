@@ -1,7 +1,7 @@
 use bitcoin::{absolute::LockTime, key::rand, Transaction};
 use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, TransactionMonitoredType},
-    types::{AckTransactionNews, ExtraData},
+    types::AckTransactionNews,
 };
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
@@ -46,7 +46,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news, vec![]);
 
     // Test single transaction news
-    let single_tx_news = TransactionMonitoredType::Transaction(tx.compute_txid(), ExtraData::None);
+    let single_tx_news = TransactionMonitoredType::Transaction(tx.compute_txid(), String::new());
     store.update_news(single_tx_news.clone())?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
@@ -57,7 +57,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     // Test group transaction news
     let group_id = Uuid::new_v4();
     let group_tx_news =
-        TransactionMonitoredType::Transaction(tx.compute_txid(), ExtraData::GroupId(group_id));
+        TransactionMonitoredType::Transaction(tx.compute_txid(), group_id.to_string());
     store.update_news(group_tx_news.clone())?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
@@ -80,7 +80,7 @@ fn news_test() -> Result<(), anyhow::Error> {
 
     // Test spending UTXO transaction news
     let spending_tx_news =
-        TransactionMonitoredType::SpendingUTXOTransaction(tx.compute_txid(), 0, ExtraData::None);
+        TransactionMonitoredType::SpendingUTXOTransaction(tx.compute_txid(), 0, String::new());
     store.update_news(spending_tx_news.clone())?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
@@ -112,7 +112,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     };
 
     // Test duplicate single transaction news
-    let single_tx_news = TransactionMonitoredType::Transaction(tx.compute_txid(), ExtraData::None);
+    let single_tx_news = TransactionMonitoredType::Transaction(tx.compute_txid(), String::new());
     store.update_news(single_tx_news.clone())?;
     store.update_news(single_tx_news.clone())?; // Try adding same tx again
     let news = store.get_news()?;
@@ -123,7 +123,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     // Test duplicate group transaction news
     let group_id = Uuid::new_v4();
     let group_tx_news =
-        TransactionMonitoredType::Transaction(tx.compute_txid(), ExtraData::GroupId(group_id));
+        TransactionMonitoredType::Transaction(tx.compute_txid(), group_id.to_string());
     store.update_news(group_tx_news.clone())?;
     store.update_news(group_tx_news.clone())?; // Try adding same group tx again
     let news = store.get_news()?;
@@ -142,7 +142,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 
     // Test duplicate spending UTXO transaction news
     let spending_tx_news =
-        TransactionMonitoredType::SpendingUTXOTransaction(tx.compute_txid(), 0, ExtraData::None);
+        TransactionMonitoredType::SpendingUTXOTransaction(tx.compute_txid(), 0, String::new());
     store.update_news(spending_tx_news.clone())?;
     store.update_news(spending_tx_news.clone())?; // Try adding same spending tx again
     let news = store.get_news()?;
@@ -186,9 +186,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     };
 
     // Test multiple single transactions
-    let single_tx1 = TransactionMonitoredType::Transaction(tx1.compute_txid(), ExtraData::None);
-    let single_tx2 = TransactionMonitoredType::Transaction(tx2.compute_txid(), ExtraData::None);
-    let single_tx3 = TransactionMonitoredType::Transaction(tx3.compute_txid(), ExtraData::None);
+    let single_tx1 = TransactionMonitoredType::Transaction(tx1.compute_txid(), String::new());
+    let single_tx2 = TransactionMonitoredType::Transaction(tx2.compute_txid(), String::new());
+    let single_tx3 = TransactionMonitoredType::Transaction(tx3.compute_txid(), String::new());
 
     store.update_news(single_tx1.clone())?;
     store.update_news(single_tx2.clone())?;
@@ -213,11 +213,11 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     let group_id3 = Uuid::new_v4();
 
     let group_tx1 =
-        TransactionMonitoredType::Transaction(tx1.compute_txid(), ExtraData::GroupId(group_id1));
+        TransactionMonitoredType::Transaction(tx1.compute_txid(), group_id1.to_string());
     let group_tx2 =
-        TransactionMonitoredType::Transaction(tx2.compute_txid(), ExtraData::GroupId(group_id2));
+        TransactionMonitoredType::Transaction(tx2.compute_txid(), group_id2.to_string());
     let group_tx3 =
-        TransactionMonitoredType::Transaction(tx3.compute_txid(), ExtraData::GroupId(group_id3));
+        TransactionMonitoredType::Transaction(tx3.compute_txid(), group_id3.to_string());
 
     store.update_news(group_tx1.clone())?;
     store.update_news(group_tx2.clone())?;
@@ -260,11 +260,11 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
 
     // Test multiple spending UTXO transactions
     let spending_tx1 =
-        TransactionMonitoredType::SpendingUTXOTransaction(tx1.compute_txid(), 0, ExtraData::None);
+        TransactionMonitoredType::SpendingUTXOTransaction(tx1.compute_txid(), 0, String::new());
     let spending_tx2 =
-        TransactionMonitoredType::SpendingUTXOTransaction(tx2.compute_txid(), 1, ExtraData::None);
+        TransactionMonitoredType::SpendingUTXOTransaction(tx2.compute_txid(), 1, String::new());
     let spending_tx3 =
-        TransactionMonitoredType::SpendingUTXOTransaction(tx3.compute_txid(), 2, ExtraData::None);
+        TransactionMonitoredType::SpendingUTXOTransaction(tx3.compute_txid(), 2, String::new());
 
     store.update_news(spending_tx1.clone())?;
     store.update_news(spending_tx2.clone())?;

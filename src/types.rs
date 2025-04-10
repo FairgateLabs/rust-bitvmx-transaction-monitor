@@ -107,23 +107,15 @@ pub struct BlockAgragatedInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransactionMonitor {
-    Transactions(Vec<Txid>, ExtraData),
-    SpendingUTXOTransaction(Txid, u32, ExtraData),
+    Transactions(Vec<Txid>, String),
+    SpendingUTXOTransaction(Txid, u32, String),
     RskPeginTransaction,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum ExtraData {
-    None,
-    GroupId(Id),
-    Context(String),
-    SpeedUp(Txid),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TransactionNews {
-    Transaction(Txid, TransactionStatus, ExtraData),
-    SpendingUTXOTransaction(Txid, u32, TransactionStatus, ExtraData),
+    Transaction(Txid, TransactionStatus, String),
+    SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
     RskPeginTransaction(Txid, TransactionStatus),
 }
 
