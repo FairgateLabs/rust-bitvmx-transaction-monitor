@@ -390,7 +390,7 @@ where
 
         let status = if tx_status.orphan {
             TransactionBlockchainStatus::Orphan
-        } else if tx_status.block_height >= self.confirmation_threshold {
+        } else if tx_status.confirmations >= self.confirmation_threshold {
             TransactionBlockchainStatus::Finalized
         } else {
             TransactionBlockchainStatus::Confirmed

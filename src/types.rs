@@ -119,6 +119,7 @@ pub enum TransactionNews {
     RskPeginTransaction(Txid, TransactionStatus),
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AckTransactionNews {
     Transaction(Txid),
     RskPeginTransaction(Txid),
