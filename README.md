@@ -4,8 +4,7 @@ This monitor tracks various Bitcoin transactions. It connects to an Indexer and 
 
 
 **Transaction Monitoring Types**:
-  - **Single Transaction**: Track individual transactions by TXID
-  - **Group Transactions**: Monitor multiple transactions as a logical group
+  - **Transactions**: Monitor a set of transactions
   - **RSK Pegin Transactions**: Detect and track RSK pegin transactions
   - **UTXO Spending**: Monitor when specific UTXOs are spent
   
