@@ -300,8 +300,13 @@ impl MonitorStoreApi for MonitorStore {
 
                 for txid in &tx_ids {
                     if let Some(pos) = txs.iter().position(|(i, _, _)| *i == *txid) {
-                        // Update the existing entry with the new extra_data
-                        txs[pos] = (*txid, extra_data.clone(), start_height);
+                        // Update the existing entry with the new extra_data if it is empty
+                        if txs[pos].1.is_empty() {
+                            txs[pos] = (*txid, extra_data.clone(), start_height);
+                        } else {
+                            // Keep the existing extra_data and height
+                            txs[pos] = (txs[pos].0, txs[pos].1.clone(), start_height);
+                        }
                     } else {
                         // Add a new entry if the txid doesn't exist
                         txs.push((*txid, extra_data.clone(), start_height));
