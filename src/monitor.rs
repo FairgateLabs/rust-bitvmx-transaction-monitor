@@ -1,5 +1,5 @@
 use crate::errors::MonitorError;
-use crate::rsk_helper::is_a_pegin_tx;
+use crate::helper::{is_a_pegin_tx, is_spending_output};
 use crate::store::{
     MonitorStore, MonitorStoreApi, TransactionMonitorType, TransactionMonitoredType,
 };
@@ -309,11 +309,32 @@ where
                 }
 
                 TransactionMonitorType::SpendingUTXOTransaction(
-                    _tx_id,
-                    _utxo_index,
-                    _extra_data,
+                    target_tx_id,
+                    target_utxo_index,
+                    extra_data,
                 ) => {
-                    // TODO: detect spending utxo txs here
+                    // Check each transaction in the block for spending the target UTXO
+                    for tx in best_full_block.txs.iter() {
+                        let is_spending_output =
+                            is_spending_output(tx, target_tx_id, target_utxo_index);
+
+                        if is_spending_output {
+                            self.store.update_news(
+                                TransactionMonitoredType::SpendingUTXOTransaction(
+                                    target_tx_id,
+                                    target_utxo_index,
+                                    extra_data.clone(),
+                                ),
+                            )?;
+
+                            info!(
+                                "Detected transaction spending UTXO: {}:{} | spending tx: {}",
+                                target_tx_id,
+                                target_utxo_index,
+                                tx.compute_txid()
+                            );
+                        }
+                    }
                 }
             }
         }

@@ -9,7 +9,7 @@ use bitcoin::{
 };
 use bitcoin::{Address, Amount, Network, Transaction, TxOut};
 use bitcoincore_rpc::RawTx;
-use bitvmx_transaction_monitor::rsk_helper::is_a_pegin_tx;
+use bitvmx_transaction_monitor::helper::is_a_pegin_tx;
 
 #[test]
 fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
