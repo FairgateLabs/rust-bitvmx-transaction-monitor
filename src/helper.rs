@@ -2,7 +2,7 @@ use bitcoin::script::Instruction;
 use bitcoin::secp256k1::ffi::{
     secp256k1_context_no_precomp, secp256k1_xonly_pubkey_parse, XOnlyPublicKey,
 };
-use bitcoin::{Address, Network, Script, Transaction};
+use bitcoin::{Address, Network, OutPoint, Script, Transaction, Txid};
 
 /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
 pub fn is_valid_op_return_rsk_data(data: Vec<Vec<u8>>) -> bool {
@@ -116,4 +116,14 @@ pub fn extract_output_data(script: &Script) -> Vec<Vec<u8>> {
     }
 
     result
+}
+
+pub fn is_spending_output(tx: &Transaction, target_txid: Txid, target_vout: u32) -> bool {
+    tx.input.iter().any(|input| {
+        input.previous_output
+            == OutPoint {
+                txid: target_txid,
+                vout: target_vout,
+            }
+    })
 }
