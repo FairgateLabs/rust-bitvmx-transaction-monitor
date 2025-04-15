@@ -106,24 +106,27 @@ pub struct BlockAgragatedInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransactionMonitor {
+pub enum TypesToMonitor {
     Transactions(Vec<Txid>, String),
     SpendingUTXOTransaction(Txid, u32, String),
     RskPeginTransaction,
+    NewBlock,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum TransactionNews {
+pub enum MonitorNews {
     Transaction(Txid, TransactionStatus, String),
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
     RskPeginTransaction(Txid, TransactionStatus),
+    NewBlock(BlockHeight, BlockHash),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum AckTransactionNews {
+pub enum AckMonitorNews {
     Transaction(Txid),
     RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32),
+    NewBlock,
 }
 
 pub type Id = Uuid;

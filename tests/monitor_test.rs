@@ -3,11 +3,14 @@ use bitcoin_indexer::indexer::MockIndexerApi;
 use bitvmx_bitcoin_rpc::types::{FullBlock, TransactionInfo};
 use bitvmx_transaction_monitor::{
     monitor::Monitor,
-    store::{MockMonitorStore, TransactionMonitorType},
-    types::TransactionMonitor,
+    store::{MockMonitorStore, MonitorStore, TypesToMonitorStore},
+    types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use mockall::predicate::*;
-use std::str::FromStr;
+use std::{path::PathBuf, rc::Rc, str::FromStr};
+use storage_backend::storage::Storage;
+use utils::generate_random_string;
+mod utils;
 
 #[test]
 fn no_monitors() -> Result<(), anyhow::Error> {
@@ -97,11 +100,11 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
 
     let monitors = vec![
         (
-            TransactionMonitor::Transactions(vec![tx.compute_txid()], String::new()),
+            TypesToMonitor::Transactions(vec![tx.compute_txid()], String::new()),
             180,
         ),
         (
-            TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
+            TypesToMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
             180,
         ),
     ];
@@ -140,17 +143,14 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
     let monitor_types = monitors
         .iter()
         .map(|(monitor, _)| match monitor {
-            TransactionMonitor::Transactions(txids, extra_data) => {
-                TransactionMonitorType::Transaction(txids[0], extra_data.clone())
+            TypesToMonitor::Transactions(txids, extra_data) => {
+                TypesToMonitorStore::Transaction(txids[0], extra_data.clone())
             }
-            TransactionMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
-                TransactionMonitorType::SpendingUTXOTransaction(
-                    *txid,
-                    *utxo_index,
-                    extra_data.clone(),
-                )
+            TypesToMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
+                TypesToMonitorStore::SpendingUTXOTransaction(*txid, *utxo_index, extra_data.clone())
             }
-            TransactionMonitor::RskPeginTransaction => TransactionMonitorType::RskPeginTransaction,
+            TypesToMonitor::RskPeginTransaction => TypesToMonitorStore::RskPeginTransaction,
+            TypesToMonitor::NewBlock => TypesToMonitorStore::NewBlock,
         })
         .collect::<Vec<_>>();
 
@@ -217,7 +217,7 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     };
 
     let monitors = vec![(
-        TransactionMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
+        TypesToMonitor::Transactions(vec![tx_to_seen.compute_txid()], String::new()),
         180,
     )];
 
@@ -248,17 +248,14 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     let monitor_types = monitors
         .iter()
         .map(|(monitor, _)| match monitor {
-            TransactionMonitor::Transactions(txids, extra_data) => {
-                TransactionMonitorType::Transaction(txids[0], extra_data.clone())
+            TypesToMonitor::Transactions(txids, extra_data) => {
+                TypesToMonitorStore::Transaction(txids[0], extra_data.clone())
             }
-            TransactionMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
-                TransactionMonitorType::SpendingUTXOTransaction(
-                    *txid,
-                    *utxo_index,
-                    extra_data.clone(),
-                )
+            TypesToMonitor::SpendingUTXOTransaction(txid, utxo_index, extra_data) => {
+                TypesToMonitorStore::SpendingUTXOTransaction(*txid, *utxo_index, extra_data.clone())
             }
-            TransactionMonitor::RskPeginTransaction => TransactionMonitorType::RskPeginTransaction,
+            TypesToMonitor::RskPeginTransaction => TypesToMonitorStore::RskPeginTransaction,
+            TypesToMonitor::NewBlock => TypesToMonitorStore::NewBlock,
         })
         .collect::<Vec<_>>();
 
@@ -279,6 +276,134 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
     let monitor = Monitor::new(mock_indexer, mock_monitor_store, Some(block_height_200), 6)?;
 
     monitor.tick()?;
+
+    Ok(())
+}
+
+#[test]
+fn test_best_block_news() -> Result<(), Box<dyn std::error::Error>> {
+    let mut mock_indexer = MockIndexerApi::new();
+    let path = format!(
+        "test_outputs/test_best_block_news/{}",
+        generate_random_string()
+    );
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let store = MonitorStore::new(storage)?;
+
+    let block_hash_100 =
+        BlockHash::from_str("12efaa3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+
+    let block_hash_101 =
+        BlockHash::from_str("23efda3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+
+    let block_hash_102 =
+        BlockHash::from_str("34efda3528db3845a859c470a525f1b8b4643b0d561f961ab395a9db778c204d")?;
+
+    let block_info_100 = FullBlock {
+        height: 100,
+        hash: block_hash_100.clone(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+    };
+
+    mock_indexer
+        .expect_get_best_block()
+        .times(2)
+        .returning(move || Ok(Some(block_info_100.clone())));
+
+    let block_info_101 = FullBlock {
+        height: 101,
+        hash: block_hash_101.clone(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+    };
+
+    mock_indexer
+        .expect_get_best_block()
+        .times(2)
+        .returning(move || Ok(Some(block_info_101.clone())));
+
+    let block_info_102 = FullBlock {
+        height: 102,
+        hash: block_hash_102.clone(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+    };
+
+    mock_indexer
+        .expect_get_best_block()
+        .times(2)
+        .returning(move || Ok(Some(block_info_102.clone())));
+
+    mock_indexer
+        .expect_tick()
+        .with(eq(99))
+        .returning(move |_| Ok(100));
+
+    mock_indexer
+        .expect_tick()
+        .with(eq(100))
+        .returning(move |_| Ok(101));
+
+    mock_indexer
+        .expect_tick()
+        .with(eq(101))
+        .returning(move |_| Ok(102));
+
+    let monitor = Monitor::new(mock_indexer, store, Some(99), 6)?;
+    monitor.save_monitor(TypesToMonitor::NewBlock, 0)?;
+
+    // First tick
+    monitor.tick()?;
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+
+    match &news[0] {
+        MonitorNews::NewBlock(height, hash) => {
+            assert_eq!(*height, 100);
+            assert_eq!(hash, &block_hash_100);
+        }
+        _ => panic!("Expected NewBlock news"),
+    }
+
+    // Second tick
+    monitor.tick()?;
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+    monitor.ack_news(AckMonitorNews::NewBlock)?;
+
+    match &news[0] {
+        MonitorNews::NewBlock(height, hash) => {
+            assert_eq!(*height, 101);
+            assert_eq!(*hash, block_hash_101);
+        }
+        _ => panic!("Expected NewBlock news"),
+    }
+
+    // Third tick
+    monitor.tick()?;
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+
+    match &news[0] {
+        MonitorNews::NewBlock(height, hash) => {
+            assert_eq!(*height, 102);
+            assert_eq!(*hash, block_hash_102);
+        }
+        _ => panic!("Expected NewBlock news"),
+    }
 
     Ok(())
 }
