@@ -295,20 +295,21 @@ impl MonitorStoreApi for MonitorStore {
         }
 
         let best_block_key = self.get_key(MonitorKey::NewBlock);
+
+        let mut filtered_monitors = monitors
+            .into_iter()
+            .filter(|(_, height)| *height <= current_height)
+            .map(|(monitor_type, _)| monitor_type)
+            .collect::<Vec<_>>();
+
         let best_block = self
             .store
             .get::<_, bool>(best_block_key)?
             .unwrap_or_default();
 
         if best_block {
-            monitors.push((TypesToMonitorStore::NewBlock, 0));
+            filtered_monitors.push(TypesToMonitorStore::NewBlock);
         }
-
-        let filtered_monitors = monitors
-            .into_iter()
-            .filter(|(_, height)| *height <= current_height)
-            .map(|(monitor_type, _)| monitor_type)
-            .collect::<Vec<_>>();
 
         Ok(filtered_monitors)
     }

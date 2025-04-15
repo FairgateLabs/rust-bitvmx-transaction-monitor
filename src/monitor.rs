@@ -335,7 +335,7 @@ where
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    if best_block_height > current_height {
+                    if new_height > current_height {
                         self.store.update_news(MonitoredTypes::NewBlock)?;
                     }
                 }
