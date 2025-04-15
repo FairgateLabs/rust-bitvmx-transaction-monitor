@@ -1,6 +1,6 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{AckTransactionNews, TransactionMonitor},
+    types::{AckMonitorNews, TypesToMonitor},
 };
 use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
@@ -12,13 +12,15 @@ use storage_backend::storage::{KeyValueStore, Storage};
 pub struct MonitorStore {
     store: Rc<Storage>,
 }
-enum TransactionKey {
+enum MonitorKey {
     TransactionList,
     RskPeginTransaction,
+    NewBlock,
     SpendingUTXOTransactionList,
     TransactionNews,
     RskPeginTransactionNews,
     SpendingUTXOTransactionNews,
+    NewBlockNews,
 }
 
 enum BlockchainKey {
@@ -26,36 +28,38 @@ enum BlockchainKey {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum TransactionMonitoredType {
+pub enum MonitoredTypes {
     Transaction(Txid, String),
     RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32, String),
+    NewBlock,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum TransactionMonitorType {
+pub enum TypesToMonitorStore {
     Transaction(Txid, String),
-    RskPeginTransaction,
     SpendingUTXOTransaction(Txid, u32, String),
+    RskPeginTransaction,
+    NewBlock,
 }
 
 pub trait MonitorStoreApi {
     fn get_monitors(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError>;
+    ) -> Result<Vec<TypesToMonitorStore>, MonitorStoreError>;
 
     fn save_monitor(
         &self,
-        data: TransactionMonitor,
+        data: TypesToMonitor,
         start_height: BlockHeight,
     ) -> Result<(), MonitorStoreError>;
 
-    fn remove_monitor(&self, data: TransactionMonitor) -> Result<(), MonitorStoreError>;
+    fn remove_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
 
-    fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError>;
-    fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError>;
-    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError>;
+    fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError>;
+    fn update_news(&self, data: MonitoredTypes) -> Result<(), MonitorStoreError>;
+    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError>;
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
     fn set_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
@@ -66,19 +70,21 @@ impl MonitorStore {
         Ok(Self { store })
     }
 
-    fn get_key(&self, key: TransactionKey) -> String {
+    fn get_key(&self, key: MonitorKey) -> String {
         let prefix = "monitor";
         match key {
-            TransactionKey::TransactionList => format!("{prefix}/tx/list"),
-            TransactionKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
-            TransactionKey::SpendingUTXOTransactionList => {
+            MonitorKey::TransactionList => format!("{prefix}/tx/list"),
+            MonitorKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
+            MonitorKey::SpendingUTXOTransactionList => {
                 format!("{prefix}/spending/utxo/tx/list")
             }
-            TransactionKey::TransactionNews => format!("{prefix}/tx/news"),
-            TransactionKey::RskPeginTransactionNews => format!("{prefix}/rsk/tx/news"),
-            TransactionKey::SpendingUTXOTransactionNews => {
+            MonitorKey::TransactionNews => format!("{prefix}/tx/news"),
+            MonitorKey::RskPeginTransactionNews => format!("{prefix}/rsk/tx/news"),
+            MonitorKey::SpendingUTXOTransactionNews => {
                 format!("{prefix}/spending/utxo/tx/news")
             }
+            MonitorKey::NewBlock => format!("{prefix}/best/block"),
+            MonitorKey::NewBlockNews => format!("{prefix}/best/block/news"),
         }
     }
 
@@ -110,48 +116,58 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn get_news(&self) -> Result<Vec<TransactionMonitoredType>, MonitorStoreError> {
+    fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError> {
         let mut news = Vec::new();
 
-        let key = self.get_key(TransactionKey::TransactionNews);
+        let key = self.get_key(MonitorKey::TransactionNews);
         let txs_news = self
             .store
             .get::<_, Vec<(Txid, String)>>(&key)?
             .unwrap_or_default();
 
         for (tx_id, extra_data) in txs_news {
-            news.push(TransactionMonitoredType::Transaction(tx_id, extra_data));
+            news.push(MonitoredTypes::Transaction(tx_id, extra_data));
         }
 
-        let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
+        let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionNews);
         let rsk_news = self
             .store
             .get::<_, Vec<Txid>>(&rsk_news_key)?
             .unwrap_or_default();
 
         for tx_id in rsk_news {
-            news.push(TransactionMonitoredType::RskPeginTransaction(tx_id));
+            news.push(MonitoredTypes::RskPeginTransaction(tx_id));
         }
 
-        let spending_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
+        let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionNews);
         let spending_news = self
             .store
             .get::<_, Vec<(Txid, u32, String)>>(&spending_news_key)?
             .unwrap_or_default();
 
         for (tx_id, utxo_index, extra_data) in spending_news {
-            news.push(TransactionMonitoredType::SpendingUTXOTransaction(
+            news.push(MonitoredTypes::SpendingUTXOTransaction(
                 tx_id, utxo_index, extra_data,
             ));
+        }
+
+        let block_news_key = self.get_key(MonitorKey::NewBlockNews);
+        let block_news = self
+            .store
+            .get::<_, bool>(&block_news_key)?
+            .unwrap_or_default();
+
+        if block_news {
+            news.push(MonitoredTypes::NewBlock);
         }
 
         Ok(news)
     }
 
-    fn update_news(&self, data: TransactionMonitoredType) -> Result<(), MonitorStoreError> {
+    fn update_news(&self, data: MonitoredTypes) -> Result<(), MonitorStoreError> {
         match data {
-            TransactionMonitoredType::Transaction(tx_id, extra_data) => {
-                let key = self.get_key(TransactionKey::TransactionNews);
+            MonitoredTypes::Transaction(tx_id, extra_data) => {
+                let key = self.get_key(MonitorKey::TransactionNews);
                 let mut txs_news = self
                     .store
                     .get::<_, Vec<(Txid, String)>>(&key)?
@@ -163,8 +179,8 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&key, &txs_news, None)?;
             }
-            TransactionMonitoredType::RskPeginTransaction(tx_id) => {
-                let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
+            MonitoredTypes::RskPeginTransaction(tx_id) => {
+                let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionNews);
                 let mut rsk_news = self
                     .store
                     .get::<_, Vec<Txid>>(&rsk_news_key)?
@@ -176,8 +192,8 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
-            TransactionMonitoredType::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
-                let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
+            MonitoredTypes::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
+                let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
                     .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
@@ -189,15 +205,19 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
+            MonitoredTypes::NewBlock => {
+                let key = self.get_key(MonitorKey::NewBlockNews);
+                self.store.set(&key, true, None)?;
+            }
         }
 
         Ok(())
     }
 
-    fn ack_news(&self, data: AckTransactionNews) -> Result<(), MonitorStoreError> {
+    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError> {
         match data {
-            AckTransactionNews::Transaction(tx_id) => {
-                let key = self.get_key(TransactionKey::TransactionNews);
+            AckMonitorNews::Transaction(tx_id) => {
+                let key = self.get_key(MonitorKey::TransactionNews);
                 let mut txs_news = self
                     .store
                     .get::<_, Vec<(Txid, String)>>(&key)?
@@ -206,8 +226,8 @@ impl MonitorStoreApi for MonitorStore {
                 txs_news.retain(|(tx, _)| tx != &tx_id);
                 self.store.set(&key, &txs_news, None)?;
             }
-            AckTransactionNews::RskPeginTransaction(tx_id) => {
-                let rsk_news_key = self.get_key(TransactionKey::RskPeginTransactionNews);
+            AckMonitorNews::RskPeginTransaction(tx_id) => {
+                let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionNews);
                 let mut rsk_news = self
                     .store
                     .get::<_, Vec<Txid>>(&rsk_news_key)?
@@ -216,8 +236,8 @@ impl MonitorStoreApi for MonitorStore {
                 rsk_news.retain(|tx| tx != &tx_id);
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
-            AckTransactionNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
-                let utxo_news_key = self.get_key(TransactionKey::SpendingUTXOTransactionNews);
+            AckMonitorNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
+                let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionNews);
                 let mut utxo_news = self
                     .store
                     .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
@@ -225,6 +245,10 @@ impl MonitorStoreApi for MonitorStore {
 
                 utxo_news.retain(|(tx, utxo_i, _)| *tx != tx_id || *utxo_i != utxo_index);
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
+            }
+            AckMonitorNews::NewBlock => {
+                let key = self.get_key(MonitorKey::NewBlockNews);
+                self.store.set(&key, false, None)?;
             }
         }
 
@@ -234,36 +258,30 @@ impl MonitorStoreApi for MonitorStore {
     fn get_monitors(
         &self,
         current_height: BlockHeight,
-    ) -> Result<Vec<TransactionMonitorType>, MonitorStoreError> {
-        let mut monitors = Vec::<(TransactionMonitorType, BlockHeight)>::new();
+    ) -> Result<Vec<TypesToMonitorStore>, MonitorStoreError> {
+        let mut monitors = Vec::<(TypesToMonitorStore, BlockHeight)>::new();
 
-        let txs_key = self.get_key(TransactionKey::TransactionList);
+        let txs_key = self.get_key(MonitorKey::TransactionList);
         let txs = self
             .store
             .get::<_, Vec<(Txid, String, BlockHeight)>>(txs_key)?
             .unwrap_or_default();
 
         for (tx_id, extra_data, height) in txs {
-            monitors.push((
-                TransactionMonitorType::Transaction(tx_id, extra_data),
-                height,
-            ));
+            monitors.push((TypesToMonitorStore::Transaction(tx_id, extra_data), height));
         }
 
-        let rsk_pegin_key = self.get_key(TransactionKey::RskPeginTransaction);
+        let rsk_pegin_key = self.get_key(MonitorKey::RskPeginTransaction);
         let rsk_pegin_height = self
             .store
             .get::<_, (bool, BlockHeight)>(rsk_pegin_key)?
             .unwrap_or_default();
 
         if rsk_pegin_height.0 {
-            monitors.push((
-                TransactionMonitorType::RskPeginTransaction,
-                rsk_pegin_height.1,
-            ));
+            monitors.push((TypesToMonitorStore::RskPeginTransaction, rsk_pegin_height.1));
         }
 
-        let spending_utxo_key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+        let spending_utxo_key = self.get_key(MonitorKey::SpendingUTXOTransactionList);
         let spending_utxos = self
             .store
             .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(spending_utxo_key)?
@@ -271,28 +289,39 @@ impl MonitorStoreApi for MonitorStore {
 
         for (tx_id, utxo_index, extra_data, height) in spending_utxos {
             monitors.push((
-                TransactionMonitorType::SpendingUTXOTransaction(tx_id, utxo_index, extra_data),
+                TypesToMonitorStore::SpendingUTXOTransaction(tx_id, utxo_index, extra_data),
                 height,
             ));
         }
 
-        let filtered_monitors = monitors
+        let best_block_key = self.get_key(MonitorKey::NewBlock);
+
+        let mut filtered_monitors = monitors
             .into_iter()
             .filter(|(_, height)| *height <= current_height)
             .map(|(monitor_type, _)| monitor_type)
             .collect::<Vec<_>>();
+
+        let best_block = self
+            .store
+            .get::<_, bool>(best_block_key)?
+            .unwrap_or_default();
+
+        if best_block {
+            filtered_monitors.push(TypesToMonitorStore::NewBlock);
+        }
 
         Ok(filtered_monitors)
     }
 
     fn save_monitor(
         &self,
-        data: TransactionMonitor,
+        data: TypesToMonitor,
         start_height: BlockHeight,
     ) -> Result<(), MonitorStoreError> {
         match data {
-            TransactionMonitor::Transactions(tx_ids, extra_data) => {
-                let key = self.get_key(TransactionKey::TransactionList);
+            TypesToMonitor::Transactions(tx_ids, extra_data) => {
+                let key = self.get_key(MonitorKey::TransactionList);
                 let mut txs = self
                     .store
                     .get::<_, Vec<(Txid, String, BlockHeight)>>(&key)?
@@ -315,12 +344,12 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&key, &txs, None)?;
             }
-            TransactionMonitor::RskPeginTransaction => {
-                let key = self.get_key(TransactionKey::RskPeginTransaction);
+            TypesToMonitor::RskPeginTransaction => {
+                let key = self.get_key(MonitorKey::RskPeginTransaction);
                 self.store.set(&key, (true, start_height), None)?;
             }
-            TransactionMonitor::SpendingUTXOTransaction(txid, vout, extra_data) => {
-                let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+            TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data) => {
+                let key = self.get_key(MonitorKey::SpendingUTXOTransactionList);
                 let mut txs = self
                     .store
                     .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(&key)?
@@ -330,15 +359,19 @@ impl MonitorStoreApi for MonitorStore {
                     self.store.set(&key, &txs, None)?;
                 }
             }
+            TypesToMonitor::NewBlock => {
+                let key = self.get_key(MonitorKey::NewBlock);
+                self.store.set(&key, true, None)?;
+            }
         }
 
         Ok(())
     }
 
-    fn remove_monitor(&self, data: TransactionMonitor) -> Result<(), MonitorStoreError> {
+    fn remove_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
         match data {
-            TransactionMonitor::Transactions(tx_ids, _) => {
-                let key = self.get_key(TransactionKey::TransactionList);
+            TypesToMonitor::Transactions(tx_ids, _) => {
+                let key = self.get_key(MonitorKey::TransactionList);
                 let mut txs = self
                     .store
                     .get::<_, Vec<(Txid, String, BlockHeight)>>(&key)?
@@ -353,18 +386,22 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&key, &txs, None)?;
             }
 
-            TransactionMonitor::RskPeginTransaction => {
-                let key = self.get_key(TransactionKey::RskPeginTransaction);
+            TypesToMonitor::RskPeginTransaction => {
+                let key = self.get_key(MonitorKey::RskPeginTransaction);
                 self.store.set(&key, (false, 0), None)?;
             }
-            TransactionMonitor::SpendingUTXOTransaction(txid, vout, _) => {
-                let key = self.get_key(TransactionKey::SpendingUTXOTransactionList);
+            TypesToMonitor::SpendingUTXOTransaction(txid, vout, _) => {
+                let key = self.get_key(MonitorKey::SpendingUTXOTransactionList);
                 let mut txs = self
                     .store
                     .get::<_, Vec<(Txid, u32, String, BlockHeight)>>(&key)?
                     .unwrap_or_default();
                 txs.retain(|(tx_id, utxo_index, _, _)| *tx_id != txid || *utxo_index != vout);
                 self.store.set(&key, &txs, None)?;
+            }
+            TypesToMonitor::NewBlock => {
+                let key = self.get_key(MonitorKey::NewBlock);
+                self.store.set(&key, false, None)?;
             }
         }
 
