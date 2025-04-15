@@ -50,8 +50,8 @@ The `Monitor` struct provides the following endpoints:
 - **`tick()`**: Processes new blocks, updates transaction statuses, and generates news.
   - Should be called periodically to keep the monitor in sync with the blockchain.
 
-- **`add_monitor()`**: Registers a new transaction to be monitored.
-  - Supports all transaction types (Single, Group, RSK Pegin, UTXO Spending).
+- **`add_monitor()`**: Registers a new variant to be monitored.
+  - Supports transaction types (Transactions, RSK Pegin, UTXO Spending, New block).
 
 - **`get_transaction_status()`**: Retrieves the current status of a monitored transaction.
   - Includes confirmation count, block information, and transaction details.

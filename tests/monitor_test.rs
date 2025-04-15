@@ -44,9 +44,8 @@ fn no_monitors() -> Result<(), anyhow::Error> {
     // Return nothing to monitor
     mock_monitor_store
         .expect_get_monitors()
-        .with(eq(block_100_height))
         .times(1)
-        .returning(|_| Ok(vec![]));
+        .returning(|| Ok(vec![]));
 
     mock_monitor_store
         .expect_set_monitor_height()
@@ -156,9 +155,8 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
 
     mock_monitor_store
         .expect_get_monitors()
-        .with(eq(block_height_200))
         .times(1)
-        .returning(move |_| Ok(monitor_types.clone()));
+        .returning(move || Ok(monitor_types.clone()));
 
     // Tx was found by the indexer and is already in the blockchain.
     mock_indexer
@@ -261,9 +259,8 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
 
     mock_monitor_store
         .expect_get_monitors()
-        .with(eq(block_height_200))
         .times(1)
-        .returning(move |_| Ok(monitor_types.clone()));
+        .returning(move || Ok(monitor_types.clone()));
 
     mock_monitor_store
         .expect_set_monitor_height()
@@ -363,7 +360,7 @@ fn test_best_block_news() -> Result<(), Box<dyn std::error::Error>> {
         .returning(move |_| Ok(102));
 
     let monitor = Monitor::new(mock_indexer, store, Some(99), 6)?;
-    monitor.save_monitor(TypesToMonitor::NewBlock, 0)?;
+    monitor.save_monitor(TypesToMonitor::NewBlock)?;
 
     // First tick
     monitor.tick()?;

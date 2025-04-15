@@ -123,10 +123,10 @@ pub trait MonitorApi {
     ///
     /// # Arguments
     /// * `data` - The type of monitoring to perform, which can be:
-    ///   - GroupTransaction: Monitor multiple transactions for a given group
-    ///   - SingleTransaction: Monitor a single transaction
+    ///   - Transactions: Monitor multiple transactions
     ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
     ///
     /// # Returns
     /// - `Ok(())`: If monitoring was set up successfully
@@ -152,10 +152,10 @@ pub trait MonitorApi {
     ///
     /// # Arguments
     /// * `data` - The type of monitoring to perform, which can be:
-    ///   - GroupTransaction: Monitor multiple transactions for a given group
-    ///   - SingleTransaction: Monitor a single transaction
+    ///   - Transactions: Monitor multiple transactions
     ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
     ///
     /// # Returns
     /// - `Ok(())`: If the update was successfully acknowledged
@@ -184,8 +184,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        let bitcoind_height = self.indexer.bitcoin_client.get_best_block()?;
-        self.store.save_monitor(data, bitcoind_height)?;
+        self.store.save_monitor(data)?;
 
         Ok(())
     }
@@ -236,12 +235,8 @@ where
         })
     }
 
-    pub fn save_monitor(
-        &self,
-        data: TypesToMonitor,
-        start_monitoring: BlockHeight,
-    ) -> Result<(), MonitorError> {
-        self.store.save_monitor(data, start_monitoring)?;
+    pub fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        self.store.save_monitor(data)?;
 
         Ok(())
     }
@@ -255,16 +250,16 @@ where
     pub fn tick(&self) -> Result<(), MonitorError> {
         let current_height = self.get_monitor_height()?;
         let new_height = self.indexer.tick(&current_height)?;
-        let best_block = self.indexer.get_best_block()?;
+        let indexer_best_block = self.indexer.get_best_block()?;
 
-        if best_block.is_none() {
+        if indexer_best_block.is_none() {
             return Ok(());
         }
 
-        let best_full_block = best_block.unwrap();
-        let best_block_height = best_full_block.height;
+        let indexer_best_block = indexer_best_block.unwrap();
+        let indexer_best_block_height = indexer_best_block.height;
 
-        let txs_types = self.store.get_monitors(best_block_height)?;
+        let txs_types = self.store.get_monitors()?;
 
         for tx_type in txs_types {
             match tx_type {
@@ -272,8 +267,10 @@ where
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
-                        if best_block_height > tx.block_height
-                            && (best_block_height - tx.block_height) <= self.confirmation_threshold
+                        // Transaction exists in the blockchain.
+                        if indexer_best_block_height > tx.block_height
+                            && (indexer_best_block_height - tx.block_height)
+                                <= self.confirmation_threshold
                         {
                             self.store.update_news(MonitoredTypes::Transaction(
                                 tx_id,
@@ -283,14 +280,14 @@ where
                             info!(
                                     "Update confirmation | tx_id: {} | at height: {} | confirmations: {}", 
                                     tx_id,
-                                    best_block_height,
-                                    best_block_height - tx.block_height + 1,
+                                    indexer_best_block_height,
+                                    indexer_best_block_height - tx.block_height + 1,
                                 );
                         }
                     }
                 }
                 TypesToMonitorStore::RskPeginTransaction => {
-                    let txs_ids = self.detect_rsk_pegin_txs(best_full_block.clone())?;
+                    let txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
 
                     for tx_id in txs_ids {
                         self.store
@@ -300,8 +297,8 @@ where
                             info!(
                                 "Update confirmation for RSK pegin tx: {} | at height: {} | confirmations: {}", 
                                 tx_id,
-                                best_block_height,
-                                best_block_height - tx.block_height + 1,
+                                indexer_best_block_height,
+                                indexer_best_block_height - tx.block_height + 1,
                             );
                         }
                     }
@@ -313,7 +310,7 @@ where
                     extra_data,
                 ) => {
                     // Check each transaction in the block for spending the target UTXO
-                    for tx in best_full_block.txs.iter() {
+                    for tx in indexer_best_block.txs.iter() {
                         let is_spending_output =
                             is_spending_output(tx, target_tx_id, target_utxo_index);
 

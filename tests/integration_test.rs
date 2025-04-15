@@ -24,7 +24,7 @@ use uuid::Uuid;
 /// 2. Initializes a Bitcoin client and connects to the blockchain
 /// 3. Creates a storage backend for persisting monitoring data
 /// 4. Initializes a transaction monitor with the Bitcoin client and storage
-/// 5. Creates a group transaction monitor (which can track multiple transactions)
+/// 5. Creates a set transaction monitor (which can track multiple transactions)
 /// 6. Enters a loop that:
 ///    - Monitors the current blockchain height
 ///    - Waits for new blocks when no changes are detected
@@ -63,11 +63,11 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         config.monitor.confirmation_threshold,
     )?;
 
-    let group_id = Uuid::new_v4();
+    let context_data = Uuid::new_v4();
     let txid = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
 
-    let group_monitor = TypesToMonitor::Transactions(vec![txid], group_id.to_string());
-    monitor.monitor(group_monitor)?;
+    let txs_monitor = TypesToMonitor::Transactions(vec![txid], context_data.to_string());
+    monitor.monitor(txs_monitor)?;
 
     // let me know when the best block is updated
     let best_block_monitor = TypesToMonitor::NewBlock;
