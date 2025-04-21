@@ -48,7 +48,7 @@ fn no_monitors() -> Result<(), anyhow::Error> {
         .returning(|| Ok(vec![]));
 
     mock_monitor_store
-        .expect_set_monitor_height()
+        .expect_update_monitor_height()
         .returning(|_| Ok(()));
 
     mock_monitor_store
@@ -172,7 +172,7 @@ fn monitor_tx_detected() -> Result<(), anyhow::Error> {
         .returning(move |_| Ok(Some(tx_info.clone())));
 
     mock_monitor_store
-        .expect_set_monitor_height()
+        .expect_update_monitor_height()
         .returning(|_| Ok(()));
 
     mock_monitor_store
@@ -263,7 +263,7 @@ fn monitor_tx_already_detected() -> Result<(), anyhow::Error> {
         .returning(move || Ok(monitor_types.clone()));
 
     mock_monitor_store
-        .expect_set_monitor_height()
+        .expect_update_monitor_height()
         .returning(|_| Ok(()));
 
     mock_monitor_store

@@ -184,7 +184,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        self.store.save_monitor(data)?;
+        self.store.add_monitor(data)?;
 
         Ok(())
     }
@@ -225,7 +225,7 @@ where
     ) -> Result<Self, MonitorError> {
         let current_height = current_height.unwrap_or(0);
         bitvmx_store
-            .set_monitor_height(current_height)
+            .update_monitor_height(current_height)
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
 
         Ok(Self {
@@ -236,7 +236,7 @@ where
     }
 
     pub fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        self.store.save_monitor(data)?;
+        self.store.add_monitor(data)?;
 
         Ok(())
     }
@@ -339,7 +339,7 @@ where
             }
         }
 
-        self.store.set_monitor_height(new_height)?;
+        self.store.update_monitor_height(new_height)?;
 
         Ok(())
     }
