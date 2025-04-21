@@ -17,6 +17,8 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::info;
 
+const DEACTIVATION_CONFIRMATION_THRESHOLD: u32 = 100;
+
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -268,21 +270,31 @@ where
 
                     if let Some(tx) = tx_info {
                         // Transaction exists in the blockchain.
-                        if indexer_best_block_height > tx.block_height
-                            && (indexer_best_block_height - tx.block_height)
-                                <= self.confirmation_threshold
-                        {
+                        let confirmations = indexer_best_block_height - tx.block_height + 1;
+
+                        if confirmations <= self.confirmation_threshold {
                             self.store.update_news(MonitoredTypes::Transaction(
                                 tx_id,
                                 extra_data.clone(),
                             ))?;
 
                             info!(
-                                    "Update confirmation | tx_id: {} | at height: {} | confirmations: {}", 
-                                    tx_id,
-                                    indexer_best_block_height,
-                                    indexer_best_block_height - tx.block_height + 1,
-                                );
+                                "Detected new transaction confirmation | tx_id: {} | at height: {} | confirmations: {}", 
+                                tx_id,
+                                indexer_best_block_height,
+                                confirmations,
+                            );
+                        } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                            // Deactivate monitor after 100 confirmations
+                            self.store.deactivate_monitor(TypesToMonitor::Transactions(
+                                vec![tx_id],
+                                extra_data.clone(),
+                            ))?;
+
+                            info!(
+                                "Deactivating monitor for tx_id: {} | confirmations: {}",
+                                tx_id, confirmations,
+                            );
                         }
                     }
                 }
@@ -303,7 +315,6 @@ where
                         }
                     }
                 }
-
                 TypesToMonitorStore::SpendingUTXOTransaction(
                     target_tx_id,
                     target_utxo_index,
@@ -315,19 +326,45 @@ where
                             is_spending_output(tx, target_tx_id, target_utxo_index);
 
                         if is_spending_output {
-                            self.store
-                                .update_news(MonitoredTypes::SpendingUTXOTransaction(
-                                    target_tx_id,
-                                    target_utxo_index,
-                                    extra_data.clone(),
-                                ))?;
+                            let tx_info = self.indexer.get_tx(&tx.compute_txid())?;
+                            if let Some(tx_info) = tx_info {
+                                let confirmations =
+                                    indexer_best_block_height - tx_info.block_height + 1;
 
-                            info!(
-                                "Detected transaction spending UTXO: {}:{} | spending tx: {}",
-                                target_tx_id,
-                                target_utxo_index,
-                                tx.compute_txid()
-                            );
+                                if confirmations <= self.confirmation_threshold {
+                                    self.store.update_news(
+                                        MonitoredTypes::SpendingUTXOTransaction(
+                                            target_tx_id,
+                                            target_utxo_index,
+                                            extra_data.clone(),
+                                        ),
+                                    )?;
+
+                                    info!(
+                                        "Detected transaction spending UTXO: {}:{} | spending tx: {} | confirmations: {}",
+                                        target_tx_id,
+                                        target_utxo_index,
+                                        tx.compute_txid(),
+                                        confirmations,
+                                    );
+                                } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                                    // Deactivate monitor after 100 confirmations
+                                    self.store.deactivate_monitor(
+                                        TypesToMonitor::SpendingUTXOTransaction(
+                                            target_tx_id,
+                                            target_utxo_index,
+                                            extra_data.clone(),
+                                        ),
+                                    )?;
+
+                                    info!(
+                                        "Deactivating monitor for spending UTXO: {}:{} | confirmations: {}",
+                                        target_tx_id,
+                                        target_utxo_index,
+                                        confirmations,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
