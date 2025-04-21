@@ -2,7 +2,7 @@ use bitcoin::{absolute::LockTime, Transaction};
 use bitvmx_transaction_monitor::store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore};
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
-use utils::generate_random_string;
+use utils::{clear_output, generate_random_string};
 mod utils;
 
 /// This test verifies the functionality of the MonitorStore implementation.
@@ -77,6 +77,8 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     store.deactivate_monitor(utxo_monitor.clone())?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 0);
+
+    clear_output();
 
     Ok(())
 }

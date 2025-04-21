@@ -9,7 +9,7 @@ use bitvmx_transaction_monitor::{
 use mockall::predicate::*;
 use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
-use utils::generate_random_string;
+use utils::{clear_output, generate_random_string};
 mod utils;
 
 #[test]
@@ -45,6 +45,8 @@ fn no_monitors() -> Result<(), anyhow::Error> {
 
     let monitor = Monitor::new(mock_indexer, store, Some(block_100_height), 6)?;
     monitor.tick()?;
+
+    clear_output();
 
     Ok(())
 }
@@ -166,6 +168,8 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         "Expected no news after acknowledgment"
     );
 
+    clear_output();
+
     Ok(())
 }
 
@@ -235,6 +239,8 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
     let monitors = monitor.store.get_monitors()?;
     assert_eq!(monitors.len(), 0);
 
+    clear_output();
+
     Ok(())
 }
 
@@ -284,6 +290,8 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
     let news = monitor.get_news()?;
     assert_eq!(news.len(), 0);
 
+    clear_output();
+
     Ok(())
 }
 
@@ -326,6 +334,8 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
         monitors[0],
         TypesToMonitorStore::RskPeginTransaction
     ));
+
+    clear_output();
 
     Ok(())
 }

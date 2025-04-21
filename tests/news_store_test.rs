@@ -5,7 +5,7 @@ use bitvmx_transaction_monitor::{
 };
 use std::{path::PathBuf, rc::Rc};
 use storage_backend::storage::Storage;
-use utils::generate_random_string;
+use utils::{clear_output, generate_random_string};
 use uuid::Uuid;
 mod utils;
 
@@ -99,6 +99,8 @@ fn news_test() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
+    clear_output();
+
     Ok(())
 }
 
@@ -169,6 +171,8 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0); // Should have no news after all acknowledgements
+
+    clear_output();
 
     Ok(())
 }
@@ -315,6 +319,8 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
+
+    clear_output();
 
     Ok(())
 }

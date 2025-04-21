@@ -14,7 +14,7 @@ use std::{path::PathBuf, rc::Rc, str::FromStr, sync::mpsc::channel, thread, time
 use storage_backend::storage::Storage;
 use tracing::info;
 use uuid::Uuid;
-
+mod utils;
 /// This integration test demonstrates how to set up and use the transaction monitor.
 /// It initializes a Bitcoin client, connects to the blockchain, and sets up a monitor
 /// to track transactions.
@@ -94,6 +94,8 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         let news = monitor.get_news()?;
         info!("news: {:?}", news);
     }
+
+    utils::clear_output();
 
     Ok(())
 }
