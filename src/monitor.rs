@@ -17,6 +17,8 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::info;
 
+const DEACTIVATION_CONFIRMATION_THRESHOLD: u32 = 100;
+
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -123,10 +125,10 @@ pub trait MonitorApi {
     ///
     /// # Arguments
     /// * `data` - The type of monitoring to perform, which can be:
-    ///   - GroupTransaction: Monitor multiple transactions for a given group
-    ///   - SingleTransaction: Monitor a single transaction
+    ///   - Transactions: Monitor multiple transactions
     ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
     ///
     /// # Returns
     /// - `Ok(())`: If monitoring was set up successfully
@@ -152,10 +154,10 @@ pub trait MonitorApi {
     ///
     /// # Arguments
     /// * `data` - The type of monitoring to perform, which can be:
-    ///   - GroupTransaction: Monitor multiple transactions for a given group
-    ///   - SingleTransaction: Monitor a single transaction
+    ///   - Transactions: Monitor multiple transactions
     ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
     ///
     /// # Returns
     /// - `Ok(())`: If the update was successfully acknowledged
@@ -184,8 +186,7 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        let bitcoind_height = self.indexer.bitcoin_client.get_best_block()?;
-        self.store.save_monitor(data, bitcoind_height)?;
+        self.store.add_monitor(data)?;
 
         Ok(())
     }
@@ -226,7 +227,7 @@ where
     ) -> Result<Self, MonitorError> {
         let current_height = current_height.unwrap_or(0);
         bitvmx_store
-            .set_monitor_height(current_height)
+            .update_monitor_height(current_height)
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
 
         Ok(Self {
@@ -236,12 +237,8 @@ where
         })
     }
 
-    pub fn save_monitor(
-        &self,
-        data: TypesToMonitor,
-        start_monitoring: BlockHeight,
-    ) -> Result<(), MonitorError> {
-        self.store.save_monitor(data, start_monitoring)?;
+    pub fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        self.store.add_monitor(data)?;
 
         Ok(())
     }
@@ -255,16 +252,16 @@ where
     pub fn tick(&self) -> Result<(), MonitorError> {
         let current_height = self.get_monitor_height()?;
         let new_height = self.indexer.tick(&current_height)?;
-        let best_block = self.indexer.get_best_block()?;
+        let indexer_best_block = self.indexer.get_best_block()?;
 
-        if best_block.is_none() {
+        if indexer_best_block.is_none() {
             return Ok(());
         }
 
-        let best_full_block = best_block.unwrap();
-        let best_block_height = best_full_block.height;
+        let indexer_best_block = indexer_best_block.unwrap();
+        let indexer_best_block_height = indexer_best_block.height;
 
-        let txs_types = self.store.get_monitors(best_block_height)?;
+        let txs_types = self.store.get_monitors()?;
 
         for tx_type in txs_types {
             match tx_type {
@@ -272,25 +269,37 @@ where
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
-                        if best_block_height > tx.block_height
-                            && (best_block_height - tx.block_height) <= self.confirmation_threshold
-                        {
+                        // Transaction exists in the blockchain.
+                        let confirmations = indexer_best_block_height - tx.block_height + 1;
+
+                        if confirmations <= self.confirmation_threshold {
                             self.store.update_news(MonitoredTypes::Transaction(
                                 tx_id,
                                 extra_data.clone(),
                             ))?;
 
                             info!(
-                                    "Update confirmation | tx_id: {} | at height: {} | confirmations: {}", 
-                                    tx_id,
-                                    best_block_height,
-                                    best_block_height - tx.block_height + 1,
-                                );
+                                "Detected new transaction confirmation | tx_id: {} | at height: {} | confirmations: {}", 
+                                tx_id,
+                                indexer_best_block_height,
+                                confirmations,
+                            );
+                        } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                            // Deactivate monitor after 100 confirmations
+                            self.store.deactivate_monitor(TypesToMonitor::Transactions(
+                                vec![tx_id],
+                                extra_data.clone(),
+                            ))?;
+
+                            info!(
+                                "Deactivating monitor for tx_id: {} | confirmations: {}",
+                                tx_id, confirmations,
+                            );
                         }
                     }
                 }
                 TypesToMonitorStore::RskPeginTransaction => {
-                    let txs_ids = self.detect_rsk_pegin_txs(best_full_block.clone())?;
+                    let txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
 
                     for tx_id in txs_ids {
                         self.store
@@ -300,37 +309,62 @@ where
                             info!(
                                 "Update confirmation for RSK pegin tx: {} | at height: {} | confirmations: {}", 
                                 tx_id,
-                                best_block_height,
-                                best_block_height - tx.block_height + 1,
+                                indexer_best_block_height,
+                                indexer_best_block_height - tx.block_height + 1,
                             );
                         }
                     }
                 }
-
                 TypesToMonitorStore::SpendingUTXOTransaction(
                     target_tx_id,
                     target_utxo_index,
                     extra_data,
                 ) => {
                     // Check each transaction in the block for spending the target UTXO
-                    for tx in best_full_block.txs.iter() {
+                    for tx in indexer_best_block.txs.iter() {
                         let is_spending_output =
                             is_spending_output(tx, target_tx_id, target_utxo_index);
 
                         if is_spending_output {
-                            self.store
-                                .update_news(MonitoredTypes::SpendingUTXOTransaction(
-                                    target_tx_id,
-                                    target_utxo_index,
-                                    extra_data.clone(),
-                                ))?;
+                            let tx_info = self.indexer.get_tx(&tx.compute_txid())?;
+                            if let Some(tx_info) = tx_info {
+                                let confirmations =
+                                    indexer_best_block_height - tx_info.block_height + 1;
 
-                            info!(
-                                "Detected transaction spending UTXO: {}:{} | spending tx: {}",
-                                target_tx_id,
-                                target_utxo_index,
-                                tx.compute_txid()
-                            );
+                                if confirmations <= self.confirmation_threshold {
+                                    self.store.update_news(
+                                        MonitoredTypes::SpendingUTXOTransaction(
+                                            target_tx_id,
+                                            target_utxo_index,
+                                            extra_data.clone(),
+                                        ),
+                                    )?;
+
+                                    info!(
+                                        "Detected transaction spending UTXO: {}:{} | spending tx: {} | confirmations: {}",
+                                        target_tx_id,
+                                        target_utxo_index,
+                                        tx.compute_txid(),
+                                        confirmations,
+                                    );
+                                } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                                    // Deactivate monitor after 100 confirmations
+                                    self.store.deactivate_monitor(
+                                        TypesToMonitor::SpendingUTXOTransaction(
+                                            target_tx_id,
+                                            target_utxo_index,
+                                            extra_data.clone(),
+                                        ),
+                                    )?;
+
+                                    info!(
+                                        "Deactivating monitor for spending UTXO: {}:{} | confirmations: {}",
+                                        target_tx_id,
+                                        target_utxo_index,
+                                        confirmations,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -342,7 +376,7 @@ where
             }
         }
 
-        self.store.set_monitor_height(new_height)?;
+        self.store.update_monitor_height(new_height)?;
 
         Ok(())
     }
