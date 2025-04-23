@@ -135,6 +135,17 @@ pub trait MonitorApi {
     /// - `Err`: If there was an error setting up monitoring
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError>;
 
+    /// Cancels monitoring for a specific transaction.
+    ///
+    /// # Arguments
+    /// * `data` - The type of monitoring to cancel, which can be:
+    ///   - Transactions: Monitor multiple transactions
+    ///   - RskPeginTransaction: Monitor RSK pegin transactions
+    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
+
+    fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError>;
+
     /// Gets status updates for monitored transactions.
     ///
     /// Returns updates for transactions that have had status changes, such as:
@@ -187,6 +198,12 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
         self.store.add_monitor(data)?;
+
+        Ok(())
+    }
+
+    fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        self.store.cancel_monitor(data)?;
 
         Ok(())
     }
