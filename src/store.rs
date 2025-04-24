@@ -46,6 +46,7 @@ pub enum TypesToMonitorStore {
 pub trait MonitorStoreApi {
     fn get_monitors(&self) -> Result<Vec<TypesToMonitorStore>, MonitorStoreError>;
     fn add_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
+    fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
     fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
 
     fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError>;
@@ -394,6 +395,41 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
+                self.store.set(&key, &txs, None)?;
+            }
+            TypesToMonitor::NewBlock => {
+                let key = self.get_key(MonitorKey::NewBlock);
+                self.store.set(&key, false, None)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
+        match data {
+            TypesToMonitor::Transactions(tx_ids, _) => {
+                let key = self.get_key(MonitorKey::Transactions);
+                let mut txs = self
+                    .store
+                    .get::<_, Vec<(Txid, String, bool)>>(&key)?
+                    .unwrap_or_default();
+
+                txs.retain(|(txid, _, active)| !tx_ids.contains(txid) || !active);
+                self.store.set(&key, &txs, None)?;
+            }
+            TypesToMonitor::RskPeginTransaction => {
+                let key = self.get_key(MonitorKey::RskPeginTransaction);
+                self.store.set(&key, false, None)?;
+            }
+            TypesToMonitor::SpendingUTXOTransaction(txid, vout, _) => {
+                let key = self.get_key(MonitorKey::SpendingUTXOTransactions);
+                let mut txs = self
+                    .store
+                    .get::<_, Vec<(Txid, u32, String, bool)>>(&key)?
+                    .unwrap_or_default();
+
+                txs.retain(|(tx_txid, tx_vout, _, _)| *tx_txid != txid || *tx_vout != vout);
                 self.store.set(&key, &txs, None)?;
             }
             TypesToMonitor::NewBlock => {

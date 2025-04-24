@@ -1,6 +1,9 @@
-use bitcoin::{absolute::LockTime, Transaction};
-use bitvmx_transaction_monitor::store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore};
-use std::{path::PathBuf, rc::Rc};
+use bitcoin::{absolute::LockTime, Transaction, Txid};
+use bitvmx_transaction_monitor::{
+    store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
+    types::TypesToMonitor,
+};
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 use storage_backend::storage::Storage;
 use utils::{clear_output, generate_random_string};
 mod utils;
@@ -79,6 +82,47 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     assert_eq!(monitors.len(), 0);
 
     clear_output();
+
+    Ok(())
+}
+
+#[test]
+fn test_monitor_store_cancel_monitor() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/cancel_monitor/{}", generate_random_string());
+    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx_id = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
+    let tx_id_1 =
+        Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")?;
+
+    let utxo_monitor = TypesToMonitor::SpendingUTXOTransaction(tx_id, 1, String::new());
+    store.add_monitor(utxo_monitor.clone())?;
+
+    let tx_monitor = TypesToMonitor::Transactions(vec![tx_id_1], String::new());
+    store.add_monitor(tx_monitor.clone())?;
+
+    // Cancel utxo monitor
+    store.cancel_monitor(utxo_monitor.clone())?;
+    let monitors = store.get_monitors()?;
+
+    assert_eq!(monitors.len(), 1);
+    assert!(matches!(
+        monitors[0].clone(),
+        TypesToMonitorStore::Transaction(tx, _) if tx == tx_id_1
+    ));
+
+    // Cancel utxo monitor again
+    store.cancel_monitor(utxo_monitor.clone())?;
+    let monitors = store.get_monitors()?;
+    assert!(matches!(
+        monitors[0].clone(),
+        TypesToMonitorStore::Transaction(tx, _) if tx == tx_id_1
+    ));
+
+    store.cancel_monitor(tx_monitor.clone())?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 0);
 
     Ok(())
 }
