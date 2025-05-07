@@ -10,7 +10,7 @@ use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
     types::TypesToMonitor,
 };
-use std::{path::PathBuf, rc::Rc, str::FromStr, sync::mpsc::channel, thread, time::Duration};
+use std::{rc::Rc, str::FromStr, sync::mpsc::channel, thread, time::Duration};
 use storage_backend::storage::Storage;
 use tracing::info;
 use uuid::Uuid;
@@ -45,7 +45,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
+    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
     let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
     info!("blockchain_height: {}", blockchain_height);
     let network = bitcoin_client.get_blockchain_info()?;
@@ -53,11 +53,9 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
     info!("Connected to chain {:?}", network);
     info!("Chain best block at {}H", blockchain_height);
 
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(
-        config.database.file_path,
-    ))?);
+    let storage = Rc::new(Storage::new(&config.storage)?);
     let monitor = Monitor::new_with_paths(
-        &config.rpc,
+        &config.bitcoin,
         storage,
         Some(config.monitor.checkpoint_height),
         config.monitor.confirmation_threshold,
