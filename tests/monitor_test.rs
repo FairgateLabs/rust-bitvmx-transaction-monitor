@@ -7,8 +7,8 @@ use bitvmx_transaction_monitor::{
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use mockall::predicate::*;
-use std::{path::PathBuf, rc::Rc, str::FromStr};
-use storage_backend::storage::Storage;
+use std::{rc::Rc, str::FromStr};
+use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
 
@@ -16,7 +16,8 @@ mod utils;
 fn no_monitors() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/no_monitors/{}", generate_random_string());
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let best_block_100 = FullBlock {
@@ -58,7 +59,8 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         "test_outputs/monitor_tx_detected/{}",
         generate_random_string()
     );
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let block_height_200 = 200;
@@ -180,7 +182,8 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         "test_outputs/monitor_deactivation/{}",
         generate_random_string()
     );
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let tx = Transaction {
@@ -251,7 +254,8 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
         "test_outputs/inactive_monitors/{}",
         generate_random_string()
     );
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let tx = Transaction {
@@ -302,7 +306,8 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
         "test_outputs/rsk_pegin_monitor/{}",
         generate_random_string()
     );
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     mock_indexer.expect_get_best_block().returning(move || {

@@ -6,9 +6,9 @@ rpc:
   wallet: test_wallet
 
 monitor:
-    checkpoint_height: 1
-    confirmation_threshold: 6
+  checkpoint_height: 1
+  confirmation_threshold: 6
 
-database:
-    file_path: data/database.db
+storage:
+  path: data
 

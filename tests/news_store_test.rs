@@ -3,8 +3,8 @@ use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, MonitoredTypes},
     types::AckMonitorNews,
 };
-use std::{path::PathBuf, rc::Rc};
-use storage_backend::storage::Storage;
+use std::rc::Rc;
+use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 use uuid::Uuid;
 mod utils;
@@ -28,7 +28,8 @@ mod utils;
 #[test]
 fn news_test() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/address_test/{}", generate_random_string());
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
     let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -110,7 +111,8 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
         "test_outputs/test_duplicate_news/{}",
         generate_random_string()
     );
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
     let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -180,7 +182,8 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 #[test]
 fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/mul/{}", generate_random_string());
-    let storage = Rc::new(Storage::new_with_path(&PathBuf::from(path))?);
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     // Create 3 different transactions
