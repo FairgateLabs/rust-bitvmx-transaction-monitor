@@ -15,7 +15,7 @@ use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
-use tracing::info;
+use tracing::{debug, info};
 
 const DEACTIVATION_CONFIRMATION_THRESHOLD: u32 = 100;
 
@@ -226,7 +226,11 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     fn is_ready(&self) -> Result<bool, MonitorError> {
         let current_height = self.get_monitor_height()?;
         let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
-         Ok(current_height >= blockchain_height)
+        debug!(
+            "Current height: {} | Blockchain height: {}",
+            current_height, blockchain_height
+        );
+        Ok(current_height >= blockchain_height)
     }
 
     fn get_confirmation_threshold(&self) -> u32 {
