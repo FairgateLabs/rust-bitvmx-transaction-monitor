@@ -2,6 +2,7 @@ use bitcoin::{BlockHash, Transaction, Txid};
 use bitcoin_indexer::{indexer::Indexer, store::IndexerStore};
 use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{monitor::Monitor, store::MonitorStore};
@@ -48,11 +49,10 @@ impl TransactionStatus {
     }
 
     pub fn is_finalized(&self, confirmation_threshold: u32) -> bool {
-        //Finalized should have:
-        //  block_info because it was mined time before.
-        //  confirmation == 0 , this is just a validation, orphan should be moved as confirmation 0.
-        //  status = Finalized
-        // TODO missing the validation of the confirmations threshold.
+        // A transaction is considered finalized if:
+        // - It has block_info (was mined)
+        // - The status is Finalized
+        // - The number of confirmations meets or exceeds the confirmation threshold
         self.block_info.is_some()
             && self.confirmations >= confirmation_threshold
             && self.status == TransactionBlockchainStatus::Finalized
@@ -60,12 +60,9 @@ impl TransactionStatus {
 
     pub fn is_confirmed(&self) -> bool {
         //Confirmed should have:
-        //  block_info because it was mined time before.
-        //  confirmation > 0
-        //  status = Confirmed
-        self.block_info.is_some()
-            && self.confirmations > 0
-            && self.status == TransactionBlockchainStatus::Confirmed
+        // A transaction is considered confirmed if it has been included in a block
+        // and has at least one confirmation (confirmations > 0), regardless of the exact number of confirmations.
+        self.block_info.is_some() && self.confirmations > 0
     }
 
     pub fn is_orphan(&self) -> bool {
