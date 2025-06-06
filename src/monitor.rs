@@ -207,9 +207,8 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     }
 
     fn is_ready(&self) -> Result<bool, MonitorError> {
-        let current_height = self.get_monitor_height()?;
-        let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
-        Ok(current_height >= blockchain_height)
+        let is_ready = self.indexer.is_ready()?;
+        Ok(is_ready)
     }
 
     fn get_confirmation_threshold(&self) -> u32 {
