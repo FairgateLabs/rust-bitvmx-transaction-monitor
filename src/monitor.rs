@@ -6,9 +6,9 @@ use crate::types::{
     TypesToMonitor,
 };
 use bitcoin::Txid;
+use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
-use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
@@ -29,7 +29,7 @@ where
     confirmation_threshold: u32,
 }
 
-impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
+impl Monitor<Indexer<BitcoinClient>, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
@@ -37,20 +37,11 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, indexer_store);
-        let best_block = indexer.get_best_block()?;
+        let indexer = Indexer::new(bitcoin_client, indexer_store, checkpoint)?;
         let bitvmx_store = MonitorStore::new(storage)?;
-        let current_height =
-            define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
-        let monitor = Monitor::new(
-            indexer,
-            bitvmx_store,
-            Some(current_height),
-            confirmation_threshold,
-        )?;
+        let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
 
         Ok(monitor)
     }
@@ -62,20 +53,11 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, indexer_store);
-        let best_block = indexer.get_best_block()?;
+        let indexer = Indexer::new(bitcoin_client, indexer_store, checkpoint)?;
         let bitvmx_store = MonitorStore::new(storage)?;
-        let current_height =
-            define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
-        let monitor = Monitor::new(
-            indexer,
-            bitvmx_store,
-            Some(current_height),
-            confirmation_threshold,
-        )?;
+        let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
 
         Ok(monitor)
     }
@@ -190,7 +172,7 @@ pub trait MonitorApi {
     fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
 }
 
-impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
+impl MonitorApi for Monitor<Indexer<BitcoinClient>, MonitorStore> {
     fn tick(&self) -> Result<(), MonitorError> {
         self.tick()
     }
@@ -242,14 +224,8 @@ where
     pub fn new(
         indexer: I,
         bitvmx_store: B,
-        current_height: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
-        let current_height = current_height.unwrap_or(0);
-        bitvmx_store
-            .update_monitor_height(current_height)
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-
         Ok(Self {
             indexer,
             store: bitvmx_store,
@@ -270,8 +246,7 @@ where
     }
 
     pub fn tick(&self) -> Result<(), MonitorError> {
-        let current_height = self.get_monitor_height()?;
-        let new_height = self.indexer.tick(&current_height)?;
+        self.indexer.tick()?;
         let indexer_best_block = self.indexer.get_best_block()?;
 
         if indexer_best_block.is_none() {
@@ -280,7 +255,6 @@ where
 
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
-
         let txs_types = self.store.get_monitors()?;
 
         for tx_type in txs_types {
@@ -389,14 +363,15 @@ where
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    if new_height > current_height {
+                    let new_height = self.indexer.get_best_height()?;
+                    let current_height = self.get_monitor_height()?;
+                    if new_height.is_some() && new_height.unwrap() > current_height {
+                        self.store.update_monitor_height(new_height.unwrap())?;
                         self.store.update_news(MonitoredTypes::NewBlock)?;
                     }
                 }
             }
         }
-
-        self.store.update_monitor_height(new_height)?;
 
         Ok(())
     }

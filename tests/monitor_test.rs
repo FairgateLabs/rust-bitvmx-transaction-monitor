@@ -34,17 +34,13 @@ fn no_monitors() -> Result<(), anyhow::Error> {
         orphan: false,
     };
 
-    let block_100_height = best_block_100.height;
-
-    mock_indexer
-        .expect_tick()
-        .returning(move |_| Ok(block_100_height + 1));
+    mock_indexer.expect_tick().returning(move || Ok(()));
 
     mock_indexer
         .expect_get_best_block()
         .returning(move || Ok(Some(best_block_100.clone())));
 
-    let monitor = Monitor::new(mock_indexer, store, Some(block_100_height), 6)?;
+    let monitor = Monitor::new(mock_indexer, store, 6)?;
     monitor.tick()?;
 
     clear_output();
@@ -114,9 +110,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         confirmations: 1,
     };
 
-    mock_indexer
-        .expect_tick()
-        .returning(move |_| Ok(block_height_200 + 1));
+    mock_indexer.expect_tick().returning(move || Ok(()));
 
     mock_indexer
         .expect_get_best_block()
@@ -132,7 +126,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         .with(eq(tx_id))
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    let monitor = Monitor::new(mock_indexer, store, Some(block_height_200), 6)?;
+    let monitor = Monitor::new(mock_indexer, store, 6)?;
 
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
@@ -227,9 +221,9 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         }))
     });
 
-    mock_indexer.expect_tick().returning(move |_| Ok(201));
+    mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, Some(100), 6)?;
+    let monitor = Monitor::new(mock_indexer, store, 6)?;
 
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
@@ -285,9 +279,9 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
         }))
     });
 
-    mock_indexer.expect_tick().returning(move |_| Ok(201));
+    mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, Some(100), 6)?;
+    let monitor = Monitor::new(mock_indexer, store, 6)?;
     monitor.tick()?;
 
     // Verify no news was produced
@@ -326,9 +320,9 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
         }))
     });
 
-    mock_indexer.expect_tick().returning(move |_| Ok(201));
+    mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, Some(100), 6)?;
+    let monitor = Monitor::new(mock_indexer, store, 6)?;
     monitor.save_monitor(TypesToMonitor::RskPeginTransaction)?;
     monitor.tick()?;
 
