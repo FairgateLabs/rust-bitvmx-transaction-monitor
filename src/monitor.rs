@@ -9,6 +9,7 @@ use bitcoin::Txid;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
+use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
@@ -29,7 +30,7 @@ where
     confirmation_threshold: u32,
 }
 
-impl Monitor<Indexer<BitcoinClient>, MonitorStore> {
+impl Monitor<IndexerType, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
@@ -172,7 +173,7 @@ pub trait MonitorApi {
     fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
 }
 
-impl MonitorApi for Monitor<Indexer<BitcoinClient>, MonitorStore> {
+impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     fn tick(&self) -> Result<(), MonitorError> {
         self.tick()
     }
@@ -365,6 +366,7 @@ where
                 TypesToMonitorStore::NewBlock => {
                     let new_height = self.indexer.get_best_height()?;
                     let current_height = self.get_monitor_height()?;
+
                     if new_height.is_some() && new_height.unwrap() > current_height {
                         self.store.update_monitor_height(new_height.unwrap())?;
                         self.store.update_news(MonitoredTypes::NewBlock)?;
