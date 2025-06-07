@@ -10,7 +10,7 @@ use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::IndexerType;
-use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use mockall::automock;
@@ -40,7 +40,7 @@ impl Monitor<IndexerType, MonitorStore> {
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, indexer_store, checkpoint)?;
+        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), checkpoint)?;
         let bitvmx_store = MonitorStore::new(storage)?;
         let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
 
@@ -56,7 +56,7 @@ impl Monitor<IndexerType, MonitorStore> {
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, indexer_store, checkpoint)?;
+        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), checkpoint)?;
         let bitvmx_store = MonitorStore::new(storage)?;
         let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
 
@@ -247,6 +247,7 @@ where
 
     pub fn tick(&self) -> Result<(), MonitorError> {
         self.indexer.tick()?;
+
         let indexer_best_block = self.indexer.get_best_block()?;
 
         if indexer_best_block.is_none() {
