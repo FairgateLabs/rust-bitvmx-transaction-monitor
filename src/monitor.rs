@@ -264,22 +264,30 @@ where
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
-                        // Transaction exists in the blockchain.
-                        let confirmations = indexer_best_block_height - tx.block_height + 1;
+                        if tx.orphan {
+                            info!(
+                                "Orphan Transaction({}) | Height({})",
+                                tx_id, tx.block_height
+                            );
 
-                        if confirmations <= self.confirmation_threshold {
+                            self.store.update_news(MonitoredTypes::Transaction(
+                                tx_id,
+                                extra_data.clone(),
+                            ))?;
+                        }
+
+                        // Transaction exists in the blockchain.
+                        if tx.confirmations <= self.confirmation_threshold {
                             self.store.update_news(MonitoredTypes::Transaction(
                                 tx_id,
                                 extra_data.clone(),
                             ))?;
 
                             info!(
-                                "Detected new transaction confirmation | tx_id: {} | at height: {} | confirmations: {}", 
-                                tx_id,
-                                indexer_best_block_height,
-                                confirmations,
+                                "News for Transaction({}) | Height({}) | Confirmations({})",
+                                tx_id, indexer_best_block_height, tx.confirmations,
                             );
-                        } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                        } else if tx.confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
                             // Deactivate monitor after 100 confirmations
                             self.store.deactivate_monitor(TypesToMonitor::Transactions(
                                 vec![tx_id],
@@ -287,8 +295,10 @@ where
                             ))?;
 
                             info!(
-                                "Deactivating monitor for tx_id: {} | confirmations: {}",
-                                tx_id, confirmations,
+                                "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
+                                tx_id,
+                                indexer_best_block_height,
+                                DEACTIVATION_CONFIRMATION_THRESHOLD,
                             );
                         }
                     }
@@ -302,7 +312,7 @@ where
 
                         if let Some(tx) = self.indexer.get_tx(&tx_id)? {
                             info!(
-                                "Update confirmation for RSK pegin tx: {} | at height: {} | confirmations: {}", 
+                                "News for RSK pegin Transaction({}) | Height({}) | Confirmations({})",
                                 tx_id,
                                 indexer_best_block_height,
                                 indexer_best_block_height - tx.block_height + 1,
@@ -336,10 +346,10 @@ where
                                     )?;
 
                                     info!(
-                                        "Detected transaction spending UTXO: {}:{} | spending tx: {} | confirmations: {}",
+                                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
                                         target_tx_id,
                                         target_utxo_index,
-                                        tx.compute_txid(),
+                                        indexer_best_block_height,
                                         confirmations,
                                     );
                                 } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
@@ -353,10 +363,11 @@ where
                                     )?;
 
                                     info!(
-                                        "Deactivating monitor for spending UTXO: {}:{} | confirmations: {}",
+                                        "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
                                         target_tx_id,
                                         target_utxo_index,
-                                        confirmations,
+                                        indexer_best_block_height,
+                                        DEACTIVATION_CONFIRMATION_THRESHOLD,
                                     );
                                 }
                             }
