@@ -2,17 +2,17 @@ use crate::errors::MonitorError;
 use crate::helper::{is_a_pegin_tx, is_spending_output};
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
 use crate::types::{
-    AckMonitorNews, BlockInfo, MonitorNews, TransactionBlockchainStatus, TransactionStatus,
-    TypesToMonitor,
+    AckMonitorNews, MonitorNews, TransactionBlockchainStatus, TransactionStatus, TypesToMonitor,
 };
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
+use bitcoin_indexer::types::FullBlock;
 use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
-use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
@@ -256,6 +256,8 @@ where
 
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
+        let current_height = self.get_monitor_height()?;
+
         let txs_types = self.store.get_monitors()?;
 
         for tx_type in txs_types {
@@ -264,10 +266,10 @@ where
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
-                        if tx.orphan {
+                        if tx.block_info.orphan {
                             info!(
                                 "Orphan Transaction({}) | Height({})",
-                                tx_id, tx.block_height
+                                tx_id, tx.block_info.height
                             );
 
                             self.store.update_news(MonitoredTypes::Transaction(
@@ -315,7 +317,7 @@ where
                                 "News for RSK pegin Transaction({}) | Height({}) | Confirmations({})",
                                 tx_id,
                                 indexer_best_block_height,
-                                indexer_best_block_height - tx.block_height + 1,
+                                indexer_best_block_height - tx.block_info.height + 1,
                             );
                         }
                     }
@@ -334,7 +336,7 @@ where
                             let tx_info = self.indexer.get_tx(&tx.compute_txid())?;
                             if let Some(tx_info) = tx_info {
                                 let confirmations =
-                                    indexer_best_block_height - tx_info.block_height + 1;
+                                    indexer_best_block_height - tx_info.block_info.height + 1;
 
                                 if confirmations <= self.confirmation_threshold {
                                     self.store.update_news(
@@ -375,16 +377,15 @@ where
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    let new_height = self.indexer.get_best_height()?;
-                    let current_height = self.get_monitor_height()?;
-
-                    if new_height.is_some() && new_height.unwrap() > current_height {
-                        self.store.update_monitor_height(new_height.unwrap())?;
+                    if current_height != indexer_best_block_height {
                         self.store.update_news(MonitoredTypes::NewBlock)?;
                     }
                 }
             }
         }
+
+        self.store
+            .update_monitor_height(indexer_best_block_height)?;
 
         Ok(())
     }
@@ -445,13 +446,7 @@ where
             .get_tx(tx_id)?
             .ok_or_else(|| MonitorError::TransactionNotFound(tx_id.to_string()))?;
 
-        let block_info = Some(BlockInfo::new(
-            tx_status.block_height,
-            tx_status.block_hash,
-            tx_status.orphan,
-        ));
-
-        let status = if tx_status.orphan {
+        let status = if tx_status.block_info.orphan {
             TransactionBlockchainStatus::Orphan
         } else if tx_status.confirmations >= self.confirmation_threshold {
             TransactionBlockchainStatus::Finalized
@@ -459,8 +454,12 @@ where
             TransactionBlockchainStatus::Confirmed
         };
 
-        let return_tx_status =
-            TransactionStatus::new(tx_status.tx, block_info, status, tx_status.confirmations);
+        let return_tx_status = TransactionStatus::new(
+            tx_status.tx,
+            tx_status.block_info,
+            status,
+            tx_status.confirmations,
+        );
 
         Ok(return_tx_status)
     }
