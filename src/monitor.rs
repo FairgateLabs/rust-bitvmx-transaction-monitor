@@ -6,10 +6,11 @@ use crate::types::{
     TypesToMonitor,
 };
 use bitcoin::Txid;
+use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
-use bitcoin_indexer::{helper::define_height_to_sync, indexer::Indexer};
-use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
+use bitcoin_indexer::IndexerType;
+use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::{BlockHeight, FullBlock};
 use mockall::automock;
@@ -29,7 +30,7 @@ where
     confirmation_threshold: u32,
 }
 
-impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
+impl Monitor<IndexerType, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
@@ -37,20 +38,11 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, indexer_store);
-        let best_block = indexer.get_best_block()?;
+        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), checkpoint)?;
         let bitvmx_store = MonitorStore::new(storage)?;
-        let current_height =
-            define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
-        let monitor = Monitor::new(
-            indexer,
-            bitvmx_store,
-            Some(current_height),
-            confirmation_threshold,
-        )?;
+        let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
 
         Ok(monitor)
     }
@@ -62,20 +54,11 @@ impl Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let blockchain_height = bitcoin_client.get_best_block()? as BlockHeight;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, indexer_store);
-        let best_block = indexer.get_best_block()?;
+        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), checkpoint)?;
         let bitvmx_store = MonitorStore::new(storage)?;
-        let current_height =
-            define_height_to_sync(checkpoint, blockchain_height, best_block.map(|b| b.height))?;
-        let monitor = Monitor::new(
-            indexer,
-            bitvmx_store,
-            Some(current_height),
-            confirmation_threshold,
-        )?;
+        let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
 
         Ok(monitor)
     }
@@ -190,7 +173,7 @@ pub trait MonitorApi {
     fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
 }
 
-impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> {
+impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     fn tick(&self) -> Result<(), MonitorError> {
         self.tick()
     }
@@ -224,9 +207,8 @@ impl MonitorApi for Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore> 
     }
 
     fn is_ready(&self) -> Result<bool, MonitorError> {
-        let current_height = self.get_monitor_height()?;
-        let blockchain_height = self.indexer.bitcoin_client.get_best_block()?;
-        Ok(current_height >= blockchain_height)
+        let is_ready = self.indexer.is_ready()?;
+        Ok(is_ready)
     }
 
     fn get_confirmation_threshold(&self) -> u32 {
@@ -242,14 +224,8 @@ where
     pub fn new(
         indexer: I,
         bitvmx_store: B,
-        current_height: Option<BlockHeight>,
         confirmation_threshold: u32,
     ) -> Result<Self, MonitorError> {
-        let current_height = current_height.unwrap_or(0);
-        bitvmx_store
-            .update_monitor_height(current_height)
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-
         Ok(Self {
             indexer,
             store: bitvmx_store,
@@ -270,8 +246,8 @@ where
     }
 
     pub fn tick(&self) -> Result<(), MonitorError> {
-        let current_height = self.get_monitor_height()?;
-        let new_height = self.indexer.tick(&current_height)?;
+        self.indexer.tick()?;
+
         let indexer_best_block = self.indexer.get_best_block()?;
 
         if indexer_best_block.is_none() {
@@ -280,7 +256,6 @@ where
 
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
-
         let txs_types = self.store.get_monitors()?;
 
         for tx_type in txs_types {
@@ -289,22 +264,30 @@ where
                     let tx_info = self.indexer.get_tx(&tx_id)?;
 
                     if let Some(tx) = tx_info {
-                        // Transaction exists in the blockchain.
-                        let confirmations = indexer_best_block_height - tx.block_height + 1;
+                        if tx.orphan {
+                            info!(
+                                "Orphan Transaction({}) | Height({})",
+                                tx_id, tx.block_height
+                            );
 
-                        if confirmations <= self.confirmation_threshold {
+                            self.store.update_news(MonitoredTypes::Transaction(
+                                tx_id,
+                                extra_data.clone(),
+                            ))?;
+                        }
+
+                        // Transaction exists in the blockchain.
+                        if tx.confirmations <= self.confirmation_threshold {
                             self.store.update_news(MonitoredTypes::Transaction(
                                 tx_id,
                                 extra_data.clone(),
                             ))?;
 
                             info!(
-                                "Detected new transaction confirmation | tx_id: {} | at height: {} | confirmations: {}", 
-                                tx_id,
-                                indexer_best_block_height,
-                                confirmations,
+                                "News for Transaction({}) | Height({}) | Confirmations({})",
+                                tx_id, indexer_best_block_height, tx.confirmations,
                             );
-                        } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                        } else if tx.confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
                             // Deactivate monitor after 100 confirmations
                             self.store.deactivate_monitor(TypesToMonitor::Transactions(
                                 vec![tx_id],
@@ -312,8 +295,10 @@ where
                             ))?;
 
                             info!(
-                                "Deactivating monitor for tx_id: {} | confirmations: {}",
-                                tx_id, confirmations,
+                                "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
+                                tx_id,
+                                indexer_best_block_height,
+                                DEACTIVATION_CONFIRMATION_THRESHOLD,
                             );
                         }
                     }
@@ -327,7 +312,7 @@ where
 
                         if let Some(tx) = self.indexer.get_tx(&tx_id)? {
                             info!(
-                                "Update confirmation for RSK pegin tx: {} | at height: {} | confirmations: {}", 
+                                "News for RSK pegin Transaction({}) | Height({}) | Confirmations({})",
                                 tx_id,
                                 indexer_best_block_height,
                                 indexer_best_block_height - tx.block_height + 1,
@@ -361,10 +346,10 @@ where
                                     )?;
 
                                     info!(
-                                        "Detected transaction spending UTXO: {}:{} | spending tx: {} | confirmations: {}",
+                                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
                                         target_tx_id,
                                         target_utxo_index,
-                                        tx.compute_txid(),
+                                        indexer_best_block_height,
                                         confirmations,
                                     );
                                 } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
@@ -378,10 +363,11 @@ where
                                     )?;
 
                                     info!(
-                                        "Deactivating monitor for spending UTXO: {}:{} | confirmations: {}",
+                                        "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
                                         target_tx_id,
                                         target_utxo_index,
-                                        confirmations,
+                                        indexer_best_block_height,
+                                        DEACTIVATION_CONFIRMATION_THRESHOLD,
                                     );
                                 }
                             }
@@ -389,14 +375,16 @@ where
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    if new_height > current_height {
+                    let new_height = self.indexer.get_best_height()?;
+                    let current_height = self.get_monitor_height()?;
+
+                    if new_height.is_some() && new_height.unwrap() > current_height {
+                        self.store.update_monitor_height(new_height.unwrap())?;
                         self.store.update_news(MonitoredTypes::NewBlock)?;
                     }
                 }
             }
         }
-
-        self.store.update_monitor_height(new_height)?;
 
         Ok(())
     }

@@ -1,8 +1,7 @@
 use bitcoin::{BlockHash, Transaction, Txid};
-use bitcoin_indexer::{indexer::Indexer, store::IndexerStore};
-use bitvmx_bitcoin_rpc::{bitcoin_client::BitcoinClient, types::BlockHeight};
+use bitcoin_indexer::IndexerType;
+use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 use uuid::Uuid;
 
 use crate::{monitor::Monitor, store::MonitorStore};
@@ -128,4 +127,4 @@ pub enum AckMonitorNews {
 
 pub type Id = Uuid;
 
-pub type MonitorType = Monitor<Indexer<BitcoinClient, IndexerStore>, MonitorStore>;
+pub type MonitorType = Monitor<IndexerType, MonitorStore>;
