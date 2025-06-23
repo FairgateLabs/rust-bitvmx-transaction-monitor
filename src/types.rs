@@ -16,7 +16,7 @@ pub struct TransactionStore {
 pub struct TransactionStatus {
     pub tx_id: Txid,
     pub tx: Transaction,
-    pub block_info: Option<BlockInfo>,
+    pub block_info: FullBlock,
     pub confirmations: u32,
     pub status: TransactionBlockchainStatus,
 }
@@ -34,7 +34,7 @@ pub enum TransactionBlockchainStatus {
 impl TransactionStatus {
     pub fn new(
         tx: Transaction,
-        block_info: Option<BlockInfo>,
+        block_info: FullBlock,
         status: TransactionBlockchainStatus,
         confirmations: u32,
     ) -> Self {
@@ -49,19 +49,17 @@ impl TransactionStatus {
 
     pub fn is_finalized(&self, confirmation_threshold: u32) -> bool {
         // A transaction is considered finalized if:
-        // - It has block_info (was mined)
         // - The status is Finalized
         // - The number of confirmations meets or exceeds the confirmation threshold
-        self.block_info.is_some()
-            && self.confirmations >= confirmation_threshold
+        self.confirmations >= confirmation_threshold
             && self.status == TransactionBlockchainStatus::Finalized
     }
 
     pub fn is_confirmed(&self) -> bool {
-        //Confirmed should have:
         // A transaction is considered confirmed if it has been included in a block
         // and has at least one confirmation (confirmations > 0), regardless of the exact number of confirmations.
-        self.block_info.is_some() && self.confirmations > 0
+        // This means the transaction is in the main chain and not orphaned.
+        self.confirmations > 0
     }
 
     pub fn is_orphan(&self) -> bool {
@@ -70,9 +68,8 @@ impl TransactionStatus {
         //  confirmation == 0 , this is just a validation, orphan should be moved as confirmation 0.
         //  is_orphan = true
         //  status = Orphan
-        self.block_info.is_some()
-            && self.confirmations == 0
-            && self.block_info.as_ref().unwrap().is_orphan
+        self.confirmations == 0
+            && self.block_info.orphan
             && self.status == TransactionBlockchainStatus::Orphan
     }
 }
@@ -82,14 +79,21 @@ pub struct BlockInfo {
     pub block_height: BlockHeight,
     pub block_hash: BlockHash,
     pub is_orphan: bool,
+    pub transactions: Vec<Txid>,
 }
 
 impl BlockInfo {
-    pub fn new(block_height: BlockHeight, block_hash: BlockHash, is_orphan: bool) -> Self {
+    pub fn new(
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        is_orphan: bool,
+        transactions: Vec<Txid>,
+    ) -> Self {
         Self {
             block_height,
             block_hash,
             is_orphan,
+            transactions,
         }
     }
 }
@@ -128,3 +132,5 @@ pub enum AckMonitorNews {
 pub type Id = Uuid;
 
 pub type MonitorType = Monitor<IndexerType, MonitorStore>;
+
+pub type FullBlock = bitcoin_indexer::types::FullBlock;
