@@ -16,7 +16,7 @@ pub struct TransactionStore {
 pub struct TransactionStatus {
     pub tx_id: Txid,
     pub tx: Transaction,
-    pub block_info: FullBlock,
+    pub block_info: Option<FullBlock>,
     pub confirmations: u32,
     pub status: TransactionBlockchainStatus,
 }
@@ -41,7 +41,7 @@ impl TransactionStatus {
         Self {
             tx_id: tx.compute_txid(),
             tx,
-            block_info,
+            block_info: Some(block_info),
             confirmations,
             status,
         }
@@ -69,7 +69,8 @@ impl TransactionStatus {
         //  is_orphan = true
         //  status = Orphan
         self.confirmations == 0
-            && self.block_info.orphan
+            && self.block_info.is_some()
+            && self.block_info.as_ref().unwrap().orphan
             && self.status == TransactionBlockchainStatus::Orphan
     }
 }
