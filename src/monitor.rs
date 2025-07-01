@@ -6,7 +6,6 @@ use crate::types::{
     AckMonitorNews, MonitorNews, TransactionBlockchainStatus, TransactionStatus, TypesToMonitor,
 };
 use bitcoin::Txid;
-use bitcoin_indexer::config::IndexerConstants;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
@@ -34,14 +33,17 @@ impl Monitor<IndexerType, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
-        indexer_constants: Option<IndexerConstants>,
         constants: Option<MonitorConstants>,
     ) -> Result<Self, MonitorError> {
         let constants = constants.unwrap_or_default();
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), indexer_constants)?;
+        let indexer = Indexer::new(
+            bitcoin_client,
+            Rc::new(indexer_store),
+            constants.indexer_constants.clone(),
+        )?;
         let bitvmx_store = MonitorStore::new(storage)?;
         let monitor = Monitor::new(indexer, bitvmx_store, constants)?;
 
