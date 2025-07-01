@@ -27,3 +27,6 @@ serde_json = "1.0"
 ctrlc = "3.4"
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 hex = "0.4"
+
+[dev-dependencies]
+bitcoind = { path = "../rust-bitcoind" }
