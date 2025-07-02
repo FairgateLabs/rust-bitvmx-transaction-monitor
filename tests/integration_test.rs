@@ -42,7 +42,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
 
     let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
 
-    let monitor = Monitor::new_with_paths(&config.bitcoin, storage, config.constants)?;
+    let monitor = Monitor::new_with_paths(&config.bitcoin, storage, config.settings)?;
 
     let wallet = bitcoin_client.init_wallet(Network::Regtest, "test_wallet")?;
 

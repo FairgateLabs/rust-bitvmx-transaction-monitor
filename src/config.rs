@@ -1,5 +1,5 @@
-use crate::constants::{DEFAULT_CONFIRMATION_THRESHOLD, DEFAULT_MAX_MONITORING_CONFIRMATIONS};
-use bitcoin_indexer::config::IndexerConstants;
+use crate::settings::{DEFAULT_CONFIRMATION_THRESHOLD, DEFAULT_MAX_MONITORING_CONFIRMATIONS};
+use bitcoin_indexer::config::IndexerSettings;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use serde::Deserialize;
 use storage_backend::storage_config::StorageConfig;
@@ -8,36 +8,36 @@ use storage_backend::storage_config::StorageConfig;
 pub struct MonitorConfig {
     pub storage: StorageConfig,
     pub bitcoin: RpcConfig,
-    pub constants: Option<MonitorConstants>,
+    pub settings: Option<MonitorSettings>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct MonitorConstants {
+pub struct MonitorSettings {
     pub confirmation_threshold: u32,
     pub max_monitoring_confirmations: u32,
-    pub indexer_constants: Option<IndexerConstants>,
+    pub indexer_settings: Option<IndexerSettings>,
 }
 
-impl MonitorConstants {
+impl MonitorSettings {
     pub fn new(
         confirmation_threshold: u32,
         max_monitoring_confirmations: u32,
-        indexer_constants: Option<IndexerConstants>,
+        indexer_settings: Option<IndexerSettings>,
     ) -> Self {
         Self {
             confirmation_threshold,
             max_monitoring_confirmations,
-            indexer_constants,
+            indexer_settings,
         }
     }
 }
 
-impl Default for MonitorConstants {
+impl Default for MonitorSettings {
     fn default() -> Self {
-        MonitorConstants {
+        MonitorSettings {
             confirmation_threshold: DEFAULT_CONFIRMATION_THRESHOLD,
             max_monitoring_confirmations: DEFAULT_MAX_MONITORING_CONFIRMATIONS,
-            indexer_constants: Some(IndexerConstants::default()),
+            indexer_settings: Some(IndexerSettings::default()),
         }
     }
 }
