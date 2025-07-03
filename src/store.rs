@@ -31,7 +31,7 @@ enum BlockchainKey {
 pub enum MonitoredTypes {
     Transaction(Txid, String),
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid, u32, String),
+    SpendingUTXOTransaction(Txid, u32, Txid, String),
     NewBlock,
 }
 
@@ -137,12 +137,15 @@ impl MonitorStoreApi for MonitorStore {
         let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
         let spending_news = self
             .store
-            .get::<_, Vec<(Txid, u32, String)>>(&spending_news_key)?
+            .get::<_, Vec<(Txid, u32, Txid, String)>>(&spending_news_key)?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index, extra_data) in spending_news {
+        for (tx_id, utxo_index, tx_id_consumer, extra_data) in spending_news {
             news.push(MonitoredTypes::SpendingUTXOTransaction(
-                tx_id, utxo_index, extra_data,
+                tx_id,
+                utxo_index,
+                tx_id_consumer,
+                extra_data,
             ));
         }
 
@@ -187,15 +190,20 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
-            MonitoredTypes::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
+            MonitoredTypes::SpendingUTXOTransaction(
+                tx_id,
+                utxo_index,
+                tx_id_consumer,
+                extra_data,
+            ) => {
                 let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, Txid, String)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                if !utxo_news.contains(&(tx_id, utxo_index, extra_data.clone())) {
-                    utxo_news.push((tx_id, utxo_index, extra_data));
+                if !utxo_news.contains(&(tx_id, utxo_index, tx_id_consumer, extra_data.clone())) {
+                    utxo_news.push((tx_id, utxo_index, tx_id_consumer, extra_data));
                 }
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
@@ -235,10 +243,10 @@ impl MonitorStoreApi for MonitorStore {
                 let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, String)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, Txid, String)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                utxo_news.retain(|(tx, utxo_i, _)| *tx != tx_id || *utxo_i != utxo_index);
+                utxo_news.retain(|(tx, utxo_i, _, _)| *tx != tx_id || *utxo_i != utxo_index);
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
             AckMonitorNews::NewBlock => {
