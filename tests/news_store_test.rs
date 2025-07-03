@@ -75,8 +75,12 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 0);
 
     // Test spending UTXO transaction news
-    let spending_tx_news =
-        MonitoredTypes::SpendingUTXOTransaction(tx.compute_txid(), 0, String::new());
+    let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(
+        tx.compute_txid(),
+        0,
+        tx.compute_txid(),
+        String::new(),
+    );
     store.update_news(spending_tx_news.clone())?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
@@ -150,8 +154,12 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     store.ack_news(AckMonitorNews::RskPeginTransaction(tx.compute_txid()))?;
 
     // Test duplicate spending UTXO transaction news
-    let spending_tx_news =
-        MonitoredTypes::SpendingUTXOTransaction(tx.compute_txid(), 0, String::new());
+    let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(
+        tx.compute_txid(),
+        0,
+        tx.compute_txid(),
+        String::new(),
+    );
     store.update_news(spending_tx_news.clone())?;
     store.update_news(spending_tx_news.clone())?; // Try adding same spending tx again
     let news = store.get_news()?;
@@ -277,12 +285,24 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 0);
 
     // Test multiple spending UTXO transactions
-    let spending_tx1 =
-        MonitoredTypes::SpendingUTXOTransaction(tx1.compute_txid(), 0, String::new());
-    let spending_tx2 =
-        MonitoredTypes::SpendingUTXOTransaction(tx2.compute_txid(), 1, String::new());
-    let spending_tx3 =
-        MonitoredTypes::SpendingUTXOTransaction(tx3.compute_txid(), 2, String::new());
+    let spending_tx1 = MonitoredTypes::SpendingUTXOTransaction(
+        tx1.compute_txid(),
+        0,
+        tx1.compute_txid(),
+        String::new(),
+    );
+    let spending_tx2 = MonitoredTypes::SpendingUTXOTransaction(
+        tx2.compute_txid(),
+        1,
+        tx1.compute_txid(),
+        String::new(),
+    );
+    let spending_tx3 = MonitoredTypes::SpendingUTXOTransaction(
+        tx3.compute_txid(),
+        2,
+        tx1.compute_txid(),
+        String::new(),
+    );
 
     store.update_news(spending_tx1.clone())?;
     store.update_news(spending_tx2.clone())?;

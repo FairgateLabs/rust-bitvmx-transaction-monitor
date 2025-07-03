@@ -343,6 +343,7 @@ where
                                         MonitoredTypes::SpendingUTXOTransaction(
                                             target_tx_id,
                                             target_utxo_index,
+                                            tx.compute_txid(),
                                             extra_data.clone(),
                                         ),
                                     )?;
@@ -417,8 +418,13 @@ where
                     let status = self.get_tx_status(&tx_id)?;
                     return_news.push(MonitorNews::RskPeginTransaction(tx_id, status));
                 }
-                MonitoredTypes::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
-                    let status = self.get_tx_status(&tx_id)?;
+                MonitoredTypes::SpendingUTXOTransaction(
+                    tx_id,
+                    utxo_index,
+                    spender_tx_id,
+                    extra_data,
+                ) => {
+                    let status = self.get_tx_status(&spender_tx_id)?;
                     return_news.push(MonitorNews::SpendingUTXOTransaction(
                         tx_id, utxo_index, status, extra_data,
                     ));
