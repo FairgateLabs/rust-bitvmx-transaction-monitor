@@ -421,10 +421,10 @@ where
                 MonitoredTypes::SpendingUTXOTransaction(
                     tx_id,
                     utxo_index,
-                    tx_id_consumer,
+                    spender_tx_id,
                     extra_data,
                 ) => {
-                    let status = self.get_tx_status(&tx_id_consumer)?;
+                    let status = self.get_tx_status(&spender_tx_id)?;
                     return_news.push(MonitorNews::SpendingUTXOTransaction(
                         tx_id, utxo_index, status, extra_data,
                     ));

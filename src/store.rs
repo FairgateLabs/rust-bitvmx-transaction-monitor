@@ -140,11 +140,11 @@ impl MonitorStoreApi for MonitorStore {
             .get::<_, Vec<(Txid, u32, Txid, String)>>(&spending_news_key)?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index, tx_id_consumer, extra_data) in spending_news {
+        for (tx_id, utxo_index, spender_tx_id, extra_data) in spending_news {
             news.push(MonitoredTypes::SpendingUTXOTransaction(
                 tx_id,
                 utxo_index,
-                tx_id_consumer,
+                spender_tx_id,
                 extra_data,
             ));
         }
@@ -193,7 +193,7 @@ impl MonitorStoreApi for MonitorStore {
             MonitoredTypes::SpendingUTXOTransaction(
                 tx_id,
                 utxo_index,
-                tx_id_consumer,
+                spender_tx_id,
                 extra_data,
             ) => {
                 let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
@@ -202,8 +202,8 @@ impl MonitorStoreApi for MonitorStore {
                     .get::<_, Vec<(Txid, u32, Txid, String)>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                if !utxo_news.contains(&(tx_id, utxo_index, tx_id_consumer, extra_data.clone())) {
-                    utxo_news.push((tx_id, utxo_index, tx_id_consumer, extra_data));
+                if !utxo_news.contains(&(tx_id, utxo_index, spender_tx_id, extra_data.clone())) {
+                    utxo_news.push((tx_id, utxo_index, spender_tx_id, extra_data));
                 }
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
