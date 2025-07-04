@@ -1,3 +1,4 @@
+use crate::config::MonitorSettings;
 use crate::errors::MonitorError;
 use crate::helper::{is_a_pegin_tx, is_spending_output};
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
@@ -18,8 +19,6 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::info;
 
-const DEACTIVATION_CONFIRMATION_THRESHOLD: u32 = 100;
-
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -27,38 +26,26 @@ where
 {
     pub indexer: I,
     pub store: B,
-    confirmation_threshold: u32,
+    pub settings: MonitorSettings,
 }
 
 impl Monitor<IndexerType, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
-        checkpoint: Option<BlockHeight>,
-        confirmation_threshold: u32,
+        settings: Option<MonitorSettings>,
     ) -> Result<Self, MonitorError> {
+        let settings = settings.unwrap_or_default();
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), checkpoint)?;
+        let indexer = Indexer::new(
+            bitcoin_client,
+            Rc::new(indexer_store),
+            settings.indexer_settings.clone(),
+        )?;
         let bitvmx_store = MonitorStore::new(storage)?;
-        let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
-
-        Ok(monitor)
-    }
-
-    pub fn new_with_paths_and_rpc_details(
-        rpc_config: &RpcConfig,
-        storage: Rc<Storage>,
-        checkpoint: Option<BlockHeight>,
-        confirmation_threshold: u32,
-    ) -> Result<Self, MonitorError> {
-        let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let indexer_store = IndexerStore::new(storage.clone())
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-        let indexer = Indexer::new(bitcoin_client, Rc::new(indexer_store), checkpoint)?;
-        let bitvmx_store = MonitorStore::new(storage)?;
-        let monitor = Monitor::new(indexer, bitvmx_store, confirmation_threshold)?;
+        let monitor = Monitor::new(indexer, bitvmx_store, settings)?;
 
         Ok(monitor)
     }
@@ -212,7 +199,7 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     }
 
     fn get_confirmation_threshold(&self) -> u32 {
-        self.confirmation_threshold
+        self.settings.confirmation_threshold
     }
 }
 
@@ -224,12 +211,12 @@ where
     pub fn new(
         indexer: I,
         bitvmx_store: B,
-        confirmation_threshold: u32,
+        settings: MonitorSettings,
     ) -> Result<Self, MonitorError> {
         Ok(Self {
             indexer,
             store: bitvmx_store,
-            confirmation_threshold,
+            settings,
         })
     }
 
@@ -279,7 +266,7 @@ where
                         }
 
                         // Transaction exists in the blockchain.
-                        if tx.confirmations <= self.confirmation_threshold {
+                        if tx.confirmations <= self.settings.confirmation_threshold {
                             self.store.update_news(MonitoredTypes::Transaction(
                                 tx_id,
                                 extra_data.clone(),
@@ -289,7 +276,7 @@ where
                                 "News for Transaction({}) | Height({}) | Confirmations({})",
                                 tx_id, indexer_best_block_height, tx.confirmations,
                             );
-                        } else if tx.confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                        } else if tx.confirmations >= self.settings.max_monitoring_confirmations {
                             // Deactivate monitor after 100 confirmations
                             self.store.deactivate_monitor(TypesToMonitor::Transactions(
                                 vec![tx_id],
@@ -300,7 +287,7 @@ where
                                 "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
                                 tx_id,
                                 indexer_best_block_height,
-                                DEACTIVATION_CONFIRMATION_THRESHOLD,
+                                self.settings.max_monitoring_confirmations,
                             );
                         }
                     }
@@ -338,7 +325,7 @@ where
                                 let confirmations =
                                     indexer_best_block_height - tx_info.block_info.height + 1;
 
-                                if confirmations <= self.confirmation_threshold {
+                                if confirmations <= self.settings.confirmation_threshold {
                                     self.store.update_news(
                                         MonitoredTypes::SpendingUTXOTransaction(
                                             target_tx_id,
@@ -355,7 +342,9 @@ where
                                         indexer_best_block_height,
                                         confirmations,
                                     );
-                                } else if confirmations >= DEACTIVATION_CONFIRMATION_THRESHOLD {
+                                } else if confirmations
+                                    >= self.settings.max_monitoring_confirmations
+                                {
                                     // Deactivate monitor after 100 confirmations
                                     self.store.deactivate_monitor(
                                         TypesToMonitor::SpendingUTXOTransaction(
@@ -370,7 +359,7 @@ where
                                         target_tx_id,
                                         target_utxo_index,
                                         indexer_best_block_height,
-                                        DEACTIVATION_CONFIRMATION_THRESHOLD,
+                                        self.settings.max_monitoring_confirmations,
                                     );
                                 }
                             }
@@ -454,7 +443,7 @@ where
 
         let status = if tx_status.block_info.orphan {
             TransactionBlockchainStatus::Orphan
-        } else if tx_status.confirmations >= self.confirmation_threshold {
+        } else if tx_status.confirmations >= self.settings.confirmation_threshold {
             TransactionBlockchainStatus::Finalized
         } else {
             TransactionBlockchainStatus::Confirmed

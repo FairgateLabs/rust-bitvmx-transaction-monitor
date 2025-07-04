@@ -1,13 +1,15 @@
-rpc:
+bitcoin:
   network: regtest
   url: http://127.0.0.1:18443
   username: foo
   password: rpcpassword
   wallet: test_wallet
-
-monitor:
-  checkpoint_height: 1
+  
+settings:
   confirmation_threshold: 6
+  max_monitoring_confirmations: 100
+  indexer_settings:
+    checkpoint_height: 0
 
 storage:
   path: data

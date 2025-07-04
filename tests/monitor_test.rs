@@ -4,6 +4,7 @@ use bitcoin_indexer::{
     types::{FullBlock, TransactionInfo},
 };
 use bitvmx_transaction_monitor::{
+    config::MonitorSettings,
     monitor::Monitor,
     store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
@@ -42,7 +43,7 @@ fn no_monitors() -> Result<(), anyhow::Error> {
         .expect_get_best_block()
         .returning(move || Ok(Some(best_block_100.clone())));
 
-    let monitor = Monitor::new(mock_indexer, store, 6)?;
+    let monitor = Monitor::new(mock_indexer, store, MonitorSettings::default())?;
     monitor.tick()?;
 
     clear_output();
@@ -121,7 +122,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         .with(eq(tx_id))
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    let monitor = Monitor::new(mock_indexer, store, 6)?;
+    let monitor = Monitor::new(mock_indexer, store, MonitorSettings::default())?;
 
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
@@ -226,7 +227,7 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, 6)?;
+    let monitor = Monitor::new(mock_indexer, store, MonitorSettings::default())?;
 
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
@@ -284,7 +285,7 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, 6)?;
+    let monitor = Monitor::new(mock_indexer, store, MonitorSettings::default())?;
     monitor.tick()?;
 
     // Verify no news was produced
@@ -325,7 +326,7 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, 6)?;
+    let monitor = Monitor::new(mock_indexer, store, MonitorSettings::default())?;
     monitor.save_monitor(TypesToMonitor::RskPeginTransaction)?;
     monitor.tick()?;
 
@@ -390,7 +391,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
-    let monitor = Monitor::new(mock_indexer, store, 6)?;
+    let monitor = Monitor::new(mock_indexer, store, MonitorSettings::default())?;
     monitor.save_monitor(TypesToMonitor::NewBlock)?;
     monitor.tick()?;
 
