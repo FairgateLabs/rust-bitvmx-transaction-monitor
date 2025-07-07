@@ -27,7 +27,7 @@ mod utils;
 ///
 #[test]
 fn news_test() -> Result<(), anyhow::Error> {
-    let path = format!("test_outputs/address_test/{}", generate_random_string());
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -111,10 +111,7 @@ fn news_test() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_duplicate_news() -> Result<(), anyhow::Error> {
-    let path = format!(
-        "test_outputs/test_duplicate_news/{}",
-        generate_random_string()
-    );
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -189,7 +186,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
-    let path = format!("test_outputs/mul/{}", generate_random_string());
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;

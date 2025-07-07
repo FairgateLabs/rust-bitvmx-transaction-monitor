@@ -15,7 +15,7 @@ mod utils;
 /// 2. Removing monitors
 #[test]
 fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
-    let path = format!("test_outputs/address_test/{}", generate_random_string());
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -89,7 +89,7 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_monitor_store_cancel_monitor() -> Result<(), anyhow::Error> {
-    let path = format!("test_outputs/cancel_monitor/{}", generate_random_string());
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;

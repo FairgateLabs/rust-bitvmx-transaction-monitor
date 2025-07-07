@@ -18,7 +18,7 @@ mod utils;
 #[test]
 fn no_monitors() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let path = format!("test_outputs/no_monitors/{}", generate_random_string());
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -54,10 +54,7 @@ fn no_monitors() -> Result<(), anyhow::Error> {
 #[test]
 fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let path = format!(
-        "test_outputs/monitor_tx_detected/{}",
-        generate_random_string()
-    );
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -168,10 +165,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
 #[test]
 fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let path = format!(
-        "test_outputs/monitor_deactivation/{}",
-        generate_random_string()
-    );
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -248,10 +242,7 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
 #[test]
 fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let path = format!(
-        "test_outputs/inactive_monitors/{}",
-        generate_random_string()
-    );
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -300,10 +291,7 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
 #[test]
 fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let path = format!(
-        "test_outputs/rsk_pegin_monitor/{}",
-        generate_random_string()
-    );
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
@@ -346,10 +334,7 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
 #[test]
 fn test_best_block_news() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
-    let path = format!(
-        "test_outputs/new_block_monitor/{}",
-        generate_random_string()
-    );
+    let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
