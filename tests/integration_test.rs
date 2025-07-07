@@ -1,5 +1,4 @@
 use anyhow::{Ok, Result};
-use bitcoin::Network;
 use bitcoind::bitcoind::Bitcoind;
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_settings::settings;
@@ -44,7 +43,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
 
     let monitor = Monitor::new_with_paths(&config.bitcoin, storage, config.settings)?;
 
-    let wallet = bitcoin_client.init_wallet(Network::Regtest, "test_wallet")?;
+    let wallet = bitcoin_client.init_wallet("test_wallet")?;
 
     info!("Mining 100 blocks to wallet");
     bitcoin_client.mine_blocks_to_address(100, &wallet)?;
