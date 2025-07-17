@@ -50,7 +50,7 @@ pub fn is_valid_op_return_rsk_data(data: Vec<Vec<u8>>) -> bool {
             &mut x_only_public_key as *mut _,
             fourth_part.as_ptr(),
         );
-        println!("fourth_part {}", fourth_part);
+
         if fourth_part != 1 {
             return false;
         }
