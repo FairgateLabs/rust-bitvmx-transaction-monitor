@@ -2,6 +2,10 @@
 
 This monitor tracks various Bitcoin transactions. It connects to an Indexer and provides real-time updates on transaction confirmations for different transaction types.
 
+## ⚠️ Disclaimer
+
+This library is currently under development and may not be fully stable.
+It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
 
 **Transaction Monitoring Types**:
   - **Transactions**: Monitor a set of transactions
