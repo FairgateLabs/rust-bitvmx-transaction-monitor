@@ -80,7 +80,7 @@ pub fn is_a_pegin_tx(tx: &Transaction) -> bool {
     let mut first_output_match = false;
 
     if let Some(first_output) = tx.output.first() {
-        //TODO: get Network::Bitcoin from configuration.
+        // TODO: Get Network::Bitcoin from configuration.
         if Address::from_script(&first_output.script_pubkey, Network::Bitcoin).is_ok() {
             first_output_match = true;
         }

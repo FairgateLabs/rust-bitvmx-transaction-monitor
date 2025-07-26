@@ -2,7 +2,6 @@
 
 This monitor tracks various Bitcoin transactions. It connects to an Indexer and provides real-time updates on transaction confirmations for different transaction types.
 
-
 **Transaction Monitoring Types**:
   - **Transactions**: Monitor a set of transactions
   - **RSK Pegin Transactions**: Detect and track RSK pegin transactions
@@ -12,7 +11,7 @@ This monitor tracks various Bitcoin transactions. It connects to an Indexer and 
 ## Features
 
 - **Status Updates**: Get notifications when monitored transactions receive new confirmations
-- **Blockchain Synchronization**: Automatically syncs with the Bitcoin blockchain on every tick.
+- **Blockchain Synchronization**: Automatically syncs with the Bitcoin blockchain on every tick
 - **Persistence**: Monitoring state is preserved across restarts
 
 ## Architecture
@@ -36,9 +35,10 @@ $ git clone git@github.com:FairgateLabs/rust-bitvmx-transaction-monitor
 ``` 
 
 ## Run Tests
-```rust
+```bash
 $ cargo test
 ```
+
 ## API Endpoints
 
 The `Monitor` struct implements the `MonitorApi` trait with the following methods:
@@ -74,7 +74,7 @@ The `Monitor` struct implements the `MonitorApi` trait with the following method
   - The monitor remains in the store but is marked as inactive and won't generate news.
 
 - **`cancel(data: TypesToMonitor)`**: Stops monitoring a specific transaction or entity.
-  - Transaction news remains in the store but no new updates will be generated. 
+  - Transaction news remains in the store but no new updates will be generated.
 
 ### Blockchain Information
 
