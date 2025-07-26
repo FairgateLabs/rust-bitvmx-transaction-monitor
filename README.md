@@ -115,7 +115,7 @@ Here's how you can use the `Monitor` struct and its methods in your application:
 2. Install dependencies using `cargo build`.
 3. Run tests with `cargo test -- --ignored`.
 
-## Contributing
+## Contributing 
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
 
 ## License
