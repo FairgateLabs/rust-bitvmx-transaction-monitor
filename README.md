@@ -1,89 +1,122 @@
 # BitVMX Transaction Monitor
 
-This monitor tracks various Bitcoin transactions. It connects to an Indexer and provides real-time updates on transaction confirmations for different transaction types.
+The BitVMX Transaction Monitor is a comprehensive tool for tracking and managing different types of transaction monitors. It connects with an Indexer to deliver real-time updates on transaction confirmations for various monitor types, such as UTXO transactions, RSK Peg-In transactions, and block monitoring.
 
 ## ⚠️ Disclaimer
 
 This library is currently under development and may not be fully stable.
 It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
 
-**Transaction Monitoring Types**:
-  - **Transactions**: Monitor a set of transactions
-  - **RSK Pegin Transactions**: Detect and track RSK pegin transactions
-  - **UTXO Spending**: Monitor when specific UTXOs are spent
-  - **New Block**: Get notifications when a new block is added to the blockchain
-  
-## Features
+## Key Features
 
-- **Status Updates**: Get notifications when monitored transactions receive new confirmations
-- **Blockchain Synchronization**: Automatically syncs with the Bitcoin blockchain on every tick.
-- **Persistence**: Monitoring state is preserved across restarts
+- 📡 **Real-Time Status Updates**: Receive immediate notifications when monitored transactions receive new confirmations.
+- 🔄 **Automatic Blockchain Synchronization**: Seamlessly syncs with the Bitcoin blockchain at regular intervals.
+- 💾 **State Persistence**: Maintains monitoring state across system restarts for uninterrupted tracking.
 
-## Architecture
+## System Architecture
 
-The monitor consists of three main components:
+The monitor is built on three primary components:
 
-1. **Indexer**: External library that connects to a Bitcoin node and indexes blockchain data
-2. **Monitor Store**: Persists monitoring transactions and news
-3. **Monitor**: Core logic that processes blocks, detects transactions, and manages news updates
+1. **Indexer**: An external library that connects to a Bitcoin node to index blockchain data.
+2. **Monitor Store**: A storage system that retains monitoring transactions and news updates.
+3. **Monitor**: The core component that processes blocks, detects transactions, and manages news updates.
 
 ## Configuration
 
-The monitor is configured through a YAML file. Here's an example configuration (`development.yaml`):
+Configuration is managed through a YAML file. An example configuration file, `development.yaml`, is located in the `config/` directory.
 
-## Installation
+## Methods
 
-Clone the repository:
+The `Monitor` struct implements the `MonitorApi` trait, offering the following methods:
 
-```bash
-$ git clone git@github.com:FairgateLabs/rust-bitvmx-transaction-monitor
-``` 
+### Core Operations
 
-## Run Tests
-```rust
-$ cargo test
-```
-## API Endpoints
+- **`is_ready()`**: Checks if the monitor is fully synchronized with the blockchain.
+  
 
-The `Monitor` struct implements the `MonitorApi` trait with the following methods:
-
-### Core Functionality
-
-- **`is_ready()`**: Checks if the monitor is fully synced with the blockchain.
-  - Returns `true` if synced, `false` if still syncing, or an error.
-
-- **`tick()`**: Processes new blocks, updates transaction statuses, and generates news.
-  - Should be called periodically to keep the monitor in sync with the blockchain.
-
-- **`monitor(data: TypesToMonitor)`**: Registers a new transaction or entity to be monitored.
-  - Supports multiple transaction types (Transactions, RSK Pegin, UTXO Spending, New Block).
-
-- **`get_tx_status(tx_id: &Txid)`**: Retrieves the current status of a monitored transaction.
-  - Includes confirmation count, block information, and transaction details.
+- **`tick()`**: Executes a monitoring cycle, processing new blocks, updating transaction statuses, and generating news. Should be called periodically to ensure blockchain synchronization.
 
 ### News Management
 
-- **`get_news()`**: Retrieves all pending news items for monitored transactions.
-  - News items include confirmation updates and status changes.
+- **`get_news()`**: Gathers all pending news items related to monitored transactions. Includes confirmation updates and status changes.
 
-- **`ack_news(data: AckMonitorNews)`**: Marks specific news items as read/processed.
-  - Prevents the same news from being returned in subsequent calls.
+- **`ack_news(data: AckMonitorNews)`**: Marks specific news items as processed. Prevents the same news from being returned in future queries.
 
-### Transaction Monitoring
+### Monitors Management
 
-- **`get_monitors()`**: Retrieves all currently active transaction monitors.
-  - Returns a list of all transactions and entities being monitored.
-
-- **`deactivate_monitor(data: TypesToMonitor)`**: Temporarily deactivates monitoring for a specific transaction or entity.
-  - The monitor remains in the store but is marked as inactive and won't generate news.
-
-- **`cancel(data: TypesToMonitor)`**: Stops monitoring a specific transaction or entity.
-  - Transaction news remains in the store but no new updates will be generated. 
+- **`monitor(data: TypesToMonitor)`**: Initiates the monitoring process for a new transaction or entity.  Capable of handling multiple monitor types, such as Bitcoin Transactions, RSK Pegin Transactions, UTXO Spending, New Block notifications.
+ 
+- **`cancel(data: TypesToMonitor)`**: Completely stops monitoring a specific transaction or entity. Existing transaction news is retained, but no further updates will be generated.
 
 ### Blockchain Information
 
-- **`get_confirmation_threshold()`**: Returns the configured confirmation threshold for transactions.
-  - Determines how many confirmations are required before a transaction is considered final.
+- **`get_confirmation_threshold()`**: Retrieves the configured confirmation threshold for transactions.
+  - Indicates the number of confirmations required for a transaction to be considered final.
 
-- **`get_monitor_height()`**: Returns the current height the monitor has processed up to.
-  - Useful for determining sync status.
+- **`get_monitor_height()`**: Provides the current block height processed by the monitor.
+  - Useful for evaluating synchronization status.
+
+- **`get_tx_status(tx_id: &Txid)`**: Retrieves the current status of a monitored transaction. Provides details such as confirmation count, block information, and transaction specifics.
+
+## Usage
+
+Here's how you can use the `Monitor` struct and its methods in your application:
+
+```rust
+  // Initialize the monitor with necessary components
+  let monitor = Monitor::new(indexer, bitvmx_store, settings)?;
+
+  // Check if the monitor is fully synchronized with the blockchain
+  match monitor.is_ready() {
+      Ok(true) => println!("Monitor is fully synchronized."),
+      Ok(false) => println!("Monitor is still syncing."),
+      Err(e) => eprintln!("Error checking monitor readiness: {:?}", e),
+  }
+
+  // Regularly tick the monitor to process new blocks and update statuses
+  monitor.tick();
+
+  // Retrieve all pending news items related to monitored transactions
+  let news = monitor.get_news()
+
+  // Acknowledge specific news items to prevent duplicate notifications
+  let ack_data = /* create your AckMonitorNews instance */;
+  monitor.ack_news(ack_data) 
+
+  // Start monitoring a new transaction or entity
+  let monitor_data = /* create your TypesToMonitor instance */;
+  monitor.monitor(monitor_data)
+
+  // Stop monitoring a specific transaction or entity
+  let cancel_data = /* create your TypesToMonitor instance */;
+  monitor.cancel(cancel_data) 
+
+  // Retrieve the confirmation count needed for a transaction to achieve finality
+  let threshold = monitor.get_confirmation_threshold();
+  println!("Confirmation threshold: {}", threshold);
+
+  // Get the current block height processed by the monitor
+  match monitor.get_monitor_height() {
+      Ok(height) => println!("Current monitor height: {}", height),
+      Err(e) => eprintln!("Error retrieving monitor height: {:?}", e),
+  }
+
+  // Retrieve the current status of a monitored transaction
+  let tx_id = /* your transaction ID */;
+  match monitor.get_tx_status(&tx_id) {
+      Ok(status) => println!("Transaction status: {:?}", status),
+      Err(e) => eprintln!("Error retrieving transaction status: {:?}", e),
+  }
+  ```
+
+## Development Setup
+
+1. Clone the repository.
+2. Install dependencies using `cargo build`.
+3. Run tests with `cargo test -- --ignored`.
+
+## Contributing 
+Contributions are welcome! Please open an issue or submit a pull request on GitHub.
+
+## License
+This project is licensed under the MIT License.

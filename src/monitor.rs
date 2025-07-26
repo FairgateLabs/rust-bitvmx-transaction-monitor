@@ -127,7 +127,7 @@ pub trait MonitorApi {
     /// - Being included in a block
     ///
     /// # Returns
-    /// - `Ok(Vec<MonitorNewType>)`: List of status updates grouped by monitor type
+    /// - `Ok(Vec<MonitorNews>)`: List of status updates grouped by monitor type
     /// - `Err`: If there was an error retrieving updates
     fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError>;
 

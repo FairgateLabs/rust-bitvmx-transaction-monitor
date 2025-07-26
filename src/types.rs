@@ -23,11 +23,11 @@ pub struct TransactionStatus {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum TransactionBlockchainStatus {
-    // Represents a transaction that has been successfully confirmed by the network but a reorganizacion move it out of the chain.
+    // Represents a transaction that has been successfully confirmed by the network but a reorganization moved it out of the chain.
     Orphan,
     // Represents a transaction that has been successfully confirmed by the network
     Confirmed,
-    // Represents when the transaction was confirmed an amount of blocks
+    // Represents when the transaction was confirmed by a certain number of blocks
     Finalized,
 }
 
@@ -63,9 +63,9 @@ impl TransactionStatus {
     }
 
     pub fn is_orphan(&self) -> bool {
-        //Orphan should have:
-        //  block_info because it was mined time before.
-        //  confirmation == 0 , this is just a validation, orphan should be moved as confirmation 0.
+        // An orphan transaction should have:
+        //  block_info because it was mined at some point before.
+        //  confirmations == 0, this is just a validation - orphan transactions should be moved to confirmation 0.
         //  is_orphan = true
         //  status = Orphan
         self.confirmations == 0
@@ -97,13 +97,6 @@ impl BlockInfo {
             transactions,
         }
     }
-}
-
-pub struct BlockAgragatedInfo {
-    pub block_height: BlockHeight,
-    pub block_hash: BlockHash,
-    pub confirmations: u32,
-    pub is_orphan: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

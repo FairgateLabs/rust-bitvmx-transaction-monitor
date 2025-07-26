@@ -19,7 +19,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
     let sk = SecretKey::new(&mut thread_rng());
     let pubk = PublicKey::from_secret_key(&secp, &sk);
 
-    // TODO: we can generate taproot sepending tree. instead a empty tree.
+    // TODO: We can generate a taproot spending tree instead of an empty tree.
     let committee_n = Address::p2tr(&secp, pubk.x_only_public_key().0, None, Network::Bitcoin);
 
     // Generate reimbursement address (R)
