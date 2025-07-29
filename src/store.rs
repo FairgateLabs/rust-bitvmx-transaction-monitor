@@ -10,7 +10,7 @@ use std::sync::Arc;
 use storage_backend::storage::{KeyValueStore, Storage};
 
 pub struct MonitorStore {
-    store: Rc<Storage>,
+    store: Arc<Storage>,
 }
 enum MonitorKey {
     Transactions,

@@ -15,7 +15,7 @@ use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
-use std::rc::Rc;
+use std::sync::Arc;
 use storage_backend::storage::Storage;
 use tracing::info;
 
@@ -32,7 +32,7 @@ where
 impl Monitor<IndexerType, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
-        storage: Rc<Storage>,
+        storage: Arc<Storage>,
         settings: Option<MonitorSettings>,
     ) -> Result<Self, MonitorError> {
         let settings = settings.unwrap_or_default();
@@ -41,7 +41,7 @@ impl Monitor<IndexerType, MonitorStore> {
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
         let indexer = Indexer::new(
             bitcoin_client,
-            Rc::new(indexer_store),
+            Arc::new(indexer_store),
             settings.indexer_settings.clone(),
         )?;
         let bitvmx_store = MonitorStore::new(storage)?;
