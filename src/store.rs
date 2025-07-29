@@ -6,7 +6,7 @@ use bitcoin::Txid;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use serde::{Deserialize, Serialize};
-use std::rc::Rc;
+use std::sync::Arc;
 use storage_backend::storage::{KeyValueStore, Storage};
 
 pub struct MonitorStore {
@@ -58,7 +58,7 @@ pub trait MonitorStoreApi {
 }
 
 impl MonitorStore {
-    pub fn new(store: Rc<Storage>) -> Result<Self, MonitorStoreError> {
+    pub fn new(store: Arc<Storage>) -> Result<Self, MonitorStoreError> {
         Ok(Self { store })
     }
 

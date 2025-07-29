@@ -10,7 +10,7 @@ use bitvmx_transaction_monitor::{
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use mockall::predicate::*;
-use std::{rc::Rc, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
@@ -20,7 +20,7 @@ fn no_monitors() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let best_block_100 = FullBlock {
@@ -56,7 +56,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let block_height_200 = 200;
@@ -167,7 +167,7 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let tx = Transaction {
@@ -244,7 +244,7 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let tx = Transaction {
@@ -293,7 +293,7 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     mock_indexer.expect_get_best_block().returning(move || {
@@ -336,7 +336,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     let mut mock_indexer = MockIndexerApi::new();
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     // Simulate the monitor's current height is 199, but the best block is 200

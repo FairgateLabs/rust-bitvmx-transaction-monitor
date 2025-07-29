@@ -7,7 +7,7 @@ use bitvmx_transaction_monitor::{
     monitor::{Monitor, MonitorApi},
     types::{MonitorNews, TypesToMonitor},
 };
-use std::rc::Rc;
+use std::sync::Arc;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::info;
 mod utils;
@@ -29,7 +29,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         encrypt: None,
     };
 
-    let storage = Rc::new(Storage::new(&storage_config)?);
+    let storage = Arc::new(Storage::new(&storage_config)?);
 
     let bitcoind = Bitcoind::new(
         "bitcoin-regtest",

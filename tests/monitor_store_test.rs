@@ -3,7 +3,7 @@ use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
     types::TypesToMonitor,
 };
-use std::{rc::Rc, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
@@ -17,7 +17,7 @@ mod utils;
 fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     // Verify initial state - no monitors
@@ -91,7 +91,7 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
 fn test_monitor_store_cancel_monitor() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&config)?);
+    let storage = Arc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
     let tx_id = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
