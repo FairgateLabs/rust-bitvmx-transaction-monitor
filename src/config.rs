@@ -8,7 +8,38 @@ use storage_backend::storage_config::StorageConfig;
 pub struct MonitorConfig {
     pub storage: StorageConfig,
     pub bitcoin: RpcConfig,
-    pub settings: Option<MonitorSettings>,
+    pub settings: Option<MonitorSettingsConfig>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct MonitorSettingsConfig {
+    pub confirmation_threshold: Option<u32>,
+    pub max_monitoring_confirmations: Option<u32>,
+    pub indexer_settings: Option<IndexerSettings>,
+}
+
+impl Default for MonitorSettingsConfig {
+    fn default() -> Self {
+        Self {
+            confirmation_threshold: Some(DEFAULT_CONFIRMATION_THRESHOLD),
+            max_monitoring_confirmations: Some(DEFAULT_MAX_MONITORING_CONFIRMATIONS),
+            indexer_settings: Some(IndexerSettings::default()),
+        }
+    }
+}
+
+impl From<MonitorSettingsConfig> for MonitorSettings {
+    fn from(monitor_settings: MonitorSettingsConfig) -> Self {
+        MonitorSettings {
+            confirmation_threshold: monitor_settings
+                .confirmation_threshold
+                .unwrap_or(DEFAULT_CONFIRMATION_THRESHOLD),
+            max_monitoring_confirmations: monitor_settings
+                .max_monitoring_confirmations
+                .unwrap_or(DEFAULT_MAX_MONITORING_CONFIRMATIONS),
+            indexer_settings: monitor_settings.indexer_settings,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -16,28 +47,4 @@ pub struct MonitorSettings {
     pub confirmation_threshold: u32,
     pub max_monitoring_confirmations: u32,
     pub indexer_settings: Option<IndexerSettings>,
-}
-
-impl MonitorSettings {
-    pub fn new(
-        confirmation_threshold: u32,
-        max_monitoring_confirmations: u32,
-        indexer_settings: Option<IndexerSettings>,
-    ) -> Self {
-        Self {
-            confirmation_threshold,
-            max_monitoring_confirmations,
-            indexer_settings,
-        }
-    }
-}
-
-impl Default for MonitorSettings {
-    fn default() -> Self {
-        MonitorSettings {
-            confirmation_threshold: DEFAULT_CONFIRMATION_THRESHOLD,
-            max_monitoring_confirmations: DEFAULT_MAX_MONITORING_CONFIRMATIONS,
-            indexer_settings: Some(IndexerSettings::default()),
-        }
-    }
 }
