@@ -22,7 +22,9 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    let config = settings::load::<MonitorConfig>()?;
+    let config = settings::load_config_file::<MonitorConfig>(Some(
+        "config/monitor_config.yaml".to_string(),
+    ))?;
 
     let storage_config = StorageConfig {
         path: "test_outputs".to_string(),

@@ -1,4 +1,4 @@
-use crate::config::MonitorSettings;
+use crate::config::{MonitorSettings, MonitorSettingsConfig};
 use crate::errors::MonitorError;
 use crate::helper::{is_a_pegin_tx, is_spending_output};
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
@@ -33,9 +33,9 @@ impl Monitor<IndexerType, MonitorStore> {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
-        settings: Option<MonitorSettings>,
+        settings: Option<MonitorSettingsConfig>,
     ) -> Result<Self, MonitorError> {
-        let settings = settings.unwrap_or_default();
+        let settings = MonitorSettings::from(settings.unwrap_or_default());
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;

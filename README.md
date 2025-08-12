@@ -23,7 +23,7 @@ The monitor is built on three primary components:
 
 ## Configuration
 
-Configuration is managed through a YAML file. An example configuration file, `development.yaml`, is located in the `config/` directory.
+Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory.
 
 ## Methods
 
