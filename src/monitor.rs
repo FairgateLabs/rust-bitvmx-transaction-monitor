@@ -243,7 +243,14 @@ where
 
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
-        let current_height = self.get_monitor_height()?;
+
+        // Should exist the block in the indexer
+        let current_block_height = self.get_monitor_height()?;
+        let current_block_hash = self
+            .indexer
+            .get_block_by_height(current_block_height)?
+            .unwrap()
+            .hash;
 
         let txs_types = self.store.get_monitors()?;
 
@@ -259,18 +266,18 @@ where
                                 tx_id, tx.block_info.height
                             );
 
-                            self.store.update_news(MonitoredTypes::Transaction(
-                                tx_id,
-                                extra_data.clone(),
-                            ))?;
+                            self.store.update_news(
+                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                                current_block_hash,
+                            )?;
                         }
 
                         // Transaction exists in the blockchain.
                         if tx.confirmations <= self.settings.confirmation_threshold {
-                            self.store.update_news(MonitoredTypes::Transaction(
-                                tx_id,
-                                extra_data.clone(),
-                            ))?;
+                            self.store.update_news(
+                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                                current_block_hash,
+                            )?;
 
                             info!(
                                 "News for Transaction({}) | Height({}) | Confirmations({})",
@@ -296,8 +303,10 @@ where
                     let txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
 
                     for tx_id in txs_ids {
-                        self.store
-                            .update_news(MonitoredTypes::RskPeginTransaction(tx_id))?;
+                        self.store.update_news(
+                            MonitoredTypes::RskPeginTransaction(tx_id),
+                            current_block_hash,
+                        )?;
 
                         if let Some(tx) = self.indexer.get_tx(&tx_id)? {
                             info!(
@@ -333,6 +342,7 @@ where
                                             tx.compute_txid(),
                                             extra_data.clone(),
                                         ),
+                                        current_block_hash,
                                     )?;
 
                                     info!(
@@ -367,9 +377,8 @@ where
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    if current_height != indexer_best_block_height {
-                        self.store.update_news(MonitoredTypes::NewBlock)?;
-                    }
+                    self.store
+                        .update_news(MonitoredTypes::NewBlock, current_block_hash)?;
                 }
             }
         }
