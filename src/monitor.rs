@@ -279,18 +279,7 @@ where
                             )?;
                         }
 
-                        // Transaction exists in the blockchain.
-                        if tx.confirmations <= self.settings.confirmation_threshold {
-                            self.store.update_news(
-                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
-                                current_block_hash,
-                            )?;
-
-                            info!(
-                                "News for Transaction({}) | Height({}) | Confirmations({})",
-                                tx_id, indexer_best_block_height, tx.confirmations,
-                            );
-                        } else if tx.confirmations >= self.settings.max_monitoring_confirmations {
+                        if tx.confirmations >= self.settings.max_monitoring_confirmations {
                             // Deactivate monitor after 100 confirmations
                             self.store.deactivate_monitor(TypesToMonitor::Transactions(
                                 vec![tx_id],
@@ -302,6 +291,16 @@ where
                                 tx_id,
                                 indexer_best_block_height,
                                 self.settings.max_monitoring_confirmations,
+                            );
+                        } else {
+                            self.store.update_news(
+                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                                current_block_hash,
+                            )?;
+
+                            info!(
+                                "News for Transaction({}) | Height({}) | Confirmations({})",
+                                tx_id, indexer_best_block_height, tx.confirmations,
                             );
                         }
                     }
@@ -341,7 +340,24 @@ where
                                 let confirmations =
                                     indexer_best_block_height - tx_info.block_info.height + 1;
 
-                                if confirmations <= self.settings.confirmation_threshold {
+                                if confirmations >= self.settings.max_monitoring_confirmations {
+                                    // Deactivate monitor after 100 confirmations
+                                    self.store.deactivate_monitor(
+                                        TypesToMonitor::SpendingUTXOTransaction(
+                                            target_tx_id,
+                                            target_utxo_index,
+                                            extra_data.clone(),
+                                        ),
+                                    )?;
+
+                                    info!(
+                                        "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                        target_tx_id,
+                                        target_utxo_index,
+                                        indexer_best_block_height,
+                                        self.settings.max_monitoring_confirmations,
+                                    );
+                                } else {
                                     self.store.update_news(
                                         MonitoredTypes::SpendingUTXOTransaction(
                                             target_tx_id,
@@ -358,25 +374,6 @@ where
                                         target_utxo_index,
                                         indexer_best_block_height,
                                         confirmations,
-                                    );
-                                } else if confirmations
-                                    >= self.settings.max_monitoring_confirmations
-                                {
-                                    // Deactivate monitor after 100 confirmations
-                                    self.store.deactivate_monitor(
-                                        TypesToMonitor::SpendingUTXOTransaction(
-                                            target_tx_id,
-                                            target_utxo_index,
-                                            extra_data.clone(),
-                                        ),
-                                    )?;
-
-                                    info!(
-                                        "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                        target_tx_id,
-                                        target_utxo_index,
-                                        indexer_best_block_height,
-                                        self.settings.max_monitoring_confirmations,
                                     );
                                 }
                             }
