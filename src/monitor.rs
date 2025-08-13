@@ -81,6 +81,13 @@ pub trait MonitorApi {
     /// - `Err`: If there was an error retrieving the height
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError>;
 
+    /// Gets the current block of the monitor.
+    ///
+    /// # Returns
+    /// - `Ok(FullBlock)`: The current block of the monitor
+    /// - `Err`: If there was an error retrieving the block
+    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError>;
+
     /// Gets the configured confirmation threshold for transactions.
     ///
     /// The confirmation threshold determines when a transaction is considered final.
@@ -201,6 +208,10 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     fn get_confirmation_threshold(&self) -> u32 {
         self.settings.confirmation_threshold
     }
+
+    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
+        self.get_current_block()
+    }
 }
 
 impl<I, B> Monitor<I, B>
@@ -243,7 +254,10 @@ where
 
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
-        let current_height = self.get_monitor_height()?;
+
+        // Should exist the block in the indexer
+        let current_block = self.get_current_block()?;
+        let current_block_hash = current_block.unwrap().hash;
 
         let txs_types = self.store.get_monitors()?;
 
@@ -259,24 +273,13 @@ where
                                 tx_id, tx.block_info.height
                             );
 
-                            self.store.update_news(MonitoredTypes::Transaction(
-                                tx_id,
-                                extra_data.clone(),
-                            ))?;
+                            self.store.update_news(
+                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                                current_block_hash,
+                            )?;
                         }
 
-                        // Transaction exists in the blockchain.
-                        if tx.confirmations <= self.settings.confirmation_threshold {
-                            self.store.update_news(MonitoredTypes::Transaction(
-                                tx_id,
-                                extra_data.clone(),
-                            ))?;
-
-                            info!(
-                                "News for Transaction({}) | Height({}) | Confirmations({})",
-                                tx_id, indexer_best_block_height, tx.confirmations,
-                            );
-                        } else if tx.confirmations >= self.settings.max_monitoring_confirmations {
+                        if tx.confirmations >= self.settings.max_monitoring_confirmations {
                             // Deactivate monitor after 100 confirmations
                             self.store.deactivate_monitor(TypesToMonitor::Transactions(
                                 vec![tx_id],
@@ -289,6 +292,16 @@ where
                                 indexer_best_block_height,
                                 self.settings.max_monitoring_confirmations,
                             );
+                        } else {
+                            self.store.update_news(
+                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                                current_block_hash,
+                            )?;
+
+                            info!(
+                                "News for Transaction({}) | Height({}) | Confirmations({})",
+                                tx_id, indexer_best_block_height, tx.confirmations,
+                            );
                         }
                     }
                 }
@@ -296,8 +309,10 @@ where
                     let txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
 
                     for tx_id in txs_ids {
-                        self.store
-                            .update_news(MonitoredTypes::RskPeginTransaction(tx_id))?;
+                        self.store.update_news(
+                            MonitoredTypes::RskPeginTransaction(tx_id),
+                            current_block_hash,
+                        )?;
 
                         if let Some(tx) = self.indexer.get_tx(&tx_id)? {
                             info!(
@@ -325,26 +340,7 @@ where
                                 let confirmations =
                                     indexer_best_block_height - tx_info.block_info.height + 1;
 
-                                if confirmations <= self.settings.confirmation_threshold {
-                                    self.store.update_news(
-                                        MonitoredTypes::SpendingUTXOTransaction(
-                                            target_tx_id,
-                                            target_utxo_index,
-                                            tx.compute_txid(),
-                                            extra_data.clone(),
-                                        ),
-                                    )?;
-
-                                    info!(
-                                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                        target_tx_id,
-                                        target_utxo_index,
-                                        indexer_best_block_height,
-                                        confirmations,
-                                    );
-                                } else if confirmations
-                                    >= self.settings.max_monitoring_confirmations
-                                {
+                                if confirmations >= self.settings.max_monitoring_confirmations {
                                     // Deactivate monitor after 100 confirmations
                                     self.store.deactivate_monitor(
                                         TypesToMonitor::SpendingUTXOTransaction(
@@ -361,15 +357,32 @@ where
                                         indexer_best_block_height,
                                         self.settings.max_monitoring_confirmations,
                                     );
+                                } else {
+                                    self.store.update_news(
+                                        MonitoredTypes::SpendingUTXOTransaction(
+                                            target_tx_id,
+                                            target_utxo_index,
+                                            tx.compute_txid(),
+                                            extra_data.clone(),
+                                        ),
+                                        current_block_hash,
+                                    )?;
+
+                                    info!(
+                                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                        target_tx_id,
+                                        target_utxo_index,
+                                        indexer_best_block_height,
+                                        confirmations,
+                                    );
                                 }
                             }
                         }
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    if current_height != indexer_best_block_height {
-                        self.store.update_news(MonitoredTypes::NewBlock)?;
-                    }
+                    self.store
+                        .update_news(MonitoredTypes::NewBlock, current_block_hash)?;
                 }
             }
         }
@@ -457,5 +470,12 @@ where
         );
 
         Ok(return_tx_status)
+    }
+
+    pub fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
+        let block_height = self.get_monitor_height()?;
+        let block = self.indexer.get_block_by_height(block_height)?;
+
+        Ok(block)
     }
 }

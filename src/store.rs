@@ -2,7 +2,7 @@ use crate::{
     errors::MonitorStoreError,
     types::{AckMonitorNews, TypesToMonitor},
 };
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use serde::{Deserialize, Serialize};
@@ -50,7 +50,11 @@ pub trait MonitorStoreApi {
     fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
 
     fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError>;
-    fn update_news(&self, data: MonitoredTypes) -> Result<(), MonitorStoreError>;
+    fn update_news(
+        &self,
+        data: MonitoredTypes,
+        current_block_hash: BlockHash,
+    ) -> Result<(), MonitorStoreError>;
     fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError>;
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
@@ -117,62 +121,88 @@ impl MonitorStoreApi for MonitorStore {
         let key = self.get_key(MonitorKey::TransactionsNews);
         let txs_news = self
             .store
-            .get::<_, Vec<(Txid, String)>>(&key)?
+            .get::<_, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
             .unwrap_or_default();
 
-        for (tx_id, extra_data) in txs_news {
-            news.push(MonitoredTypes::Transaction(tx_id, extra_data));
+        for (tx_id, extra_data, (_, ack)) in txs_news {
+            if !ack {
+                news.push(MonitoredTypes::Transaction(tx_id, extra_data));
+            }
         }
 
         let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
         let rsk_news = self
             .store
-            .get::<_, Vec<Txid>>(&rsk_news_key)?
+            .get::<_, Vec<(Txid, (BlockHash, bool))>>(&rsk_news_key)?
             .unwrap_or_default();
 
-        for tx_id in rsk_news {
-            news.push(MonitoredTypes::RskPeginTransaction(tx_id));
+        for (tx_id, (_, ack)) in rsk_news {
+            if !ack {
+                news.push(MonitoredTypes::RskPeginTransaction(tx_id));
+            }
         }
 
         let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
         let spending_news = self
             .store
-            .get::<_, Vec<(Txid, u32, Txid, String)>>(&spending_news_key)?
+            .get::<_, Vec<(Txid, u32, Txid, String, (BlockHash, bool))>>(&spending_news_key)?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index, spender_tx_id, extra_data) in spending_news {
-            news.push(MonitoredTypes::SpendingUTXOTransaction(
-                tx_id,
-                utxo_index,
-                spender_tx_id,
-                extra_data,
-            ));
+        for (tx_id, utxo_index, spender_tx_id, extra_data, (_, ack)) in spending_news {
+            if !ack {
+                news.push(MonitoredTypes::SpendingUTXOTransaction(
+                    tx_id,
+                    utxo_index,
+                    spender_tx_id,
+                    extra_data,
+                ));
+            }
         }
 
         let block_news_key = self.get_key(MonitorKey::NewBlockNews);
-        let block_news = self
-            .store
-            .get::<_, bool>(&block_news_key)?
-            .unwrap_or_default();
+        let block_news = self.store.get::<_, (BlockHash, bool)>(&block_news_key)?;
 
-        if block_news {
-            news.push(MonitoredTypes::NewBlock);
+        if let Some((_, ack)) = block_news {
+            if !ack {
+                news.push(MonitoredTypes::NewBlock);
+            }
         }
 
         Ok(news)
     }
 
-    fn update_news(&self, data: MonitoredTypes) -> Result<(), MonitorStoreError> {
+    fn update_news(
+        &self,
+        data: MonitoredTypes,
+        current_block_hash: BlockHash,
+    ) -> Result<(), MonitorStoreError> {
+        // Notifiaction will be updated if the block_hash is different
+        // If the notification is already in the store, it will be updated with the new block_hash and ack in false.
+
         match data {
             MonitoredTypes::Transaction(tx_id, extra_data) => {
                 let key = self.get_key(MonitorKey::TransactionsNews);
                 let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Txid, String)>>(&key)?
+                    .get::<_, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
 
-                if !txs_news.contains(&(tx_id, extra_data.clone())) {
-                    txs_news.push((tx_id, extra_data.clone()));
+                let is_new_news = txs_news.iter().position(|(id, _, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    // Insert news with current block hash and ack in false
+                    txs_news.push((tx_id, extra_data.clone(), (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, (existing_block_hash, _)) = &txs_news[pos];
+
+                    if existing_block_hash == &current_block_hash {
+                        // We already have this news, do not update
+                        return Ok(());
+                    } else {
+                        // Replace the notification if the block hash is different
+                        txs_news[pos] = (tx_id, extra_data.clone(), (current_block_hash, false));
+                    }
                 }
 
                 self.store.set(&key, &txs_news, None)?;
@@ -181,11 +211,24 @@ impl MonitorStoreApi for MonitorStore {
                 let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
                 let mut rsk_news = self
                     .store
-                    .get::<_, Vec<Txid>>(&rsk_news_key)?
+                    .get::<_, Vec<(Txid, (BlockHash, bool))>>(&rsk_news_key)?
                     .unwrap_or_default();
 
-                if !rsk_news.contains(&tx_id) {
-                    rsk_news.push(tx_id);
+                let is_new_news = rsk_news.iter().position(|(id, _)| id == &tx_id);
+
+                if is_new_news.is_none() {
+                    rsk_news.push((tx_id, (current_block_hash, false)));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, (existing_block_hash, _)) = &rsk_news[pos];
+
+                    if existing_block_hash == &current_block_hash {
+                        // We already have this news, do not update
+                        return Ok(());
+                    } else {
+                        // Replace the notification if the block hash is different
+                        rsk_news[pos] = (tx_id, (current_block_hash, false));
+                    }
                 }
 
                 self.store.set(&rsk_news_key, &rsk_news, None)?;
@@ -199,18 +242,58 @@ impl MonitorStoreApi for MonitorStore {
                 let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, Txid, String)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, Txid, String, (BlockHash, bool))>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                if !utxo_news.contains(&(tx_id, utxo_index, spender_tx_id, extra_data.clone())) {
-                    utxo_news.push((tx_id, utxo_index, spender_tx_id, extra_data));
+                let is_new_news = utxo_news.iter().position(|(id, utxo_i, spender_id, _, _)| {
+                    id == &tx_id && *utxo_i == utxo_index && spender_id == &spender_tx_id
+                });
+
+                if is_new_news.is_none() {
+                    utxo_news.push((
+                        tx_id,
+                        utxo_index,
+                        spender_tx_id,
+                        extra_data.clone(),
+                        (current_block_hash, false),
+                    ));
+                } else {
+                    let pos = is_new_news.unwrap();
+                    let (_, _, _, _, (existing_block_hash, _)) = &utxo_news[pos];
+
+                    if existing_block_hash == &current_block_hash {
+                        // We already have this news, do not update
+                        return Ok(());
+                    } else {
+                        // Replace the notification if the block hash is different
+                        utxo_news[pos] = (
+                            tx_id,
+                            utxo_index,
+                            spender_tx_id,
+                            extra_data.clone(),
+                            (current_block_hash, false),
+                        );
+                    }
                 }
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
             MonitoredTypes::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
-                self.store.set(&key, true, None)?;
+
+                let data = self.store.get::<_, (BlockHash, bool)>(&key)?;
+
+                if let Some((last_block_hash, _)) = data {
+                    if last_block_hash == current_block_hash {
+                        // We already have this news, do not update
+                        return Ok(());
+                    } else {
+                        // Replace the notification if the block hash is different
+                        self.store.set(&key, (current_block_hash, false), None)?;
+                    }
+                }
+
+                self.store.set(&key, (current_block_hash, false), None)?;
             }
         }
 
@@ -223,35 +306,51 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(MonitorKey::TransactionsNews);
                 let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Txid, String)>>(&key)?
+                    .get::<_, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
 
-                txs_news.retain(|(tx, _)| tx != &tx_id);
-                self.store.set(&key, &txs_news, None)?;
+                if let Some((_, _, (_, ack))) =
+                    txs_news.iter_mut().find(|(txid, _, _)| txid == &tx_id)
+                {
+                    *ack = true;
+                    self.store.set(&key, &txs_news, None)?;
+                }
             }
             AckMonitorNews::RskPeginTransaction(tx_id) => {
-                let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut rsk_news = self
+                let key = self.get_key(MonitorKey::RskPeginTransactionsNews);
+                let mut txs_news = self
                     .store
-                    .get::<_, Vec<Txid>>(&rsk_news_key)?
+                    .get::<_, Vec<(Txid, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
 
-                rsk_news.retain(|tx| tx != &tx_id);
-                self.store.set(&rsk_news_key, &rsk_news, None)?;
+                if let Some((_, (_, ack))) = txs_news.iter_mut().find(|(txid, _)| txid == &tx_id) {
+                    *ack = true;
+                    self.store.set(&key, &txs_news, None)?;
+                }
             }
             AckMonitorNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
-                let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
-                let mut utxo_news = self
+                let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
+                let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, Txid, String)>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, Txid, String, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
 
-                utxo_news.retain(|(tx, utxo_i, _, _)| *tx != tx_id || *utxo_i != utxo_index);
-                self.store.set(&utxo_news_key, &utxo_news, None)?;
+                if let Some((_, _, _, _, (_, ack))) = txs_news
+                    .iter_mut()
+                    .find(|(tx, utxo_i, _, _, _)| *tx == tx_id && *utxo_i == utxo_index)
+                {
+                    *ack = true;
+                    self.store.set(&key, &txs_news, None)?;
+                }
             }
             AckMonitorNews::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
-                self.store.set(&key, false, None)?;
+                let mut new_block_news = self.store.get::<_, (BlockHash, bool)>(&key)?;
+
+                if let Some((block_hash, _)) = new_block_news.as_mut() {
+                    new_block_news = Some((*block_hash, true));
+                    self.store.set(&key, &new_block_news, None)?;
+                }
             }
         }
 

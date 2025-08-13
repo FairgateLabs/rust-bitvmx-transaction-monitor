@@ -37,6 +37,12 @@ fn no_monitors() -> Result<(), anyhow::Error> {
         orphan: false,
     };
 
+    let best_block_100_clone = best_block_100.clone();
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(best_block_100_clone.clone())));
+
     mock_indexer.expect_tick().returning(move || Ok(()));
 
     mock_indexer
@@ -77,6 +83,12 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         txs: vec![],
         orphan: false,
     };
+
+    let block_200_clone = block_200.clone();
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(block_200_clone.clone())));
 
     let tx_to_seen = Transaction {
         version: bitcoin::transaction::Version::TWO,
@@ -211,21 +223,31 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    mock_indexer.expect_get_best_block().returning(move || {
-        Ok(Some(FullBlock {
-            height: 200,
-            hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            prev_hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000001",
-            )
-            .unwrap(),
-            txs: vec![],
-            orphan: false,
-        }))
-    });
+    let full_block = FullBlock {
+        height: 200,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+    };
+
+    let full_block_clone = full_block.clone();
+
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(full_block_clone.clone())));
+
+    let full_block_clone = full_block.clone();
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(full_block_clone.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -270,21 +292,29 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
     store.add_monitor(TypesToMonitor::Transactions(vec![tx_id], String::new()))?;
     store.deactivate_monitor(TypesToMonitor::Transactions(vec![tx_id], String::new()))?;
 
-    mock_indexer.expect_get_best_block().returning(move || {
-        Ok(Some(FullBlock {
-            height: 200,
-            hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            prev_hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000001",
-            )
-            .unwrap(),
-            txs: vec![],
-            orphan: false,
-        }))
-    });
+    let full_block = FullBlock {
+        height: 200,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+    };
+
+    let full_block_clone = full_block.clone();
+
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(full_block.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(full_block_clone.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -312,21 +342,31 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
-    mock_indexer.expect_get_best_block().returning(move || {
-        Ok(Some(FullBlock {
-            height: 200,
-            hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            prev_hash: BlockHash::from_str(
-                "0000000000000000000000000000000000000000000000000000000000000001",
-            )
-            .unwrap(),
-            txs: vec![],
-            orphan: false,
-        }))
-    });
+    let full_block = FullBlock {
+        height: 200,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+    };
+
+    let full_block_clone = full_block.clone();
+
+    mock_indexer
+        .expect_get_best_block()
+        .returning(move || Ok(Some(full_block.clone())));
+
+    let full_block_clone = full_block_clone.clone();
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(full_block_clone.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -381,6 +421,11 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     };
 
     let full_block_200 = full_block.clone();
+    let full_block_200_clone = full_block.clone();
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(full_block_200_clone.clone())));
 
     mock_indexer
         .expect_get_best_block()
@@ -419,13 +464,9 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
 
     monitor.tick()?;
 
-    // After tick, NewBlock news should be present
+    // After tick, NewBlock news should not be present because it was already acknowledged
     let news = monitor.store.get_news()?;
-    assert_eq!(news.len(), 1);
-    assert!(matches!(
-        news[0],
-        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock
-    ));
+    assert_eq!(news.len(), 0);
 
     clear_output();
 
