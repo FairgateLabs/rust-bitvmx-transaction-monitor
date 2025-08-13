@@ -81,6 +81,13 @@ pub trait MonitorApi {
     /// - `Err`: If there was an error retrieving the height
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError>;
 
+    /// Gets the current block of the monitor.
+    ///
+    /// # Returns
+    /// - `Ok(FullBlock)`: The current block of the monitor
+    /// - `Err`: If there was an error retrieving the block
+    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError>;
+
     /// Gets the configured confirmation threshold for transactions.
     ///
     /// The confirmation threshold determines when a transaction is considered final.
@@ -201,6 +208,10 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     fn get_confirmation_threshold(&self) -> u32 {
         self.settings.confirmation_threshold
     }
+
+    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
+        self.get_current_block()
+    }
 }
 
 impl<I, B> Monitor<I, B>
@@ -245,12 +256,8 @@ where
         let indexer_best_block_height = indexer_best_block.height;
 
         // Should exist the block in the indexer
-        let current_block_height = self.get_monitor_height()?;
-        let current_block_hash = self
-            .indexer
-            .get_block_by_height(current_block_height)?
-            .unwrap()
-            .hash;
+        let current_block = self.get_current_block()?;
+        let current_block_hash = current_block.unwrap().hash;
 
         let txs_types = self.store.get_monitors()?;
 
@@ -466,5 +473,12 @@ where
         );
 
         Ok(return_tx_status)
+    }
+
+    pub fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
+        let block_height = self.get_monitor_height()?;
+        let block = self.indexer.get_block_by_height(block_height)?;
+
+        Ok(block)
     }
 }
