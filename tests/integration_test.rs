@@ -42,13 +42,12 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
     bitcoind.start()?;
 
     let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
-
-    let monitor = Monitor::new_with_paths(&config.bitcoin, storage, config.settings)?;
-
     let wallet = bitcoin_client.init_wallet("test_wallet")?;
 
     info!("Mining 100 blocks to wallet");
     bitcoin_client.mine_blocks_to_address(100, &wallet)?;
+
+    let monitor = Monitor::new_with_paths(&config.bitcoin, storage, config.settings)?;
 
     let block_info = bitcoin_client.get_block_by_height(&90)?.unwrap();
 

@@ -9,7 +9,7 @@ settings:
   confirmation_threshold: 6
   max_monitoring_confirmations: 100
   indexer_settings:
-    checkpoint_height: 0
+    checkpoint_height: 10
 
 storage:
   path: data

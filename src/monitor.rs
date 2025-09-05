@@ -254,10 +254,7 @@ where
 
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
-
-        // Should exist the block in the indexer
-        let current_block = self.get_current_block()?;
-        let current_block_hash = current_block.unwrap().hash;
+        let current_block_hash = indexer_best_block.hash;
 
         let txs_types = self.store.get_monitors()?;
 
