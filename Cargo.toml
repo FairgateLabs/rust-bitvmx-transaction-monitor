@@ -10,10 +10,10 @@ license = "MIT"
 categories = ["cryptocurrency", "monitoring"]
 
 [dependencies]
-bitcoin-indexer = { path = "../rust-bitcoin-indexer" }
-bitvmx-settings = { path = "../rust-bitvmx-settings" }
-rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
-bitvmx-bitcoin-rpc = { path = "../rust-bitvmx-bitcoin-rpc" }
+bitcoin-indexer = { git = "https://github.com/FairgateLabs/rust-bitcoin-indexer.git", branch = "v.0.0.1" }
+bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.1" }
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.1" }
+bitvmx-bitcoin-rpc = { git = "https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git", branch = "v.0.0.1" }
 bitcoin = "0.32.2"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
@@ -26,5 +26,5 @@ uuid = { version = "1.11.0", features = ["v4", "serde"] }
 hex = "0.4"
 
 [dev-dependencies]
-bitcoind = { path = "../rust-bitcoind" }
+bitcoind = { git = "https://github.com/FairgateLabs/rust-bitcoind.git", branch = "v.0.0.1" }
 bitcoincore-rpc = "0.19"
