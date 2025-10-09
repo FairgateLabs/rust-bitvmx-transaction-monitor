@@ -165,6 +165,8 @@ pub trait MonitorApi {
     /// - `Err(MonitorError::TransactionNotFound)`: If the transaction is not found
     /// - `Err`: If there was an error retrieving the status
     fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
+
+    fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError>;
 }
 
 impl MonitorApi for Monitor<IndexerType, MonitorStore> {
@@ -211,6 +213,10 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
 
     fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
         self.get_current_block()
+    }
+
+    fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
+        self.get_estimated_fee_rate()
     }
 }
 
@@ -474,5 +480,11 @@ where
         let block = self.indexer.get_block_by_height(block_height)?;
 
         Ok(block)
+    }
+
+    pub fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
+        self.indexer
+            .get_estimated_fee_rate()
+            .map_err(MonitorError::IndexerError)
     }
 }
