@@ -35,7 +35,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
 
     let bitcoind = Bitcoind::new(
         "bitcoin-regtest",
-        "ruimarinho/bitcoin-core",
+        "bitcoin/bitcoin:29.1",
         config.bitcoin.clone(),
     );
 
