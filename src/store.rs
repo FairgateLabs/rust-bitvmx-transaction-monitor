@@ -522,7 +522,7 @@ impl MonitorStoreApi for MonitorStore {
                     .get::<_, Vec<(Txid, String, bool)>>(&key)?
                     .unwrap_or_default();
 
-                txs.retain(|(txid, _, active)| !tx_ids.contains(txid) || !active);
+                txs.retain(|(txid, _, _)| !tx_ids.contains(txid));
                 self.store.set(&key, &txs, None)?;
             }
             TypesToMonitor::RskPeginTransaction => {

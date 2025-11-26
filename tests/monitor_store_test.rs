@@ -128,3 +128,37 @@ fn test_monitor_store_cancel_monitor() -> Result<(), anyhow::Error> {
 
     Ok(())
 }
+
+#[test]
+fn test_monitor_store_cancel_deactivated_transaction_monitor() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx_id_active =
+        Txid::from_str("1000000000000000000000000000000000000000000000000000000000000000")?;
+    let tx_id_inactive =
+        Txid::from_str("2000000000000000000000000000000000000000000000000000000000000000")?;
+
+    let active_monitor = TypesToMonitor::Transactions(vec![tx_id_active], String::new());
+    store.add_monitor(active_monitor.clone())?;
+
+    let inactive_monitor = TypesToMonitor::Transactions(vec![tx_id_inactive], String::new());
+    store.add_monitor(inactive_monitor.clone())?;
+
+    store.cancel_monitor(inactive_monitor.clone())?;
+
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(matches!(
+        monitors[0],
+        TypesToMonitorStore::Transaction(tx, _) if tx == tx_id_active
+    ));
+
+    store.cancel_monitor(active_monitor.clone())?;
+    let monitors = store.get_monitors()?;
+    assert!(monitors.is_empty());
+
+    Ok(())
+}

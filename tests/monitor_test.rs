@@ -35,6 +35,7 @@ fn no_monitors() -> Result<(), anyhow::Error> {
         .unwrap(),
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let best_block_100_clone = best_block_100.clone();
@@ -82,6 +83,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         .unwrap(),
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let block_200_clone = block_200.clone();
@@ -209,6 +211,7 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         )?,
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let tx_info = TransactionInfo {
@@ -235,6 +238,7 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         .unwrap(),
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let full_block_clone = full_block.clone();
@@ -304,6 +308,7 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
         .unwrap(),
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let full_block_clone = full_block.clone();
@@ -354,6 +359,7 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
         .unwrap(),
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let full_block_clone = full_block.clone();
@@ -418,6 +424,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
         .unwrap(),
         txs: vec![],
         orphan: false,
+        estimated_fee_rate: 0,
     };
 
     let full_block_200 = full_block.clone();

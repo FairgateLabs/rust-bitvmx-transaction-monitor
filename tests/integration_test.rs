@@ -26,10 +26,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
         "config/monitor_config.yaml".to_string(),
     ))?;
 
-    let storage_config = StorageConfig {
-        path: "test_outputs".to_string(),
-        encrypt: None,
-    };
+    let storage_config = StorageConfig::new("test_outputs".to_string(), None);
 
     let storage = Rc::new(Storage::new(&storage_config)?);
 
