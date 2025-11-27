@@ -13,6 +13,10 @@ It is not production-ready, has not been audited, and future updates may introdu
 - 🔄 **Automatic Blockchain Synchronization**: Seamlessly syncs with the Bitcoin blockchain at regular intervals.
 - 💾 **State Persistence**: Maintains monitoring state across system restarts for uninterrupted tracking.
 
+### ⚠️ SegWit Requirement For Reliable Tracking
+
+The transaction monitor relies on transaction IDs (txids) to follow confirmations. Legacy (non-SegWit) transactions have malleable txids, so a re-mined transaction could receive a different txid and the monitor would lose track of it—especially because the monitor reports transactions once they reach at least one confirmation and does not enforce SegWit-only inputs. BitVMX currently uses Pay-to-Taproot (P2TR), which is SegWit-based and therefore not susceptible to third-party malleability. If you intend to track legacy transactions, you must either ensure they are SegWit variants (P2WPKH, P2WSH, P2TR, etc.) or reject non-SegWit monitors to avoid missing confirmations.
+
 ## System Architecture
 
 The monitor is built on three primary components:
