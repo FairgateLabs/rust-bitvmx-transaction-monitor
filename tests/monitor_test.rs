@@ -429,6 +429,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
 
     let full_block_200 = full_block.clone();
     let full_block_200_clone = full_block.clone();
+    let full_block_200_clone_2 = full_block.clone();
 
     mock_indexer
         .expect_get_block_by_height()
@@ -461,7 +462,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert!(matches!(
         news[0],
-        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock
+        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock(hash) if hash == full_block_200_clone_2.hash
     ));
 
     // Acknowledge the news and verify it's gone

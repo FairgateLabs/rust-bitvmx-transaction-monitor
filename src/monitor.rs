@@ -384,8 +384,10 @@ where
                     }
                 }
                 TypesToMonitorStore::NewBlock => {
-                    self.store
-                        .update_news(MonitoredTypes::NewBlock, current_block_hash)?;
+                    self.store.update_news(
+                        MonitoredTypes::NewBlock(current_block_hash),
+                        current_block_hash,
+                    )?;
                 }
             }
         }
@@ -434,8 +436,8 @@ where
                         tx_id, utxo_index, status, extra_data,
                     ));
                 }
-                MonitoredTypes::NewBlock => {
-                    let block_info = self.indexer.get_best_block()?;
+                MonitoredTypes::NewBlock(hash) => {
+                    let block_info = self.indexer.get_block_by_hash(&hash)?;
                     if let Some(block_info) = block_info {
                         return_news.push(MonitorNews::NewBlock(block_info.height, block_info.hash));
                     }
