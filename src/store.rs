@@ -32,7 +32,7 @@ pub enum MonitoredTypes {
     Transaction(Txid, String),
     RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32, Txid, String),
-    NewBlock,
+    NewBlock(BlockHash),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -162,9 +162,9 @@ impl MonitorStoreApi for MonitorStore {
         let block_news_key = self.get_key(MonitorKey::NewBlockNews);
         let block_news = self.store.get::<_, (BlockHash, bool)>(&block_news_key)?;
 
-        if let Some((_, ack)) = block_news {
+        if let Some((hash, ack)) = block_news {
             if !ack {
-                news.push(MonitoredTypes::NewBlock);
+                news.push(MonitoredTypes::NewBlock(hash));
             }
         }
 
@@ -278,14 +278,14 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
-            MonitoredTypes::NewBlock => {
+            MonitoredTypes::NewBlock(hash) => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
 
                 let data = self.store.get::<_, (BlockHash, bool)>(&key)?;
 
                 if let Some((last_block_hash, _)) = data {
-                    if last_block_hash == current_block_hash {
-                        // We already have this news, do not update
+                    if last_block_hash == hash {
+                        // We already have this new block news, do not update
                         return Ok(());
                     } else {
                         // Replace the notification if the block hash is different
