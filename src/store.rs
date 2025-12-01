@@ -31,6 +31,8 @@ enum BlockchainKey {
 pub enum MonitoredTypes {
     Transaction(Txid, String),
     RskPeginTransaction(Txid),
+
+    // Last item is the spender tx_id.
     SpendingUTXOTransaction(Txid, u32, String, Txid),
     NewBlock(BlockHash),
 }
@@ -150,10 +152,10 @@ impl MonitorStoreApi for MonitorStore {
         let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
         let spending_news = self
             .store
-            .get::<_, Vec<(Txid, u32, Txid, String, (BlockHash, bool))>>(&spending_news_key)?
+            .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&spending_news_key)?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index, spender_tx_id, extra_data, (_, ack)) in spending_news {
+        for (tx_id, utxo_index, extra_data, spender_tx_id, (_, ack)) in spending_news {
             if !ack {
                 news.push(MonitoredTypes::SpendingUTXOTransaction(
                     tx_id,
@@ -247,10 +249,10 @@ impl MonitorStoreApi for MonitorStore {
                 let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut utxo_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, Txid, String, (BlockHash, bool))>>(&utxo_news_key)?
+                    .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                let is_new_news = utxo_news.iter().position(|(id, utxo_i, spender_id, _, _)| {
+                let is_new_news = utxo_news.iter().position(|(id, utxo_i, _, spender_id, _)| {
                     id == &tx_id && *utxo_i == utxo_index && spender_id == &spender_tx_id
                 });
 
@@ -258,8 +260,8 @@ impl MonitorStoreApi for MonitorStore {
                     utxo_news.push((
                         tx_id,
                         utxo_index,
-                        spender_tx_id,
                         extra_data.clone(),
+                        spender_tx_id,
                         (current_block_hash, false),
                     ));
                 } else {
@@ -274,8 +276,8 @@ impl MonitorStoreApi for MonitorStore {
                         utxo_news[pos] = (
                             tx_id,
                             utxo_index,
-                            spender_tx_id,
                             extra_data.clone(),
+                            spender_tx_id,
                             (current_block_hash, false),
                         );
                     }
@@ -337,7 +339,7 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut txs_news = self
                     .store
-                    .get::<_, Vec<(Txid, u32, Txid, String, (BlockHash, bool))>>(&key)?
+                    .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&key)?
                     .unwrap_or_default();
 
                 if let Some((_, _, _, _, (_, ack))) = txs_news
@@ -452,16 +454,16 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactions);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, u32, String, bool)>>(&key)?
+                    .get::<_, Vec<(Txid, u32, String, Option<Txid>, bool)>>(&key)?
                     .unwrap_or_default();
 
                 // Check if the transaction with the same txid, vout, and extra_data already exists
                 let exists = txs
                     .iter()
-                    .any(|(t, v, e, _)| *t == txid && *v == vout && *e == extra_data);
+                    .any(|(t, v, e, _, _)| *t == txid && *v == vout && *e == extra_data);
 
                 if !exists {
-                    txs.push((txid, vout, extra_data.clone(), true));
+                    txs.push((txid, vout, extra_data.clone(), None, true));
                     self.store.set(&key, &txs, None)?;
                 }
             }
@@ -501,11 +503,11 @@ impl MonitorStoreApi for MonitorStore {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactions);
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, u32, String, bool)>>(&key)?
+                    .get::<_, Vec<(Txid, u32, String, Option<Txid>, bool)>>(&key)?
                     .unwrap_or_default();
 
                 // Update active status for matching transactions
-                for (tx_txid, tx_vout, _, active) in txs.iter_mut() {
+                for (tx_txid, tx_vout, _, _, active) in txs.iter_mut() {
                     if *tx_txid == txid && *tx_vout == vout {
                         *active = false;
                     }
