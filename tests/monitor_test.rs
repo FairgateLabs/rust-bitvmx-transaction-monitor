@@ -6,7 +6,7 @@ use bitcoin_indexer::{
 use bitvmx_transaction_monitor::{
     config::{MonitorSettings, MonitorSettingsConfig},
     monitor::Monitor,
-    store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
+    store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore},
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use mockall::predicate::*;
@@ -458,22 +458,22 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     monitor.tick()?;
 
     // After tick, NewBlock news should be present
-    let news = monitor.store.get_news()?;
+    let news = monitor.get_news()?;
     assert_eq!(news.len(), 1);
     assert!(matches!(
         news[0],
-        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock(hash) if hash == full_block_200_clone_2.hash
+        MonitorNews::NewBlock(_, hash) if hash == full_block_200_clone_2.hash
     ));
 
     // Acknowledge the news and verify it's gone
     monitor.ack_news(AckMonitorNews::NewBlock)?;
-    let news = monitor.store.get_news()?;
+    let news = monitor.get_news()?;
     assert_eq!(news.len(), 0);
 
     monitor.tick()?;
 
     // After tick, NewBlock news should not be present because it was already acknowledged
-    let news = monitor.store.get_news()?;
+    let news = monitor.get_news()?;
     assert_eq!(news.len(), 0);
 
     clear_output();
@@ -557,11 +557,6 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
         .expect_get_best_block()
         .returning(move || Ok(Some(best_block_clone_1.clone())));
 
-    let best_block_clone_2 = best_block.clone();
-    mock_indexer
-        .expect_get_block_by_height()
-        .returning(move |_| Ok(Some(best_block_clone_2.clone())));
-
     mock_indexer.expect_tick().returning(move || Ok(()));
 
     // Expect get_tx to be called for the spending transaction
@@ -611,19 +606,17 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
             if t == target_tx_id && u == target_utxo_index
     ));
 
-    // Verify news was created for the orphan transaction
+    // Verify no news was created for the orphan transaction
     let news = monitor.store.get_news()?;
-    assert_eq!(news.len(), 1);
-    assert!(matches!(
-        news[0].clone(),
-        bitvmx_transaction_monitor::store::MonitoredTypes::SpendingUTXOTransaction(t, u, _, stx)
-            if t == target_tx_id && u == target_utxo_index && stx == spending_tx_id
-    ));
+    assert_eq!(news.len(), 0);
 
     clear_output();
 
     Ok(())
 }
+
+// This test verifies that a SpendingUTXOTransaction monitor is correctly deactivated after 3 confirmations.
+// It also checks that a SpendingUTXOTransaction notification is created and the monitor is removed properly.
 
 #[test]
 fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(), anyhow::Error> {
@@ -662,7 +655,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     let spending_tx_id = spending_tx.compute_txid();
 
     // Create a block at height 100 containing the spending transaction
-    let block_with_spending = FullBlock {
+    let block_with_spending_tx = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000000",
@@ -675,90 +668,99 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
         estimated_fee_rate: 0,
     };
 
-    // Create transaction info for the spending transaction at block 100
-    let spending_tx_info_at_100 = TransactionInfo {
-        tx: spending_tx.clone(),
-        block_info: block_with_spending.clone(),
-        confirmations: 1,
-    };
-
-    // Create transaction info for the spending transaction when best block is 200
-    let spending_tx_info_at_200 = TransactionInfo {
-        tx: spending_tx.clone(),
-        block_info: block_with_spending.clone(),
-        confirmations: 101, // 200 - 100 + 1 = 101 confirmations
-    };
-
-    // First best block at height 100 (when spending tx is found)
-    let best_block_100 = FullBlock {
-        height: 100,
+    // Create a block at height 101 for further confirmations
+    let block_101 = FullBlock {
+        height: 101,
         hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000000",
         )?,
         prev_hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000001",
-        )?,
-        txs: vec![spending_tx.clone()],
-        orphan: false,
-        estimated_fee_rate: 0,
-    };
-
-    // Second best block at height 200 (100 blocks later, should trigger deactivation)
-    let best_block_200 = FullBlock {
-        height: 200,
-        hash: BlockHash::from_str(
-            "1000000000000000000000000000000000000000000000000000000000000000",
-        )?,
-        prev_hash: BlockHash::from_str(
-            "2000000000000000000000000000000000000000000000000000000000000000",
         )?,
         txs: vec![],
         orphan: false,
         estimated_fee_rate: 0,
     };
 
-    // Set up expectations for first tick (block 100)
-    let best_block_100_clone_1 = best_block_100.clone();
+    // Create a block at height 102 for the final confirmation count
+    let block_102 = FullBlock {
+        height: 102,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )?,
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )?,
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
 
-    // Set up expectations for second tick (block 200)
-    let best_block_200_clone_1 = best_block_200.clone();
+    // Transaction info for the spending transaction at each confirmation level
+    let spending_tx_info_at_100 = TransactionInfo {
+        tx: spending_tx.clone(),
+        block_info: block_102.clone(),
+        confirmations: 1,
+    };
 
-    // First call to get_best_block returns block 100
+    let spending_tx_info_at_101 = TransactionInfo {
+        tx: spending_tx.clone(),
+        block_info: block_102.clone(),
+        confirmations: 2,
+    };
+
+    let spending_tx_info_at_102 = TransactionInfo {
+        tx: spending_tx.clone(),
+        block_info: block_102.clone(),
+        confirmations: 3,
+    };
+
+    // Set expectations for each tick: block 100, then 101, then 102
+    let best_block_100_clone_1 = block_with_spending_tx.clone();
+    let best_block_101_clone = block_101.clone();
+    let best_block_102_clone = block_102.clone();
+
     mock_indexer
         .expect_get_best_block()
         .times(1)
         .returning(move || Ok(Some(best_block_100_clone_1.clone())));
 
-    // Second call to get_best_block returns block 200
     mock_indexer
         .expect_get_best_block()
         .times(1)
-        .returning(move || Ok(Some(best_block_200_clone_1.clone())));
+        .returning(move || Ok(Some(best_block_101_clone.clone())));
+
+    mock_indexer
+        .expect_get_best_block()
+        .times(1)
+        .returning(move || Ok(Some(best_block_102_clone.clone())));
 
     mock_indexer
         .expect_tick()
-        .times(2)
+        .times(3)
         .returning(move || Ok(()));
 
-    // First call to get_tx returns info at block 100 (when spending tx is first detected)
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
         .times(1)
         .returning(move |_| Ok(Some(spending_tx_info_at_100.clone())));
 
-    // Second call to get_tx returns info at block 200 (when checking confirmations)
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
         .times(1)
-        .returning(move |_| Ok(Some(spending_tx_info_at_200.clone())));
+        .returning(move |_| Ok(Some(spending_tx_info_at_101.clone())));
 
-    let monitor = Monitor::new(
-        mock_indexer,
-        store,
-        MonitorSettings::from(MonitorSettingsConfig::default()),
-    )?;
+    mock_indexer
+        .expect_get_tx()
+        .with(eq(spending_tx_id))
+        .returning(move |_| Ok(Some(spending_tx_info_at_102.clone())));
+
+    let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
+    settings.max_monitoring_confirmations = 3;
+
+    let monitor = Monitor::new(mock_indexer, store, settings)?;
 
     // Add the SpendingUTXOTransaction monitor
     monitor.save_monitor(TypesToMonitor::SpendingUTXOTransaction(
@@ -767,14 +769,14 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
         String::new(),
     ))?;
 
-    // Verify the monitor is active
+    // Ensure the monitor is initially active
     let monitors = monitor.store.get_monitors()?;
     assert_eq!(monitors.len(), 1);
 
-    // First tick: block 100 - spending transaction is detected and saved
+    // First tick: detect and save the spending transaction
     monitor.tick()?;
 
-    // Verify the monitor is still active and has the spending tx_id
+    // Confirm the monitor still tracks the spending transaction
     let monitors = monitor.store.get_monitors()?;
     assert_eq!(monitors.len(), 1);
     assert!(matches!(
@@ -783,15 +785,34 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
             if t == target_tx_id && u == target_utxo_index && stx == spending_tx_id
     ));
 
-    // Second tick: block 200 - 100 blocks have passed, confirmations >= max_monitoring_confirmations
-    // The monitor should be deactivated
+    // Second tick: confirmations reach the threshold; the monitor should be dequeued
     monitor.tick()?;
 
-    // Verify the monitor was deactivated
+    // Check that news was created as expected
+    let monitors = monitor.store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+    assert!(matches!(
+        news[0],
+        MonitorNews::SpendingUTXOTransaction(t, u, j, _)
+            if t == target_tx_id && u == target_utxo_index
+    ));
+
+    monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
+        target_tx_id,
+        target_utxo_index,
+    ))?;
+
+    monitor.tick()?;
+
+    // Verify that the monitor is now deactivated
     let monitors = monitor.store.get_monitors()?;
     assert_eq!(monitors.len(), 0);
 
-    clear_output();
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 0);
 
     Ok(())
 }

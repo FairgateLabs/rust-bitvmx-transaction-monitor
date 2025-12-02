@@ -338,6 +338,13 @@ where
                         let tx_info = self.indexer.get_tx(&tx_id_spending)?.unwrap();
 
                         if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
+                            info!("Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                target_tx_id,
+                                target_utxo_index,
+                                indexer_best_block_height,
+                                self.settings.max_monitoring_confirmations,
+                            );
+
                             self.store.deactivate_monitor(
                                 TypesToMonitor::SpendingUTXOTransaction(
                                     target_tx_id,
@@ -352,6 +359,14 @@ where
                         }
 
                         if tx_info.block_info.orphan {
+                            info!(
+                                "Orphan SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                target_tx_id,
+                                target_utxo_index,
+                                indexer_best_block_height,
+                                tx_info.confirmations,
+                            );
+
                             self.store.update_spending_utxo_monitor((
                                 target_tx_id,
                                 target_utxo_index,
