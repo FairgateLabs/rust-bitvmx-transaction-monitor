@@ -430,6 +430,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     let full_block_200 = full_block.clone();
     let full_block_200_clone = full_block.clone();
     let full_block_200_clone_2 = full_block.clone();
+    let full_block_200_clone_3 = full_block_200_clone_2.clone();
 
     mock_indexer
         .expect_get_block_by_height()
@@ -447,6 +448,11 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
         .times(1)
         .returning(move || Ok(Some(full_block.clone())));
 
+    mock_indexer
+        .expect_get_block_by_hash()
+        .with(eq(full_block_200_clone_2.hash))
+        .returning(move |_| Ok(Some(full_block_200_clone_2.clone())));
+
     mock_indexer.expect_tick().returning(move || Ok(()));
 
     let monitor = Monitor::new(
@@ -462,8 +468,8 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert!(matches!(
         news[0],
-        MonitorNews::NewBlock(_, hash) if hash == full_block_200_clone_2.hash
-    ));
+        MonitorNews::NewBlock(_, hash) if hash == full_block_200_clone_3.hash
+    )); // hash is the hash of the block that was just processed
 
     // Acknowledge the news and verify it's gone
     monitor.ack_news(AckMonitorNews::NewBlock)?;
@@ -795,7 +801,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     let news = monitor.get_news()?;
     assert_eq!(news.len(), 1);
     assert!(matches!(
-        news[0],
+        news[0].clone(),
         MonitorNews::SpendingUTXOTransaction(t, u, j, _)
             if t == target_tx_id && u == target_utxo_index
     ));
