@@ -252,9 +252,9 @@ impl MonitorStoreApi for MonitorStore {
                     .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&utxo_news_key)?
                     .unwrap_or_default();
 
-                let is_new_news = utxo_news.iter().position(|(id, utxo_i, _, spender_id, _)| {
-                    id == &tx_id && *utxo_i == utxo_index && spender_id == &spender_tx_id
-                });
+                let is_new_news = utxo_news
+                    .iter()
+                    .position(|(id, utxo_i, _, _, _)| id == &tx_id && *utxo_i == utxo_index);
 
                 if is_new_news.is_none() {
                     utxo_news.push((
@@ -266,21 +266,16 @@ impl MonitorStoreApi for MonitorStore {
                     ));
                 } else {
                     let pos = is_new_news.unwrap();
-                    let (_, _, _, _, (existing_block_hash, _)) = &utxo_news[pos];
+                    let (_, _, _, _, (_, _)) = &utxo_news[pos];
 
-                    if existing_block_hash == &current_block_hash {
-                        // We already have this news, do not update
-                        return Ok(());
-                    } else {
-                        // Replace the notification if the block hash is different
-                        utxo_news[pos] = (
-                            tx_id,
-                            utxo_index,
-                            extra_data.clone(),
-                            spender_tx_id,
-                            (current_block_hash, false),
-                        );
-                    }
+                    // Replace the notification if the block hash is different
+                    utxo_news[pos] = (
+                        tx_id,
+                        utxo_index,
+                        extra_data.clone(),
+                        spender_tx_id,
+                        (current_block_hash, false),
+                    );
                 }
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;

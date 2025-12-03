@@ -6,7 +6,7 @@ use bitcoin_indexer::{
 use bitvmx_transaction_monitor::{
     config::{MonitorSettings, MonitorSettingsConfig},
     monitor::Monitor,
-    store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore},
+    store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use mockall::predicate::*;
@@ -506,7 +506,7 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     let target_utxo_index = 0u32;
 
     // Create a spending transaction
-    let spending_tx = Transaction {
+    let spending_tx1 = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195601).unwrap(),
         input: vec![bitcoin::TxIn {
@@ -521,31 +521,39 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
         output: vec![],
     };
 
-    let spending_tx_id = spending_tx.compute_txid();
+    let spending_tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195601).unwrap(),
+        input: vec![bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint {
+                txid: target_tx_id,
+                vout: target_utxo_index,
+            },
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::new(),
+        }],
+        output: vec![],
+    };
 
-    // Create an orphan block containing the spending transaction
-    let orphan_block = FullBlock {
+    let spending_tx1_id = spending_tx1.compute_txid();
+
+    let block_100 = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "1000000000000000000000000000000000000000000000000000000000000000",
         )?,
         prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
+            "2000000000000000000000000000000000000000000000000000000000000000",
         )?,
-        txs: vec![spending_tx.clone()],
-        orphan: true,
+        txs: vec![spending_tx1.clone()],
+        orphan: false,
         estimated_fee_rate: 0,
     };
 
-    // Create transaction info for the spending transaction (orphan)
-    let spending_tx_info = TransactionInfo {
-        tx: spending_tx.clone(),
-        block_info: orphan_block.clone(),
-        confirmations: 0,
-    };
-
-    let best_block = FullBlock {
-        height: 200,
+    // Block 100 has the spending transaction tx1
+    let block_101 = FullBlock {
+        height: 101,
         hash: BlockHash::from_str(
             "1000000000000000000000000000000000000000000000000000000000000000",
         )?,
@@ -557,19 +565,85 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
         estimated_fee_rate: 0,
     };
 
-    // Set up expectations
-    let best_block_clone_1 = best_block.clone();
-    mock_indexer
-        .expect_get_best_block()
-        .returning(move || Ok(Some(best_block_clone_1.clone())));
+    // Block 100 is a new block making a reorg with block 100 , and has another spending transaction tx2
+    let block_100_reorg = FullBlock {
+        height: 100,
+        hash: BlockHash::from_str(
+            "1000000000000000000000000000000000000000000000000000000000000001",
+        )?,
+        prev_hash: BlockHash::from_str(
+            "2000000000000000000000000000000000000000000000000000000000000000",
+        )?,
+        txs: vec![spending_tx2.clone()],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    // Create transaction info for the spending transaction (orphan)
+    let spending_tx1 = TransactionInfo {
+        tx: spending_tx1.clone(),
+        block_info: block_100.clone(),
+        confirmations: 1,
+    };
+
+    let spending_tx2 = TransactionInfo {
+        tx: spending_tx2.clone(),
+        block_info: block_100_reorg.clone(),
+        confirmations: 1,
+    };
+
+    let spending_tx2_id = spending_tx2.tx.compute_txid();
+
+    let spending_tx1_clone = spending_tx1.clone();
+    let mut spending_tx1_clone_2 = spending_tx1_clone.clone();
+    let spending_tx2_clone = spending_tx2.clone();
+    let spending_tx2_clone_2 = spending_tx2_clone.clone();
 
     mock_indexer.expect_tick().returning(move || Ok(()));
+
+    // Set up expectations
+    let block_100_clone = block_100.clone();
+    mock_indexer
+        .expect_get_best_block()
+        .times(1)
+        .returning(move || Ok(Some(block_100_clone.clone())));
+
+    mock_indexer
+        .expect_get_best_block()
+        .times(1)
+        .returning(move || Ok(Some(block_101.clone())));
+
+    mock_indexer
+        .expect_get_best_block()
+        .times(1)
+        .returning(move || Ok(Some(block_100_reorg.clone())));
 
     // Expect get_tx to be called for the spending transaction
     mock_indexer
         .expect_get_tx()
-        .with(eq(spending_tx_id))
-        .returning(move |_| Ok(Some(spending_tx_info.clone())));
+        .with(eq(spending_tx1_id))
+        .times(2)
+        .returning(move |_| Ok(Some(spending_tx1_clone.clone())));
+
+    mock_indexer
+        .expect_get_tx()
+        .with(eq(spending_tx1_id))
+        .times(1)
+        .returning(move |_| Ok(Some(spending_tx2.clone())));
+
+    spending_tx1_clone_2.confirmations = 2;
+
+    mock_indexer
+        .expect_get_tx()
+        .with(eq(spending_tx1_id))
+        .times(1)
+        .returning(move |_| Ok(Some(spending_tx1_clone_2.clone())));
+
+    mock_indexer
+        .expect_get_tx()
+        .with(eq(spending_tx2_id))
+        .times(2)
+        .returning(move |_| Ok(Some(spending_tx2_clone.clone())));
 
     let monitor = Monitor::new(
         mock_indexer,
@@ -584,37 +658,51 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
         String::new(),
     ))?;
 
-    // First, manually set a spending transaction ID to simulate it was found before
-    monitor.store.update_spending_utxo_monitor((
-        target_tx_id,
-        target_utxo_index,
-        Some(spending_tx_id),
-    ))?;
-
-    // Verify the monitor has the spending tx_id
-    let monitors = monitor.store.get_monitors()?;
-    assert_eq!(monitors.len(), 1);
-    assert!(matches!(
-        monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx))
-            if t == target_tx_id && u == target_utxo_index && stx == spending_tx_id
-    ));
-
-    // Run tick - should detect orphan and update monitor to None
+    // First tick - should detect the spending transaction
     monitor.tick()?;
 
-    // Verify the monitor's spending tx_id was set to None due to orphan
-    let monitors = monitor.store.get_monitors()?;
-    assert_eq!(monitors.len(), 1);
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+
     assert!(matches!(
-        monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, None)
-            if t == target_tx_id && u == target_utxo_index
+        news[0].clone(),
+        MonitorNews::SpendingUTXOTransaction(t, u, tx_status, _)
+            if t == target_tx_id && u == target_utxo_index && tx_status.tx_id == spending_tx1.tx.compute_txid() && tx_status.confirmations == 1
     ));
 
-    // Verify no news was created for the orphan transaction
-    let news = monitor.store.get_news()?;
-    assert_eq!(news.len(), 0);
+    monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
+        target_tx_id,
+        target_utxo_index,
+    ))?;
+
+    // Second tick - should confirm the spending transaction (2 confirmations)
+    monitor.tick()?;
+
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+
+    assert!(matches!(
+        news[0].clone(),
+        MonitorNews::SpendingUTXOTransaction(t, u, tx_status, _)
+            if t == target_tx_id && u == target_utxo_index && tx_status.tx_id == spending_tx1.tx.compute_txid() && tx_status.confirmations == 2
+    ));
+
+    monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
+        target_tx_id,
+        target_utxo_index,
+    ))?;
+
+    // Third tick - Reorg with block 100, and should detect the new spending transaction tx2
+    monitor.tick()?;
+
+    let news = monitor.get_news()?;
+
+    assert_eq!(news.len(), 1);
+    assert!(matches!(
+        news[0].clone(),
+        MonitorNews::SpendingUTXOTransaction(t, u, tx_status, _)
+            if t == target_tx_id && u == target_utxo_index && tx_status.tx_id == spending_tx2_clone_2.tx.compute_txid() && tx_status.confirmations == 1
+    ));
 
     clear_output();
 
