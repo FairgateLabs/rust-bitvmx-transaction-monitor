@@ -31,8 +31,6 @@ enum BlockchainKey {
 pub enum MonitoredTypes {
     Transaction(Txid, String),
     RskPeginTransaction(Txid),
-
-    // Last item is the spender tx_id.
     SpendingUTXOTransaction(Txid, u32, String, Txid),
     NewBlock(BlockHash),
 }
