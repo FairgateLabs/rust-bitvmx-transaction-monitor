@@ -176,8 +176,8 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(
         tx.compute_txid(),
         0,
-        tx.compute_txid(),
         String::new(),
+        tx.compute_txid(),
     );
     store.update_news(spending_tx_news.clone(), block_hash)?;
     store.update_news(spending_tx_news.clone(), block_hash)?; // Try adding same spending tx again
@@ -313,20 +313,20 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     let spending_tx1 = MonitoredTypes::SpendingUTXOTransaction(
         tx1.compute_txid(),
         0,
-        tx1.compute_txid(),
         String::new(),
+        tx1.compute_txid(),
     );
     let spending_tx2 = MonitoredTypes::SpendingUTXOTransaction(
         tx2.compute_txid(),
         1,
-        tx1.compute_txid(),
         String::new(),
+        tx1.compute_txid(),
     );
     let spending_tx3 = MonitoredTypes::SpendingUTXOTransaction(
         tx3.compute_txid(),
         2,
-        tx1.compute_txid(),
         String::new(),
+        tx1.compute_txid(),
     );
 
     store.update_news(spending_tx1.clone(), block_hash)?;
