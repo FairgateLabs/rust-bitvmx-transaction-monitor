@@ -353,8 +353,8 @@ where
                                 ),
                             )?;
 
-                            // Here we skip seaching in the new block for the spending transaction.
-                            // Because we already know that it is confirmed.
+                            // Skip searching in the new block for the spending transaction.
+                            // Because it is already confirmed.
                             continue;
                         }
 
@@ -373,8 +373,8 @@ where
                                 None,
                             ))?;
 
-                            // We DON'T skip seaching in the new block for the spending transaction.
-                            // Because we need to check if there is a new spending transaction.
+                            // Don't skip searching in the new block for the spending transaction.
+                            // Because it is needed to check if there is a new spending transaction.
                         } else {
                             self.store.update_news(
                                 MonitoredTypes::SpendingUTXOTransaction(
@@ -394,13 +394,13 @@ where
                                 tx_info.confirmations,
                             );
 
-                            // Here we skip seaching in the new block for the spending transaction.
-                            // Because we already know that it is confirmed.
+                            // Skip searching in the new block for the spending transaction.
+                            // Because it is already confirmed.
                             continue;
                         }
                     }
 
-                    // Check each transaction in the new block for spending the target UTXO
+                    // Check each transaction in the new block for a spending transaction of the target UTXO
                     for tx in indexer_best_block.txs.iter() {
                         let is_spending_output =
                             is_spending_output(tx, target_tx_id, target_utxo_index);
@@ -408,7 +408,6 @@ where
                         if is_spending_output {
                             let tx_info = self.indexer.get_tx(&tx.compute_txid())?.unwrap();
 
-                            // Update the monitor with the spending transaction ID
                             self.store.update_spending_utxo_monitor((
                                 target_tx_id,
                                 target_utxo_index,
