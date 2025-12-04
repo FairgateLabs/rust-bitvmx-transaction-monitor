@@ -74,7 +74,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     let block_200 = FullBlock {
         height: block_height_200,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000011",
         )
         .unwrap(),
         prev_hash: BlockHash::from_str(
@@ -86,10 +86,31 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         estimated_fee_rate: 0,
     };
 
+    let block_0 = FullBlock {
+        height: 0,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000022",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
     let block_200_clone = block_200.clone();
 
     mock_indexer
         .expect_get_block_by_height()
+        .with(eq(0))
+        .returning(move |_| Ok(Some(block_0.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(block_height_200))
         .returning(move |_| Ok(Some(block_200_clone.clone())));
 
     let tx_to_seen = Transaction {
@@ -204,11 +225,39 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
     let block_info = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        )?,
-        prev_hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000001",
         )?,
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        )?,
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    let block_0 = FullBlock {
+        height: 0,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000003",
+        )?,
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000004",
+        )?,
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    let block_200 = FullBlock {
+        height: 200,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000005",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000006",
+        )
+        .unwrap(),
         txs: vec![],
         orphan: false,
         estimated_fee_rate: 0,
@@ -226,32 +275,21 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    let full_block = FullBlock {
-        height: 200,
-        hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        )
-        .unwrap(),
-        prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
-        )
-        .unwrap(),
-        txs: vec![],
-        orphan: false,
-        estimated_fee_rate: 0,
-    };
-
-    let full_block_clone = full_block.clone();
+    let block_200_clone = block_200.clone();
+    let block_200_clone_1 = block_200.clone();
 
     mock_indexer
         .expect_get_best_block()
-        .returning(move || Ok(Some(full_block_clone.clone())));
-
-    let full_block_clone = full_block.clone();
+        .returning(move || Ok(Some(block_200_clone.clone())));
 
     mock_indexer
         .expect_get_block_by_height()
-        .returning(move |_| Ok(Some(full_block_clone.clone())));
+        .with(eq(0))
+        .returning(move |_| Ok(Some(block_0.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(block_200_clone_1.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -412,14 +450,14 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
         let store_ref = &store;
         store_ref.update_monitor_height(monitor_height)?;
     }
-    let mut full_block = FullBlock {
+    let block_200 = FullBlock {
         height: 200,
         hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000000",
         )
         .unwrap(),
         prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
+            "0000000000000000000000000000000000000000000000000000000000000022",
         )
         .unwrap(),
         txs: vec![],
@@ -427,25 +465,39 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
         estimated_fee_rate: 0,
     };
 
-    let full_block_200 = full_block.clone();
-    let full_block_200_clone = full_block.clone();
-    let full_block_200_clone_2 = full_block.clone();
+    let block_199 = FullBlock {
+        height: 199,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    let block_200_clone = block_200.clone();
+    let block_200_clone_1 = block_200.clone();
+    let block_200_clone_2 = block_200.clone();
 
     mock_indexer
         .expect_get_block_by_height()
-        .returning(move |_| Ok(Some(full_block_200_clone.clone())));
+        .with(eq(199))
+        .returning(move |_| Ok(Some(block_199.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(200))
+        .returning(move |_| Ok(Some(block_200_clone.clone())));
 
     mock_indexer
         .expect_get_best_block()
-        .times(1)
-        .returning(move || Ok(Some(full_block_200.clone())));
-
-    full_block.height = 201;
-
-    mock_indexer
-        .expect_get_best_block()
-        .times(1)
-        .returning(move || Ok(Some(full_block.clone())));
+        .times(3)
+        .returning(move || Ok(Some(block_200_clone_1.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -462,7 +514,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert!(matches!(
         news[0],
-        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock(hash) if hash == full_block_200_clone_2.hash
+        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock(hash) if hash == block_200_clone_2.hash
     ));
 
     // Acknowledge the news and verify it's gone
