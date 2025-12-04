@@ -17,7 +17,7 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct Monitor<I, B>
 where
@@ -179,6 +179,10 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     }
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        if data != TypesToMonitor::NewBlock {
+            self.store.set_pending_work(true)?;
+        }
+
         self.store.add_monitor(data)?;
 
         Ok(())
@@ -238,6 +242,10 @@ where
     }
 
     pub fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        if data != TypesToMonitor::NewBlock {
+            self.store.set_pending_work(true)?;
+        }
+
         self.store.add_monitor(data)?;
 
         Ok(())
@@ -249,15 +257,50 @@ where
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
     }
 
+    // This method checks if the monitor has pending work to be done.
+    // It checks if the block in the monitor is the same as the best block in the indexer.
+    // If the block is not the same, it means that the monitor is not synced with the indexer, so it has pending work to be done to sync it.
+    // If the block is the same, it means that the monitor is synced with the indexer, so it has no pending work to be done.
+    pub fn is_pending_work(&self) -> Result<bool, MonitorError> {
+        let is_pending_work = self.store.has_pending_work()?;
+
+        if is_pending_work {
+            return Ok(true);
+        }
+
+        let block = self.get_current_block()?;
+
+        if block.is_none() {
+            debug!("No block found in Monitor, pending work to be done");
+            return Ok(true);
+        }
+
+        let monitor_block_hash = block.unwrap();
+        let block = self.indexer.get_best_block()?;
+
+        if block.is_none() {
+            return Ok(false);
+        }
+
+        let block = block.unwrap();
+
+        if block.hash != monitor_block_hash.hash {
+            debug!("Best block hash mismatch, pending work to be done");
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
     pub fn tick(&self) -> Result<(), MonitorError> {
         self.indexer.tick()?;
 
-        let indexer_best_block = self.indexer.get_best_block()?;
-
-        if indexer_best_block.is_none() {
+        if !self.is_pending_work()? {
+            debug!("No pending work, skipping tick");
             return Ok(());
         }
 
+        let indexer_best_block = self.indexer.get_best_block()?;
         let indexer_best_block = indexer_best_block.unwrap();
         let indexer_best_block_height = indexer_best_block.height;
         let current_block_hash = indexer_best_block.hash;
@@ -394,6 +437,8 @@ where
 
         self.store
             .update_monitor_height(indexer_best_block_height)?;
+
+        self.store.set_pending_work(false)?;
 
         Ok(())
     }

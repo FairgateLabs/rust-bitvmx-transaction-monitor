@@ -21,6 +21,7 @@ enum MonitorKey {
     RskPeginTransactionsNews,
     SpendingUTXOTransactionsNews,
     NewBlockNews,
+    PendingWork,
 }
 
 enum BlockchainKey {
@@ -59,6 +60,8 @@ pub trait MonitorStoreApi {
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
     fn update_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
+    fn has_pending_work(&self) -> Result<bool, MonitorStoreError>;
+    fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError>;
 }
 
 impl MonitorStore {
@@ -70,6 +73,7 @@ impl MonitorStore {
         let prefix = "monitor";
         match key {
             // Monitors
+            MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
             MonitorKey::Transactions => format!("{prefix}/tx/list"),
             MonitorKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
             MonitorKey::SpendingUTXOTransactions => {
@@ -99,6 +103,18 @@ impl MonitorStore {
 
 #[automock]
 impl MonitorStoreApi for MonitorStore {
+    fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError> {
+        let key = self.get_key(MonitorKey::PendingWork);
+        self.store.set(&key, is_pending_work, None)?;
+        Ok(())
+    }
+
+    fn has_pending_work(&self) -> Result<bool, MonitorStoreError> {
+        let key = self.get_key(MonitorKey::PendingWork);
+        let pending_work = self.store.get::<_, bool>(&key)?.unwrap_or(false);
+        Ok(pending_work)
+    }
+
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError> {
         let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
         let last_block_height = self
