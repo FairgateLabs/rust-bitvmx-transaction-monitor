@@ -528,6 +528,35 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     let news = monitor.store.get_news()?;
     assert_eq!(news.len(), 0);
 
+    // Check if there's any pending work initially; it should be false
+    let is_pending_work = monitor.store.has_pending_work()?;
+    assert!(!is_pending_work);
+
+    // Save a new monitor for NewBlock and check again for pending work; should still be false
+    monitor.save_monitor(TypesToMonitor::NewBlock)?;
+
+    let is_pending_work = monitor.store.has_pending_work()?;
+    assert!(!is_pending_work);
+
+    // Create a new transaction and compute its txid
+    let tx_id = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    }
+    .compute_txid();
+
+    // Save a monitor for the transaction and set a description "test"
+    monitor.save_monitor(TypesToMonitor::Transactions(
+        vec![tx_id],
+        "test".to_string(),
+    ))?;
+
+    // Check if there's pending work after saving the transaction monitor; it should be true
+    let is_pending_work = monitor.store.has_pending_work()?;
+    assert!(is_pending_work);
+
     clear_output();
 
     Ok(())

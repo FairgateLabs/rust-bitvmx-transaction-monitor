@@ -179,6 +179,10 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     }
 
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        if data != TypesToMonitor::NewBlock {
+            self.store.set_pending_work(true)?;
+        }
+
         self.store.add_monitor(data)?;
 
         Ok(())
@@ -238,6 +242,10 @@ where
     }
 
     pub fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        if data != TypesToMonitor::NewBlock {
+            self.store.set_pending_work(true)?;
+        }
+
         self.store.add_monitor(data)?;
 
         Ok(())
@@ -254,6 +262,12 @@ where
     // If the block is not the same, it means that the monitor is not synced with the indexer, so it has pending work to be done to sync it.
     // If the block is the same, it means that the monitor is synced with the indexer, so it has no pending work to be done.
     pub fn is_pending_work(&self) -> Result<bool, MonitorError> {
+        let is_pending_work = self.store.has_pending_work()?;
+
+        if is_pending_work {
+            return Ok(true);
+        }
+
         let block = self.get_current_block()?;
 
         if block.is_none() {
@@ -423,6 +437,8 @@ where
 
         self.store
             .update_monitor_height(indexer_best_block_height)?;
+
+        self.store.set_pending_work(false)?;
 
         Ok(())
     }
