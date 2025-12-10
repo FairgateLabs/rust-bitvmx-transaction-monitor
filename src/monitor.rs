@@ -275,7 +275,7 @@ where
             return Ok(true);
         }
 
-        let monitor_block_hash = block.unwrap();
+        let monitor_block = block.unwrap();
         let block = self.indexer.get_best_block()?;
 
         if block.is_none() {
@@ -284,7 +284,7 @@ where
 
         let block = block.unwrap();
 
-        if block.hash != monitor_block_hash.hash {
+        if block.hash != monitor_block.hash {
             debug!("Best block hash mismatch, pending work to be done");
             return Ok(true);
         }
@@ -374,55 +374,104 @@ where
                     target_tx_id,
                     target_utxo_index,
                     extra_data,
+                    tx_id_spending,
                 ) => {
-                    // Check each transaction in the block for spending the target UTXO
+                    if let Some(tx_id_spending) = tx_id_spending {
+                        let tx_info = self.indexer.get_tx(&tx_id_spending)?.unwrap();
+                        if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
+                            info!("Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                target_tx_id,
+                                target_utxo_index,
+                                indexer_best_block_height,
+                                self.settings.max_monitoring_confirmations,
+                            );
+
+                            self.store.deactivate_monitor(
+                                TypesToMonitor::SpendingUTXOTransaction(
+                                    target_tx_id,
+                                    target_utxo_index,
+                                    extra_data.clone(),
+                                ),
+                            )?;
+
+                            // Skip searching in the new block for the spending transaction.
+                            // Because it is already confirmed.
+                            continue;
+                        }
+
+                        if tx_info.block_info.orphan {
+                            info!(
+                                "Orphan SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                target_tx_id,
+                                target_utxo_index,
+                                indexer_best_block_height,
+                                tx_info.confirmations,
+                            );
+
+                            self.store.update_spending_utxo_monitor((
+                                target_tx_id,
+                                target_utxo_index,
+                                None,
+                            ))?;
+
+                            // Don't skip searching in the new block for the spending transaction.
+                            // Because it is needed to check if there is a new spending transaction.
+                        } else {
+                            self.store.update_news(
+                                MonitoredTypes::SpendingUTXOTransaction(
+                                    target_tx_id,
+                                    target_utxo_index,
+                                    extra_data.clone(),
+                                    tx_id_spending,
+                                ),
+                                current_block_hash,
+                            )?;
+
+                            info!(
+                                "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                target_tx_id,
+                                target_utxo_index,
+                                indexer_best_block_height,
+                                tx_info.confirmations,
+                            );
+
+                            // Skip searching in the new block for the spending transaction.
+                            // Because it is already confirmed.
+                            continue;
+                        }
+                    }
+
+                    // Check each transaction in the new block for a spending transaction of the target UTXO
                     for tx in indexer_best_block.txs.iter() {
                         let is_spending_output =
                             is_spending_output(tx, target_tx_id, target_utxo_index);
 
                         if is_spending_output {
-                            let tx_info = self.indexer.get_tx(&tx.compute_txid())?;
-                            if let Some(tx_info) = tx_info {
-                                let confirmations =
-                                    indexer_best_block_height - tx_info.block_info.height + 1;
+                            let tx_info = self.indexer.get_tx(&tx.compute_txid())?.unwrap();
 
-                                if confirmations >= self.settings.max_monitoring_confirmations {
-                                    // Deactivate monitor after 100 confirmations
-                                    self.store.deactivate_monitor(
-                                        TypesToMonitor::SpendingUTXOTransaction(
-                                            target_tx_id,
-                                            target_utxo_index,
-                                            extra_data.clone(),
-                                        ),
-                                    )?;
+                            self.store.update_spending_utxo_monitor((
+                                target_tx_id,
+                                target_utxo_index,
+                                Some(tx.compute_txid()),
+                            ))?;
 
-                                    info!(
-                                        "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                        target_tx_id,
-                                        target_utxo_index,
-                                        indexer_best_block_height,
-                                        self.settings.max_monitoring_confirmations,
-                                    );
-                                } else {
-                                    self.store.update_news(
-                                        MonitoredTypes::SpendingUTXOTransaction(
-                                            target_tx_id,
-                                            target_utxo_index,
-                                            tx.compute_txid(),
-                                            extra_data.clone(),
-                                        ),
-                                        current_block_hash,
-                                    )?;
+                            self.store.update_news(
+                                MonitoredTypes::SpendingUTXOTransaction(
+                                    target_tx_id,
+                                    target_utxo_index,
+                                    extra_data.clone(),
+                                    tx.compute_txid(),
+                                ),
+                                current_block_hash,
+                            )?;
 
-                                    info!(
-                                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                        target_tx_id,
-                                        target_utxo_index,
-                                        indexer_best_block_height,
-                                        confirmations,
-                                    );
-                                }
-                            }
+                            info!(
+                                    "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                                    target_tx_id,
+                                    target_utxo_index,
+                                    indexer_best_block_height,
+                                    tx_info.confirmations,
+                                );
                         }
                     }
                 }
@@ -473,8 +522,8 @@ where
                 MonitoredTypes::SpendingUTXOTransaction(
                     tx_id,
                     utxo_index,
-                    spender_tx_id,
                     extra_data,
+                    spender_tx_id,
                 ) => {
                     let status = self.get_tx_status(&spender_tx_id)?;
                     return_news.push(MonitorNews::SpendingUTXOTransaction(
