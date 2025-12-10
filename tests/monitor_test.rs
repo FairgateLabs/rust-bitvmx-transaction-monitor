@@ -74,7 +74,7 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     let block_200 = FullBlock {
         height: block_height_200,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000011",
         )
         .unwrap(),
         prev_hash: BlockHash::from_str(
@@ -86,10 +86,31 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         estimated_fee_rate: 0,
     };
 
+    let block_0 = FullBlock {
+        height: 0,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000022",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
     let block_200_clone = block_200.clone();
 
     mock_indexer
         .expect_get_block_by_height()
+        .with(eq(0))
+        .returning(move |_| Ok(Some(block_0.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(block_height_200))
         .returning(move |_| Ok(Some(block_200_clone.clone())));
 
     let tx_to_seen = Transaction {
@@ -204,11 +225,39 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
     let block_info = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        )?,
-        prev_hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000001",
         )?,
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        )?,
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    let block_0 = FullBlock {
+        height: 0,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000003",
+        )?,
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000004",
+        )?,
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    let block_200 = FullBlock {
+        height: 200,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000005",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000006",
+        )
+        .unwrap(),
         txs: vec![],
         orphan: false,
         estimated_fee_rate: 0,
@@ -226,32 +275,21 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         .times(1)
         .returning(move |_| Ok(Some(tx_info.clone())));
 
-    let full_block = FullBlock {
-        height: 200,
-        hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        )
-        .unwrap(),
-        prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
-        )
-        .unwrap(),
-        txs: vec![],
-        orphan: false,
-        estimated_fee_rate: 0,
-    };
-
-    let full_block_clone = full_block.clone();
+    let block_200_clone = block_200.clone();
+    let block_200_clone_1 = block_200.clone();
 
     mock_indexer
         .expect_get_best_block()
-        .returning(move || Ok(Some(full_block_clone.clone())));
-
-    let full_block_clone = full_block.clone();
+        .returning(move || Ok(Some(block_200_clone.clone())));
 
     mock_indexer
         .expect_get_block_by_height()
-        .returning(move |_| Ok(Some(full_block_clone.clone())));
+        .with(eq(0))
+        .returning(move |_| Ok(Some(block_0.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .returning(move |_| Ok(Some(block_200_clone_1.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -412,14 +450,14 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
         let store_ref = &store;
         store_ref.update_monitor_height(monitor_height)?;
     }
-    let mut full_block = FullBlock {
+    let block_200 = FullBlock {
         height: 200,
         hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000000",
         )
         .unwrap(),
         prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
+            "0000000000000000000000000000000000000000000000000000000000000022",
         )
         .unwrap(),
         txs: vec![],
@@ -427,31 +465,39 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
         estimated_fee_rate: 0,
     };
 
-    let full_block_200 = full_block.clone();
-    let full_block_200_clone = full_block.clone();
-    let full_block_200_clone_2 = full_block.clone();
-    let full_block_200_clone_3 = full_block_200_clone_2.clone();
+    let block_199 = FullBlock {
+        height: 199,
+        hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap(),
+        prev_hash: BlockHash::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+        )
+        .unwrap(),
+        txs: vec![],
+        orphan: false,
+        estimated_fee_rate: 0,
+    };
+
+    let block_200_clone = block_200.clone();
+    let block_200_clone_1 = block_200.clone();
+    let block_200_clone_2 = block_200.clone();
 
     mock_indexer
         .expect_get_block_by_height()
-        .returning(move |_| Ok(Some(full_block_200_clone.clone())));
+        .with(eq(199))
+        .returning(move |_| Ok(Some(block_199.clone())));
+
+    mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(200))
+        .returning(move |_| Ok(Some(block_200_clone.clone())));
 
     mock_indexer
         .expect_get_best_block()
-        .times(1)
-        .returning(move || Ok(Some(full_block_200.clone())));
-
-    full_block.height = 201;
-
-    mock_indexer
-        .expect_get_best_block()
-        .times(1)
-        .returning(move || Ok(Some(full_block.clone())));
-
-    mock_indexer
-        .expect_get_block_by_hash()
-        .with(eq(full_block_200_clone_2.hash))
-        .returning(move |_| Ok(Some(full_block_200_clone_2.clone())));
+        .times(3)
+        .returning(move || Ok(Some(block_200_clone_1.clone())));
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -464,23 +510,52 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     monitor.tick()?;
 
     // After tick, NewBlock news should be present
-    let news = monitor.get_news()?;
+    let news = monitor.store.get_news()?;
     assert_eq!(news.len(), 1);
     assert!(matches!(
         news[0],
-        MonitorNews::NewBlock(_, hash) if hash == full_block_200_clone_3.hash
-    )); // hash is the hash of the block that was just processed
+        bitvmx_transaction_monitor::store::MonitoredTypes::NewBlock(hash) if hash == block_200_clone_2.hash
+    ));
 
     // Acknowledge the news and verify it's gone
     monitor.ack_news(AckMonitorNews::NewBlock)?;
-    let news = monitor.get_news()?;
+    let news = monitor.store.get_news()?;
     assert_eq!(news.len(), 0);
 
     monitor.tick()?;
 
     // After tick, NewBlock news should not be present because it was already acknowledged
-    let news = monitor.get_news()?;
+    let news = monitor.store.get_news()?;
     assert_eq!(news.len(), 0);
+
+    // Check if there's any pending work initially; it should be false
+    let is_pending_work = monitor.store.has_pending_work()?;
+    assert!(!is_pending_work);
+
+    // Save a new monitor for NewBlock and check again for pending work; should still be false
+    monitor.save_monitor(TypesToMonitor::NewBlock)?;
+
+    let is_pending_work = monitor.store.has_pending_work()?;
+    assert!(!is_pending_work);
+
+    // Create a new transaction and compute its txid
+    let tx_id = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    }
+    .compute_txid();
+
+    // Save a monitor for the transaction and set a description "test"
+    monitor.save_monitor(TypesToMonitor::Transactions(
+        vec![tx_id],
+        "test".to_string(),
+    ))?;
+
+    // Check if there's pending work after saving the transaction monitor; it should be true
+    let is_pending_work = monitor.store.has_pending_work()?;
+    assert!(is_pending_work);
 
     clear_output();
 
@@ -541,7 +616,7 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     let block_100 = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
-            "1000000000000000000000000000000000000000000000000000000000000000",
+            "1000000000000000000000000000000000000000000000000000000000000001",
         )?,
         prev_hash: BlockHash::from_str(
             "2000000000000000000000000000000000000000000000000000000000000000",
@@ -555,10 +630,10 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     let block_101 = FullBlock {
         height: 101,
         hash: BlockHash::from_str(
-            "1000000000000000000000000000000000000000000000000000000000000000",
+            "1000000000000000000000000000000000000000000000000000000000000002",
         )?,
         prev_hash: BlockHash::from_str(
-            "2000000000000000000000000000000000000000000000000000000000000000",
+            "2000000000000000000000000000000000000000000000000000000000000001",
         )?,
         txs: vec![],
         orphan: false,
@@ -569,10 +644,10 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     let block_100_reorg = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
-            "1000000000000000000000000000000000000000000000000000000000000001",
+            "1000000000000000000000000000000000000000000000000000000000000003",
         )?,
         prev_hash: BlockHash::from_str(
-            "2000000000000000000000000000000000000000000000000000000000000000",
+            "2000000000000000000000000000000000000000000000000000000000000002",
         )?,
         txs: vec![spending_tx2.clone()],
         orphan: false,
@@ -603,19 +678,35 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
 
     // Set up expectations
     let block_100_clone = block_100.clone();
+
+    // Each tick in the monitor uses 2 get_best_block call but if there is pending work, it will use 1 get_best_block call
     mock_indexer
         .expect_get_best_block()
         .times(1)
-        .returning(move || Ok(Some(block_100_clone.clone())));
+        .returning(move || Ok(Some(block_100.clone())));
 
     mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(100))
+        .returning(move |_| Ok(Some(block_100_clone.clone())));
+
+    let block_101_clone = block_101.clone();
+
+    // Each tick in the monitor uses 2 get_best_block call but if there is pending work, it will use 1 get_best_block call
+    mock_indexer
         .expect_get_best_block()
-        .times(1)
+        .times(2)
         .returning(move || Ok(Some(block_101.clone())));
 
     mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(101))
+        .returning(move |_| Ok(Some(block_101_clone.clone())));
+
+    // Each tick in the monitor uses 2 get_best_block call but if there is pending work, it will use 1 get_best_block call
+    mock_indexer
         .expect_get_best_block()
-        .times(1)
+        .times(2)
         .returning(move || Ok(Some(block_100_reorg.clone())));
 
     // Expect get_tx to be called for the spending transaction
@@ -752,10 +843,10 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     let block_with_spending_tx = FullBlock {
         height: 100,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000001",
         )?,
         prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
+            "0000000000000000000000000000000000000000000000000000000000000000",
         )?,
         txs: vec![spending_tx.clone()],
         orphan: false,
@@ -766,7 +857,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     let block_101 = FullBlock {
         height: 101,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000002",
         )?,
         prev_hash: BlockHash::from_str(
             "0000000000000000000000000000000000000000000000000000000000000001",
@@ -780,10 +871,10 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     let block_102 = FullBlock {
         height: 102,
         hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000003",
         )?,
         prev_hash: BlockHash::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000001",
+            "0000000000000000000000000000000000000000000000000000000000000002",
         )?,
         txs: vec![],
         orphan: false,
@@ -811,44 +902,63 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
 
     // Set expectations for each tick: block 100, then 101, then 102
     let best_block_100_clone_1 = block_with_spending_tx.clone();
+    let best_block_100_clone_2 = block_with_spending_tx.clone();
     let best_block_101_clone = block_101.clone();
+    let best_block_101_clone_2 = block_101.clone();
     let best_block_102_clone = block_102.clone();
+    let best_block_102_clone_2 = block_102.clone();
 
+    // Each tick in the monitor uses 1 get_best_block call but if there is pending work, it will use 2 get_best_block calls
     mock_indexer
         .expect_get_best_block()
         .times(1)
         .returning(move || Ok(Some(best_block_100_clone_1.clone())));
 
     mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(100))
+        .returning(move |_| Ok(Some(best_block_100_clone_2.clone())));
+
+    // Each tick in the monitor uses 2 get_best_block calls
+    mock_indexer
         .expect_get_best_block()
-        .times(1)
+        .times(2)
         .returning(move || Ok(Some(best_block_101_clone.clone())));
 
     mock_indexer
+        .expect_get_block_by_height()
+        .with(eq(101))
+        .returning(move |_| Ok(Some(best_block_101_clone_2.clone())));
+
+    // Each tick in the monitor uses 2 get_best_block calls
+    mock_indexer
         .expect_get_best_block()
-        .times(1)
+        .times(2)
         .returning(move || Ok(Some(best_block_102_clone.clone())));
 
     mock_indexer
-        .expect_tick()
-        .times(3)
-        .returning(move || Ok(()));
+        .expect_get_block_by_height()
+        .with(eq(102))
+        .returning(move |_| Ok(Some(best_block_102_clone_2.clone())));
+
+    mock_indexer.expect_tick().returning(move || Ok(()));
 
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
-        .times(1)
+        .times(2)
         .returning(move |_| Ok(Some(spending_tx_info_at_100.clone())));
 
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
-        .times(1)
+        .times(2)
         .returning(move |_| Ok(Some(spending_tx_info_at_101.clone())));
 
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
+        .times(1)
         .returning(move |_| Ok(Some(spending_tx_info_at_102.clone())));
 
     let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
@@ -879,6 +989,19 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
             if t == target_tx_id && u == target_utxo_index && stx == spending_tx_id
     ));
 
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+    assert!(matches!(
+        news[0].clone(),
+        MonitorNews::SpendingUTXOTransaction(t, u, _, _)
+            if t == target_tx_id && u == target_utxo_index
+    ));
+
+    monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
+        target_tx_id,
+        target_utxo_index,
+    ))?;
+
     // Second tick: confirmations reach the threshold; the monitor should be dequeued
     monitor.tick()?;
 
@@ -890,7 +1013,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     assert_eq!(news.len(), 1);
     assert!(matches!(
         news[0].clone(),
-        MonitorNews::SpendingUTXOTransaction(t, u, j, _)
+        MonitorNews::SpendingUTXOTransaction(t, u, _, _)
             if t == target_tx_id && u == target_utxo_index
     ));
 

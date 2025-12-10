@@ -21,6 +21,7 @@ enum MonitorKey {
     RskPeginTransactionsNews,
     SpendingUTXOTransactionsNews,
     NewBlockNews,
+    PendingWork,
 }
 
 enum BlockchainKey {
@@ -64,6 +65,8 @@ pub trait MonitorStoreApi {
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
     fn update_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
+    fn has_pending_work(&self) -> Result<bool, MonitorStoreError>;
+    fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError>;
 }
 
 impl MonitorStore {
@@ -75,6 +78,7 @@ impl MonitorStore {
         let prefix = "monitor";
         match key {
             // Monitors
+            MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
             MonitorKey::Transactions => format!("{prefix}/tx/list"),
             MonitorKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
             MonitorKey::SpendingUTXOTransactions => {
@@ -104,6 +108,18 @@ impl MonitorStore {
 
 #[automock]
 impl MonitorStoreApi for MonitorStore {
+    fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError> {
+        let key = self.get_key(MonitorKey::PendingWork);
+        self.store.set(&key, is_pending_work, None)?;
+        Ok(())
+    }
+
+    fn has_pending_work(&self) -> Result<bool, MonitorStoreError> {
+        let key = self.get_key(MonitorKey::PendingWork);
+        let pending_work = self.store.get::<_, bool>(&key)?.unwrap_or(false);
+        Ok(pending_work)
+    }
+
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError> {
         let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
         let last_block_height = self
@@ -194,19 +210,21 @@ impl MonitorStoreApi for MonitorStore {
 
                 let is_new_news = txs_news.iter().position(|(id, _, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    // Insert news with current block hash and ack in false
-                    txs_news.push((tx_id, extra_data.clone(), (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
-                    let (_, _, (existing_block_hash, _)) = &txs_news[pos];
-
-                    if existing_block_hash == &current_block_hash {
-                        // We already have this news, do not update
-                        return Ok(());
-                    } else {
-                        // Replace the notification if the block hash is different
-                        txs_news[pos] = (tx_id, extra_data.clone(), (current_block_hash, false));
+                match is_new_news {
+                    None => {
+                        // Insert news with current block hash and ack in false
+                        txs_news.push((tx_id, extra_data.clone(), (current_block_hash, false)));
+                    }
+                    Some(pos) => {
+                        let (_, _, (existing_block_hash, _)) = &txs_news[pos];
+                        if existing_block_hash == &current_block_hash {
+                            // We already have this news, do not update
+                            return Ok(());
+                        } else {
+                            // Replace the notification if the block hash is different
+                            txs_news[pos] =
+                                (tx_id, extra_data.clone(), (current_block_hash, false));
+                        }
                     }
                 }
 
@@ -221,18 +239,17 @@ impl MonitorStoreApi for MonitorStore {
 
                 let is_new_news = rsk_news.iter().position(|(id, _)| id == &tx_id);
 
-                if is_new_news.is_none() {
-                    rsk_news.push((tx_id, (current_block_hash, false)));
-                } else {
-                    let pos = is_new_news.unwrap();
-                    let (_, (existing_block_hash, _)) = &rsk_news[pos];
-
-                    if existing_block_hash == &current_block_hash {
-                        // We already have this news, do not update
-                        return Ok(());
-                    } else {
-                        // Replace the notification if the block hash is different
-                        rsk_news[pos] = (tx_id, (current_block_hash, false));
+                match is_new_news {
+                    None => rsk_news.push((tx_id, (current_block_hash, false))),
+                    Some(pos) => {
+                        let (_, (existing_block_hash, _)) = &rsk_news[pos];
+                        if existing_block_hash == &current_block_hash {
+                            // We already have this news, do not update
+                            return Ok(());
+                        } else {
+                            // Replace the notification if the block hash is different
+                            rsk_news[pos] = (tx_id, (current_block_hash, false));
+                        }
                     }
                 }
 
@@ -254,26 +271,25 @@ impl MonitorStoreApi for MonitorStore {
                     .iter()
                     .position(|(id, utxo_i, _, _, _)| id == &tx_id && *utxo_i == utxo_index);
 
-                if is_new_news.is_none() {
-                    utxo_news.push((
+                match is_new_news {
+                    None => utxo_news.push((
                         tx_id,
                         utxo_index,
                         extra_data.clone(),
                         spender_tx_id,
                         (current_block_hash, false),
-                    ));
-                } else {
-                    let pos = is_new_news.unwrap();
-                    let (_, _, _, _, (_, _)) = &utxo_news[pos];
-
-                    // Replace the notification if the block hash is different
-                    utxo_news[pos] = (
-                        tx_id,
-                        utxo_index,
-                        extra_data.clone(),
-                        spender_tx_id,
-                        (current_block_hash, false),
-                    );
+                    )),
+                    Some(pos) => {
+                        let (_, _, _, _, (_, _)) = &utxo_news[pos];
+                        // Replace the notification if the block hash is different
+                        utxo_news[pos] = (
+                            tx_id,
+                            utxo_index,
+                            extra_data.clone(),
+                            spender_tx_id,
+                            (current_block_hash, false),
+                        );
+                    }
                 }
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
@@ -349,7 +365,7 @@ impl MonitorStoreApi for MonitorStore {
 
                 if let Some((block_hash, _)) = new_block_news.as_mut() {
                     new_block_news = Some((*block_hash, true));
-                    self.store.set(&key, &new_block_news, None)?;
+                    self.store.set(&key, new_block_news, None)?;
                 }
             }
         }
