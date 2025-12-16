@@ -75,7 +75,7 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors()?;
     assert!(matches!(
         monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(tx_id, utxo_index, _)
+        TypesToMonitorStore::SpendingUTXOTransaction(tx_id, utxo_index, _, _)
             if tx_id == tx3.compute_txid() && utxo_index == 1
     ));
     store.deactivate_monitor(utxo_monitor.clone())?;
@@ -159,6 +159,73 @@ fn test_monitor_store_cancel_deactivated_transaction_monitor() -> Result<(), any
     store.cancel_monitor(active_monitor.clone())?;
     let monitors = store.get_monitors()?;
     assert!(monitors.is_empty());
+
+    Ok(())
+}
+
+#[test]
+fn test_update_spending_utxo_monitor() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx_id = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
+    let spender_tx_id_1 =
+        Txid::from_str("1000000000000000000000000000000000000000000000000000000000000000")?;
+    let spender_tx_id_2 =
+        Txid::from_str("2000000000000000000000000000000000000000000000000000000000000000")?;
+
+    // Add a SpendingUTXOTransaction monitor
+    let utxo_monitor = TypesToMonitor::SpendingUTXOTransaction(tx_id, 1, String::new());
+    store.add_monitor(utxo_monitor.clone())?;
+
+    // Verify initial state - spending tx_id should be None
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(matches!(
+        monitors[0].clone(),
+        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, None)
+            if t == tx_id && u == 1
+    ));
+
+    // Update with a spending transaction ID
+    store.update_spending_utxo_monitor((tx_id, 1, Some(spender_tx_id_1)))?;
+
+    // Verify the spending tx_id was updated
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(matches!(
+        monitors[0].clone(),
+        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx))
+            if t == tx_id && u == 1 && stx == spender_tx_id_1
+    ));
+
+    // Update with a different spending transaction ID
+    store.update_spending_utxo_monitor((tx_id, 1, Some(spender_tx_id_2)))?;
+
+    // Verify the spending tx_id was updated again
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(matches!(
+        monitors[0].clone(),
+        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx))
+            if t == tx_id && u == 1 && stx == spender_tx_id_2
+    ));
+
+    // Update with None (orphan case)
+    store.update_spending_utxo_monitor((tx_id, 1, None))?;
+
+    // Verify the spending tx_id was set back to None
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(matches!(
+        monitors[0].clone(),
+        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, None)
+            if t == tx_id && u == 1
+    ));
+
+    clear_output();
 
     Ok(())
 }
