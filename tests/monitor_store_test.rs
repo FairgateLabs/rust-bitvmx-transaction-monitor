@@ -75,7 +75,7 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors()?;
     assert!(matches!(
         monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(tx_id, utxo_index, _)
+        TypesToMonitorStore::SpendingUTXOTransaction(tx_id, utxo_index, _, _)
             if tx_id == tx3.compute_txid() && utxo_index == 1
     ));
     store.deactivate_monitor(utxo_monitor.clone())?;
@@ -423,9 +423,9 @@ fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
     // All three should be active
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 3);
-    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id1 && *idx == 0)));
-    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id1 && *idx == 1)));
-    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id2 && *idx == 0)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 0)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _  ) if *id == tx_id1 && *idx == 1)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id2 && *idx == 0)));
 
     // Deactivate one
     store.deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
@@ -437,9 +437,9 @@ fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
     // Two should remain active
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 2);
-    assert!(!monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id1 && *idx == 0)));
-    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id1 && *idx == 1)));
-    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id2 && *idx == 0)));
+    assert!(!monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 0)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 1)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id2 && *idx == 0)));
 
     // Reactivate
     store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
@@ -558,7 +558,7 @@ fn test_reactivate_monitor() -> Result<(), anyhow::Error> {
     ))?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 3);
-    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _) if *id == tx_id2 && *idx == 0)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id2 && *idx == 0)));
 
     // Test reactivating NewBlock monitor
     store.add_monitor(TypesToMonitor::NewBlock)?;
