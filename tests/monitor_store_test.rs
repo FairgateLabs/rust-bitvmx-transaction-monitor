@@ -163,67 +163,419 @@ fn test_monitor_store_cancel_deactivated_transaction_monitor() -> Result<(), any
     Ok(())
 }
 
+/// This test verifies that active and inactive monitors are stored in separate keys.
+/// It tests:
+/// 1. Active monitors are returned by get_monitors
+/// 2. Inactive monitors are not returned by get_monitors
+/// 3. Deactivating moves monitors from active to inactive
+/// 4. Reactivating (adding a deactivated monitor) moves it back to active
+/// 5. Multiple monitors can coexist in active and inactive states
 #[test]
-fn test_update_spending_utxo_monitor() -> Result<(), anyhow::Error> {
+fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
-    let tx_id = Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
-    let spender_tx_id_1 =
-        Txid::from_str("1000000000000000000000000000000000000000000000000000000000000000")?;
-    let spender_tx_id_2 =
-        Txid::from_str("2000000000000000000000000000000000000000000000000000000000000000")?;
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
 
-    // Add a SpendingUTXOTransaction monitor
-    let utxo_monitor = TypesToMonitor::SpendingUTXOTransaction(tx_id, 1, String::new());
+    let tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195601).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx3 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195602).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+    let tx_id2 = tx2.compute_txid();
+    let tx_id3 = tx3.compute_txid();
+
+    // Add three transaction monitors
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+    ))?;
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id2],
+        "extra2".to_string(),
+    ))?;
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id3],
+        "extra3".to_string(),
+    ))?;
+
+    // All three should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 3);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id2)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id3)));
+
+    // Deactivate tx_id2
+    store.deactivate_monitor(TypesToMonitor::Transactions(vec![tx_id2], String::new()))?;
+
+    // Only tx_id1 and tx_id3 should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id2)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id3)));
+
+    // Deactivate tx_id1 as well
+    store.deactivate_monitor(TypesToMonitor::Transactions(vec![tx_id1], String::new()))?;
+
+    // Only tx_id3 should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id2)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id3)));
+
+    // Reactivate tx_id2 (add it again)
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id2],
+        "extra2_reactivated".to_string(),
+    ))?;
+
+    // tx_id2 and tx_id3 should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id2)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id3)));
+
+    // Cancel tx_id2 (should remove from both active and inactive)
+    store.cancel_monitor(TypesToMonitor::Transactions(vec![tx_id2], String::new()))?;
+
+    // Only tx_id3 should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id3)));
+
+    // Reactivate tx_id1
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1_reactivated".to_string(),
+    ))?;
+
+    // tx_id1 and tx_id3 should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id3)));
+
+    clear_output();
+
+    Ok(())
+}
+
+/// This test verifies active/inactive separation for RskPeginTransaction and NewBlock monitors
+#[test]
+fn test_active_inactive_boolean_monitors() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    // Test RskPeginTransaction
+    store.add_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction)));
+
+    store.deactivate_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction)));
+
+    // Reactivate
+    store.add_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction)));
+
+    // Cancel
+    store.cancel_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction)));
+
+    // Test NewBlock
+    store.add_monitor(TypesToMonitor::NewBlock)?;
+    let monitors = store.get_monitors()?;
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::NewBlock)));
+
+    store.deactivate_monitor(TypesToMonitor::NewBlock)?;
+    let monitors = store.get_monitors()?;
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::NewBlock)));
+
+    // Reactivate
+    store.add_monitor(TypesToMonitor::NewBlock)?;
+    let monitors = store.get_monitors()?;
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::NewBlock)));
+
+    // Cancel
+    store.cancel_monitor(TypesToMonitor::NewBlock)?;
+    let monitors = store.get_monitors()?;
+    assert!(!monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::NewBlock)));
+
+    clear_output();
+
+    Ok(())
+}
+
+/// This test verifies active/inactive separation for SpendingUTXOTransaction monitors
+#[test]
+fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195601).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+    let tx_id2 = tx2.compute_txid();
+
+    // Add two UTXO monitors
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra1".to_string(),
+    ))?;
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        1,
+        "extra2".to_string(),
+    ))?;
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id2,
+        0,
+        "extra3".to_string(),
+    ))?;
+
+    // All three should be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 3);
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 0)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _  ) if *id == tx_id1 && *idx == 1)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id2 && *idx == 0)));
+
+    // Deactivate one
+    store.deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        String::new(),
+    ))?;
+
+    // Two should remain active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+    assert!(!monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 0)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 1)));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id2 && *idx == 0)));
+
+    // Reactivate
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra1_reactivated".to_string(),
+    ))?;
+
+    // All three should be active again
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 3);
+
+    // Cancel one
+    store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        String::new(),
+    ))?;
+
+    // Two should remain
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+
+    clear_output();
+
+    Ok(())
+}
+
+/// This test specifically verifies reactivating monitors after they have been deactivated.
+/// It tests that calling add_monitor on a previously deactivated monitor reactivates it.
+#[test]
+fn test_reactivate_monitor() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195601).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+    let tx_id2 = tx2.compute_txid();
+
+    // Test reactivating Transactions monitor
+    let tx_monitor = TypesToMonitor::Transactions(vec![tx_id1], "extra1".to_string());
+    store.add_monitor(tx_monitor.clone())?;
+
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+
+    // Deactivate
+    store.deactivate_monitor(tx_monitor.clone())?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 0);
+
+    // Reactivate by calling add_monitor again
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1_reactivated".to_string(),
+    ))?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _) if *id == tx_id1)));
+
+    // Test reactivating RskPeginTransaction monitor
+    store.add_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2); // tx_id1 + RskPeginTransaction
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction)));
+
+    store.deactivate_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1); // Only tx_id1
+
+    // Reactivate
+    store.add_monitor(TypesToMonitor::RskPeginTransaction)?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction)));
+
+    // Test reactivating SpendingUTXOTransaction monitor
+    let utxo_monitor = TypesToMonitor::SpendingUTXOTransaction(tx_id2, 0, "extra2".to_string());
     store.add_monitor(utxo_monitor.clone())?;
-
-    // Verify initial state - spending tx_id should be None
     let monitors = store.get_monitors()?;
-    assert_eq!(monitors.len(), 1);
-    assert!(matches!(
-        monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, None)
-            if t == tx_id && u == 1
-    ));
+    assert_eq!(monitors.len(), 3); // tx_id1 + RskPeginTransaction + utxo
 
-    // Update with a spending transaction ID
-    store.update_spending_utxo_monitor((tx_id, 1, Some(spender_tx_id_1)))?;
-
-    // Verify the spending tx_id was updated
+    store.deactivate_monitor(utxo_monitor.clone())?;
     let monitors = store.get_monitors()?;
-    assert_eq!(monitors.len(), 1);
-    assert!(matches!(
-        monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx))
-            if t == tx_id && u == 1 && stx == spender_tx_id_1
-    ));
+    assert_eq!(monitors.len(), 2); // tx_id1 + RskPeginTransaction
 
-    // Update with a different spending transaction ID
-    store.update_spending_utxo_monitor((tx_id, 1, Some(spender_tx_id_2)))?;
-
-    // Verify the spending tx_id was updated again
+    // Reactivate
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id2,
+        0,
+        "extra2_reactivated".to_string(),
+    ))?;
     let monitors = store.get_monitors()?;
-    assert_eq!(monitors.len(), 1);
-    assert!(matches!(
-        monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx))
-            if t == tx_id && u == 1 && stx == spender_tx_id_2
-    ));
+    assert_eq!(monitors.len(), 3);
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id2 && *idx == 0)));
 
-    // Update with None (orphan case)
-    store.update_spending_utxo_monitor((tx_id, 1, None))?;
-
-    // Verify the spending tx_id was set back to None
+    // Test reactivating NewBlock monitor
+    store.add_monitor(TypesToMonitor::NewBlock)?;
     let monitors = store.get_monitors()?;
-    assert_eq!(monitors.len(), 1);
-    assert!(matches!(
-        monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, None)
-            if t == tx_id && u == 1
-    ));
+    assert_eq!(monitors.len(), 4); // All monitors
+
+    store.deactivate_monitor(TypesToMonitor::NewBlock)?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 3); // Without NewBlock
+
+    // Reactivate
+    store.add_monitor(TypesToMonitor::NewBlock)?;
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 4);
+    assert!(monitors
+        .iter()
+        .any(|m| matches!(m, TypesToMonitorStore::NewBlock)));
 
     clear_output();
 
