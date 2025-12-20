@@ -1,6 +1,6 @@
 [package]
 name = "bitvmx-transaction-monitor"
-version = "0.0.2"
+version = "0.5.0"
 edition = "2021"
 description = "Monitor"
 keywords = ["bitcoin", "monitor", "bitcoin transactions"]
@@ -10,10 +10,10 @@ license = "MIT"
 categories = ["cryptocurrency", "monitoring"]
 
 [dependencies]
-bitcoin-indexer = { git = "https://github.com/FairgateLabs/rust-bitcoin-indexer.git", branch = "v.0.0.2" }
-bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.2" }
-rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.2" }
-bitvmx-bitcoin-rpc = { git = "https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git", branch = "v.0.0.2" }
+bitcoin-indexer = { git = "https://github.com/FairgateLabs/rust-bitcoin-indexer.git", tag = "v0.5.0" }
+bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", tag = "v0.5.0" }
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", tag = "v0.5.0" }
+bitvmx-bitcoin-rpc = { git = "https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git", tag = "v0.5.0" }
 bitcoin = "0.32.2"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
@@ -26,5 +26,5 @@ uuid = { version = "1.11.0", features = ["v4", "serde"] }
 hex = "0.4"
 
 [dev-dependencies]
-bitcoind = { git = "https://github.com/FairgateLabs/rust-bitcoind.git", branch = "v.0.0.2" }
+bitcoind = { git = "https://github.com/FairgateLabs/rust-bitcoind.git", tag = "v0.5.0" }
 bitcoincore-rpc = "0.19"
