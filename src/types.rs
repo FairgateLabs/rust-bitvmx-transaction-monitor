@@ -101,9 +101,9 @@ impl BlockInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypesToMonitor {
-    Transactions(Vec<Txid>, String),
-    SpendingUTXOTransaction(Txid, u32, String),
-    RskPeginTransaction,
+    Transactions(Vec<Txid>, String, Option<u32>),
+    SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
+    RskPeginTransaction(Option<u32>),
     NewBlock,
 }
 
