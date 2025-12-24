@@ -167,10 +167,12 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
         "test".to_string(),
+        None,
     ))?;
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id_2],
         "test 2".to_string(),
+        None,
     ))?;
 
     monitor.tick()?;
@@ -302,6 +304,7 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
         "test".to_string(),
+        None,
     ))?;
 
     monitor.tick()?;
@@ -331,8 +334,16 @@ fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
     };
 
     let tx_id = tx.compute_txid();
-    store.add_monitor(TypesToMonitor::Transactions(vec![tx_id], String::new()))?;
-    store.deactivate_monitor(TypesToMonitor::Transactions(vec![tx_id], String::new()))?;
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id],
+        String::new(),
+        None,
+    ))?;
+    store.deactivate_monitor(TypesToMonitor::Transactions(
+        vec![tx_id],
+        String::new(),
+        None,
+    ))?;
 
     let full_block = FullBlock {
         height: 200,
@@ -419,7 +430,7 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
         store,
         MonitorSettings::from(MonitorSettingsConfig::default()),
     )?;
-    monitor.save_monitor(TypesToMonitor::RskPeginTransaction)?;
+    monitor.save_monitor(TypesToMonitor::RskPeginTransaction(None))?;
     monitor.tick()?;
 
     // Verify monitor is still active
@@ -427,7 +438,7 @@ fn test_rsk_pegin_monitor_not_deactivated() -> Result<(), anyhow::Error> {
     assert_eq!(monitors.len(), 1);
     assert!(matches!(
         monitors[0],
-        TypesToMonitorStore::RskPeginTransaction
+        TypesToMonitorStore::RskPeginTransaction(_)
     ));
 
     clear_output();
@@ -551,6 +562,7 @@ fn test_best_block_news() -> Result<(), anyhow::Error> {
     monitor.save_monitor(TypesToMonitor::Transactions(
         vec![tx_id],
         "test".to_string(),
+        None,
     ))?;
 
     // Check if there's pending work after saving the transaction monitor; it should be true
@@ -747,6 +759,7 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
         target_tx_id,
         target_utxo_index,
         String::new(),
+        None,
     ))?;
 
     // First tick - should detect the spending transaction
@@ -971,6 +984,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
         target_tx_id,
         target_utxo_index,
         String::new(),
+        None,
     ))?;
 
     // Ensure the monitor is initially active
@@ -985,7 +999,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     assert_eq!(monitors.len(), 1);
     assert!(matches!(
         monitors[0].clone(),
-        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx))
+        TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, Some(stx), _)
             if t == target_tx_id && u == target_utxo_index && stx == spending_tx_id
     ));
 
