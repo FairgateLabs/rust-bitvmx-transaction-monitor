@@ -303,7 +303,7 @@ where
             current_confirmations == trigger
         } else {
             // If None, always send news when current confirmations are less than or equal to the confirmation threshold
-            current_confirmations <= self.settings.max_monitoring_confirmations
+            current_confirmations < self.settings.max_monitoring_confirmations
         }
     }
 
@@ -311,6 +311,7 @@ where
         self.indexer.tick()?;
 
         if !self.is_pending_work()? {
+            println!("No pending work, skipping tick");
             debug!("No pending work, skipping tick");
             return Ok(());
         }
@@ -413,7 +414,14 @@ where
                     number_confirmation_trigger,
                 ) => {
                     if let Some(tx_id_spending) = tx_id_spending {
-                        let tx_info = self.indexer.get_tx(&tx_id_spending)?.unwrap();
+                        let tx_info = match self.indexer.get_tx(&tx_id_spending)? {
+                            Some(tx_info) => tx_info,
+                            None => {
+                                return Err(MonitorError::TransactionNotFound(
+                                    tx_id_spending.to_string(),
+                                ))
+                            }
+                        };
 
                         if tx_info.block_info.orphan {
                             info!(
@@ -494,7 +502,15 @@ where
                             is_spending_output(tx, target_tx_id, target_utxo_index);
 
                         if is_spending_output {
-                            let tx_info = self.indexer.get_tx(&tx.compute_txid())?.unwrap();
+                            println!("is_spending_output: {}", tx.compute_txid());
+                            let tx_info = match self.indexer.get_tx(&tx.compute_txid())? {
+                                Some(tx_info) => tx_info,
+                                None => {
+                                    return Err(MonitorError::TransactionNotFound(
+                                        tx.compute_txid().to_string(),
+                                    ))
+                                }
+                            };
 
                             self.store.update_spending_utxo_monitor((
                                 target_tx_id,

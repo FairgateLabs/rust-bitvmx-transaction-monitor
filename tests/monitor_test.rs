@@ -894,23 +894,17 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
         estimated_fee_rate: 0,
     };
 
-    // Transaction info for the spending transaction at each confirmation level
     let spending_tx_info_at_100 = TransactionInfo {
         tx: spending_tx.clone(),
-        block_info: block_102.clone(),
+        block_info: block_with_spending_tx.clone(),
         confirmations: 1,
     };
 
+    // Transaction info for the spending transaction at each confirmation level
     let spending_tx_info_at_101 = TransactionInfo {
         tx: spending_tx.clone(),
         block_info: block_102.clone(),
         confirmations: 2,
-    };
-
-    let spending_tx_info_at_102 = TransactionInfo {
-        tx: spending_tx.clone(),
-        block_info: block_102.clone(),
-        confirmations: 3,
     };
 
     // Set expectations for each tick: block 100, then 101, then 102
@@ -959,23 +953,17 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
-        .times(2)
+        .times(4)
         .returning(move |_| Ok(Some(spending_tx_info_at_100.clone())));
 
     mock_indexer
         .expect_get_tx()
         .with(eq(spending_tx_id))
-        .times(2)
+        .times(1)
         .returning(move |_| Ok(Some(spending_tx_info_at_101.clone())));
 
-    mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx_id))
-        .times(1)
-        .returning(move |_| Ok(Some(spending_tx_info_at_102.clone())));
-
     let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
-    settings.max_monitoring_confirmations = 3;
+    settings.max_monitoring_confirmations = 2;
 
     let monitor = Monitor::new(mock_indexer, store, settings)?;
 
