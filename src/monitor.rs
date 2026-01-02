@@ -292,6 +292,21 @@ where
         Ok(false)
     }
 
+    /// Determines if news should be sent based on the confirmation trigger.
+    fn should_send_news(
+        &self,
+        number_confirmation_trigger: Option<u32>,
+        current_confirmations: u32,
+    ) -> bool {
+        if let Some(trigger) = number_confirmation_trigger {
+            // Only send news when confirmations exactly match the trigger value
+            current_confirmations == trigger
+        } else {
+            // If None, always send news when current confirmations are less than the max monitoring confirmations
+            current_confirmations < self.settings.max_monitoring_confirmations
+        }
+    }
+
     pub fn tick(&self) -> Result<(), MonitorError> {
         self.indexer.tick()?;
 
@@ -305,175 +320,48 @@ where
         let indexer_best_block_height = indexer_best_block.height;
         let current_block_hash = indexer_best_block.hash;
 
-        let txs_types = self.store.get_monitors()?;
+        let txs_monitors = self.store.get_monitors()?;
 
-        for tx_type in txs_types {
+        for tx_type in txs_monitors {
             match tx_type {
-                TypesToMonitorStore::Transaction(tx_id, extra_data) => {
-                    let tx_info = self.indexer.get_tx(&tx_id)?;
-
-                    if let Some(tx) = tx_info {
-                        if tx.block_info.orphan {
-                            info!(
-                                "Orphan Transaction({}) | Height({})",
-                                tx_id, tx.block_info.height
-                            );
-
-                            self.store.update_news(
-                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
-                                current_block_hash,
-                            )?;
-                        }
-
-                        if tx.confirmations >= self.settings.max_monitoring_confirmations {
-                            // Deactivate monitor after 100 confirmations
-                            self.store.deactivate_monitor(TypesToMonitor::Transactions(
-                                vec![tx_id],
-                                extra_data.clone(),
-                            ))?;
-
-                            info!(
-                                "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
-                                tx_id,
-                                indexer_best_block_height,
-                                self.settings.max_monitoring_confirmations,
-                            );
-                        } else {
-                            self.store.update_news(
-                                MonitoredTypes::Transaction(tx_id, extra_data.clone()),
-                                current_block_hash,
-                            )?;
-
-                            info!(
-                                "News for Transaction({}) | Height({}) | Confirmations({})",
-                                tx_id, indexer_best_block_height, tx.confirmations,
-                            );
-                        }
-                    }
+                TypesToMonitorStore::Transaction(
+                    tx_id,
+                    extra_data,
+                    number_confirmation_trigger,
+                ) => {
+                    self.process_transaction_monitor(
+                        tx_id,
+                        extra_data,
+                        number_confirmation_trigger,
+                        indexer_best_block_height,
+                        current_block_hash,
+                    )?;
                 }
-                TypesToMonitorStore::RskPeginTransaction => {
-                    let txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
-
-                    for tx_id in txs_ids {
-                        self.store.update_news(
-                            MonitoredTypes::RskPeginTransaction(tx_id),
-                            current_block_hash,
-                        )?;
-
-                        if let Some(tx) = self.indexer.get_tx(&tx_id)? {
-                            info!(
-                                "News for RSK pegin Transaction({}) | Height({}) | Confirmations({})",
-                                tx_id,
-                                indexer_best_block_height,
-                                indexer_best_block_height - tx.block_info.height + 1,
-                            );
-                        }
-                    }
+                TypesToMonitorStore::RskPegin(from) => {
+                    self.process_rsk_pegin_transaction(
+                        from,
+                        &indexer_best_block,
+                        indexer_best_block_height,
+                        current_block_hash,
+                    )?;
                 }
                 TypesToMonitorStore::SpendingUTXOTransaction(
                     target_tx_id,
                     target_utxo_index,
                     extra_data,
                     tx_id_spending,
+                    number_confirmation_trigger,
                 ) => {
-                    if let Some(tx_id_spending) = tx_id_spending {
-                        let tx_info = self.indexer.get_tx(&tx_id_spending)?.unwrap();
-                        if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
-                            info!("Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                target_tx_id,
-                                target_utxo_index,
-                                indexer_best_block_height,
-                                self.settings.max_monitoring_confirmations,
-                            );
-
-                            self.store.deactivate_monitor(
-                                TypesToMonitor::SpendingUTXOTransaction(
-                                    target_tx_id,
-                                    target_utxo_index,
-                                    extra_data.clone(),
-                                ),
-                            )?;
-
-                            // Skip searching in the new block for the spending transaction.
-                            // Because it is already confirmed.
-                            continue;
-                        }
-
-                        if tx_info.block_info.orphan {
-                            info!(
-                                "Orphan SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                target_tx_id,
-                                target_utxo_index,
-                                indexer_best_block_height,
-                                tx_info.confirmations,
-                            );
-
-                            self.store.update_spending_utxo_monitor((
-                                target_tx_id,
-                                target_utxo_index,
-                                None,
-                            ))?;
-
-                            // Don't skip searching in the new block for the spending transaction.
-                            // Because it is needed to check if there is a new spending transaction.
-                        } else {
-                            self.store.update_news(
-                                MonitoredTypes::SpendingUTXOTransaction(
-                                    target_tx_id,
-                                    target_utxo_index,
-                                    extra_data.clone(),
-                                    tx_id_spending,
-                                ),
-                                current_block_hash,
-                            )?;
-
-                            info!(
-                                "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                target_tx_id,
-                                target_utxo_index,
-                                indexer_best_block_height,
-                                tx_info.confirmations,
-                            );
-
-                            // Skip searching in the new block for the spending transaction.
-                            // Because it is already confirmed.
-                            continue;
-                        }
-                    }
-
-                    // Check each transaction in the new block for a spending transaction of the target UTXO
-                    for tx in indexer_best_block.txs.iter() {
-                        let is_spending_output =
-                            is_spending_output(tx, target_tx_id, target_utxo_index);
-
-                        if is_spending_output {
-                            let tx_info = self.indexer.get_tx(&tx.compute_txid())?.unwrap();
-
-                            self.store.update_spending_utxo_monitor((
-                                target_tx_id,
-                                target_utxo_index,
-                                Some(tx.compute_txid()),
-                            ))?;
-
-                            self.store.update_news(
-                                MonitoredTypes::SpendingUTXOTransaction(
-                                    target_tx_id,
-                                    target_utxo_index,
-                                    extra_data.clone(),
-                                    tx.compute_txid(),
-                                ),
-                                current_block_hash,
-                            )?;
-
-                            info!(
-                                    "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                                    target_tx_id,
-                                    target_utxo_index,
-                                    indexer_best_block_height,
-                                    tx_info.confirmations,
-                                );
-                        }
-                    }
+                    self.process_spending_utxo_transaction(
+                        target_tx_id,
+                        target_utxo_index,
+                        extra_data,
+                        tx_id_spending,
+                        number_confirmation_trigger,
+                        &indexer_best_block,
+                        indexer_best_block_height,
+                        current_block_hash,
+                    )?;
                 }
                 TypesToMonitorStore::NewBlock => {
                     self.store.update_news(
@@ -502,6 +390,232 @@ where
         }
 
         Ok(txs_ids)
+    }
+
+    fn process_rsk_pegin_transaction(
+        &self,
+        number_confirmation_trigger: Option<u32>,
+        indexer_best_block: &FullBlock,
+        indexer_best_block_height: BlockHeight,
+        current_block_hash: bitcoin::BlockHash,
+    ) -> Result<(), MonitorError> {
+        const INTERNAL_RSK_PEGUIN: &str = "INTERNAL_RSK_PEGIN";
+
+        let new_txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
+
+        // Add new transactions to monitoring using add_monitor with INTERNAL_RSK_PEGUIN context
+        for tx_id in &new_txs_ids {
+            self.store.add_monitor(TypesToMonitor::Transactions(
+                vec![*tx_id],
+                INTERNAL_RSK_PEGUIN.to_string(),
+                number_confirmation_trigger,
+            ))?;
+
+            self.process_transaction_monitor(
+                *tx_id,
+                INTERNAL_RSK_PEGUIN.to_string(),
+                number_confirmation_trigger,
+                indexer_best_block_height,
+                current_block_hash,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn process_transaction_monitor(
+        &self,
+        tx_id: Txid,
+        extra_data: String,
+        number_confirmation_trigger: Option<u32>,
+        indexer_best_block_height: BlockHeight,
+        current_block_hash: bitcoin::BlockHash,
+    ) -> Result<(), MonitorError> {
+        let tx_info = self.indexer.get_tx(&tx_id)?;
+
+        if let Some(tx) = tx_info {
+            if tx.block_info.orphan {
+                info!(
+                    "Orphan Transaction({}) | Height({})",
+                    tx_id, tx.block_info.height
+                );
+            }
+
+            // Check if we should send news based on number_confirmation_trigger
+            let should_send_news =
+                self.should_send_news(number_confirmation_trigger, tx.confirmations);
+
+            if should_send_news {
+                if extra_data == "INTERNAL_RSK_PEGIN" {
+                    self.store.update_news(
+                        MonitoredTypes::RskPeginTransaction(tx_id),
+                        current_block_hash,
+                    )?;
+                } else {
+                    self.store.update_news(
+                        MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                        current_block_hash,
+                    )?;
+                }
+
+                info!(
+                    "News for Transaction({}) | Height({}) | Confirmations({})",
+                    tx_id, indexer_best_block_height, tx.confirmations,
+                );
+            }
+
+            // Check if we should deactivate monitor based on max_monitoring_confirmations
+            if tx.confirmations >= self.settings.max_monitoring_confirmations {
+                self.store.deactivate_monitor(TypesToMonitor::Transactions(
+                    vec![tx_id],
+                    extra_data.clone(),
+                    number_confirmation_trigger,
+                ))?;
+
+                info!(
+                    "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
+                    tx_id, indexer_best_block_height, self.settings.max_monitoring_confirmations,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn process_spending_utxo_transaction(
+        &self,
+        target_tx_id: Txid,
+        target_utxo_index: u32,
+        extra_data: String,
+        tx_id_spending: Option<Txid>,
+        number_confirmation_trigger: Option<u32>,
+        indexer_best_block: &FullBlock,
+        indexer_best_block_height: BlockHeight,
+        current_block_hash: bitcoin::BlockHash,
+    ) -> Result<(), MonitorError> {
+        if let Some(tx_id_spending) = tx_id_spending {
+            let tx_info = match self.indexer.get_tx(&tx_id_spending)? {
+                Some(tx_info) => tx_info,
+                None => {
+                    return Err(MonitorError::TransactionNotFound(
+                        tx_id_spending.to_string(),
+                    ));
+                }
+            };
+
+            if tx_info.block_info.orphan {
+                info!(
+                    "Orphan SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                    target_tx_id,
+                    target_utxo_index,
+                    indexer_best_block_height,
+                    tx_info.confirmations,
+                );
+
+                self.store
+                    .update_spending_utxo_monitor((target_tx_id, target_utxo_index, None))?;
+
+                // Don't skip searching in the new block for the spending transaction.
+                // Because it is needed to check if there is a new spending transaction.
+            } else {
+                // Check if we should send news based on number_confirmation_trigger
+                let should_send_news =
+                    self.should_send_news(number_confirmation_trigger, tx_info.confirmations);
+
+                if should_send_news {
+                    self.store.update_news(
+                        MonitoredTypes::SpendingUTXOTransaction(
+                            target_tx_id,
+                            target_utxo_index,
+                            extra_data.clone(),
+                            tx_id_spending,
+                        ),
+                        current_block_hash,
+                    )?;
+
+                    info!(
+                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                        target_tx_id,
+                        target_utxo_index,
+                        indexer_best_block_height,
+                        tx_info.confirmations,
+                    );
+                }
+
+                // Check if we should deactivate monitor based on max_monitoring_confirmations
+                if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
+                    info!("Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                        target_tx_id,
+                        target_utxo_index,
+                        indexer_best_block_height,
+                        self.settings.max_monitoring_confirmations,
+                    );
+
+                    self.store
+                        .deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
+                            target_tx_id,
+                            target_utxo_index,
+                            extra_data.clone(),
+                            number_confirmation_trigger,
+                        ))?;
+
+                    // Skip searching in the new block for the spending transaction.
+                    // Because it is already confirmed.
+                    return Ok(());
+                }
+
+                // Skip searching in the new block for the spending transaction.
+                // Because it is already confirmed.
+                return Ok(());
+            }
+        }
+
+        // Check each transaction in the new block for a spending transaction of the target UTXO
+        for tx in indexer_best_block.txs.iter() {
+            let is_spending_output = is_spending_output(tx, target_tx_id, target_utxo_index);
+
+            if is_spending_output {
+                let tx_info = match self.indexer.get_tx(&tx.compute_txid())? {
+                    Some(tx_info) => tx_info,
+                    None => {
+                        return Err(MonitorError::TransactionNotFound(
+                            tx.compute_txid().to_string(),
+                        ))
+                    }
+                };
+
+                self.store.update_spending_utxo_monitor((
+                    target_tx_id,
+                    target_utxo_index,
+                    Some(tx.compute_txid()),
+                ))?;
+
+                let should_send_news =
+                    self.should_send_news(number_confirmation_trigger, tx_info.confirmations);
+
+                if should_send_news {
+                    self.store.update_news(
+                        MonitoredTypes::SpendingUTXOTransaction(
+                            target_tx_id,
+                            target_utxo_index,
+                            extra_data.clone(),
+                            tx.compute_txid(),
+                        ),
+                        current_block_hash,
+                    )?;
+
+                    info!(
+                        "News for SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
+                        target_tx_id,
+                        target_utxo_index,
+                        indexer_best_block_height,
+                        tx_info.confirmations,
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError> {

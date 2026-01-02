@@ -50,7 +50,7 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
 
     let tx_id = block_info.txs[0].compute_txid();
 
-    let txs_monitor = TypesToMonitor::Transactions(vec![tx_id], "Txid".to_string());
+    let txs_monitor = TypesToMonitor::Transactions(vec![tx_id], "Txid".to_string(), None);
     monitor.monitor(txs_monitor)?;
 
     let best_block_monitor = TypesToMonitor::NewBlock;
