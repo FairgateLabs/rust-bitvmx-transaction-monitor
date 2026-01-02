@@ -16,7 +16,7 @@ enum MonitorKey {
     Transactions(bool),
     SpendingUTXOTransactions(bool),
     PendingWork,
-    RskPeginTransaction,
+    RskPegin,
     NewBlock,
     TransactionsNews,
     RskPeginTransactionsNews,
@@ -40,8 +40,8 @@ pub enum MonitoredTypes {
 pub enum TypesToMonitorStore {
     Transaction(Txid, String, Option<u32>),
     SpendingUTXOTransaction(Txid, u32, String, Option<Txid>, Option<u32>),
-    RskPeginTransaction(Option<u32>),
     NewBlock,
+    RskPegin(Option<u32>),
 }
 
 pub trait MonitorStoreApi {
@@ -86,7 +86,7 @@ impl MonitorStore {
                 status = if is_active { "active" } else { "inactive" }
             ),
             MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
-            MonitorKey::RskPeginTransaction => format!("{prefix}/rsk/tx"),
+            MonitorKey::RskPegin => format!("{prefix}/rsk/pegin"),
             MonitorKey::NewBlock => format!("{prefix}/new/block"),
             MonitorKey::TransactionsNews => format!("{prefix}/tx/news"),
             MonitorKey::RskPeginTransactionsNews => format!("{prefix}/rsk/tx/news"),
@@ -392,17 +392,14 @@ impl MonitorStoreApi for MonitorStore {
             ));
         }
 
-        // Get RSK pegin transaction monitor
-        let rsk_pegin_key = self.get_key(MonitorKey::RskPeginTransaction);
-        let monitor_rsk_pegin = self
-            .store
-            .get::<_, (bool, Option<u32>)>(&rsk_pegin_key)?
-            .unwrap_or((false, None));
+        // Get RSK pegin monitor (if active)
+        let rsk_pegin_key = self.get_key(MonitorKey::RskPegin);
+        let rsk_pegin_active: Option<(bool, Option<u32>)> = self.store.get(&rsk_pegin_key)?;
 
-        if monitor_rsk_pegin.0 {
-            monitors.push(TypesToMonitorStore::RskPeginTransaction(
-                monitor_rsk_pegin.1,
-            ));
+        if let Some((active, from)) = rsk_pegin_active {
+            if active {
+                monitors.push(TypesToMonitorStore::RskPegin(from));
+            }
         }
 
         // Get active spending UTXO transactions
@@ -465,8 +462,8 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&key, &txs, None)?;
             }
-            TypesToMonitor::RskPeginTransaction(from) => {
-                let key = self.get_key(MonitorKey::RskPeginTransaction);
+            TypesToMonitor::RskPegin(from) => {
+                let key = self.get_key(MonitorKey::RskPegin);
                 self.store.set(&key, (true, from), None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, from) => {
@@ -534,8 +531,8 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
 
-            TypesToMonitor::RskPeginTransaction(from) => {
-                let key = self.get_key(MonitorKey::RskPeginTransaction);
+            TypesToMonitor::RskPegin(from) => {
+                let key = self.get_key(MonitorKey::RskPegin);
                 self.store.set(&key, (false, from), None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, _, _) => {
@@ -615,8 +612,8 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
-            TypesToMonitor::RskPeginTransaction(from) => {
-                let key = self.get_key(MonitorKey::RskPeginTransaction);
+            TypesToMonitor::RskPegin(from) => {
+                let key = self.get_key(MonitorKey::RskPegin);
                 self.store.set(&key, (false, from), None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, _, _) => {

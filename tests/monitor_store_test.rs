@@ -58,12 +58,12 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     assert_eq!(monitors.len(), 0);
 
     // 3. Test RskPeginTransaction
-    let rsk_monitor = TypesToMonitor::RskPeginTransaction(None);
+    let rsk_monitor = TypesToMonitor::RskPegin(None);
     store.add_monitor(rsk_monitor.clone())?;
     let monitors = store.get_monitors()?;
     assert!(matches!(
         monitors[0].clone(),
-        TypesToMonitorStore::RskPeginTransaction(_)
+        TypesToMonitorStore::RskPegin(_)
     ));
     store.deactivate_monitor(rsk_monitor.clone())?;
     let monitors = store.get_monitors()?;
@@ -338,31 +338,31 @@ fn test_active_inactive_boolean_monitors() -> Result<(), anyhow::Error> {
     let store = MonitorStore::new(storage)?;
 
     // Test RskPeginTransaction
-    store.add_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.add_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction(_))));
+        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_))));
 
-    store.deactivate_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.deactivate_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert!(!monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction(_))));
+        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_))));
 
     // Reactivate
-    store.add_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.add_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction(_))));
+        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_))));
 
     // Cancel
-    store.cancel_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.cancel_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert!(!monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction(_))));
+        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_))));
 
     // Test NewBlock
     store.add_monitor(TypesToMonitor::NewBlock)?;
@@ -546,24 +546,24 @@ fn test_reactivate_monitor() -> Result<(), anyhow::Error> {
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id1)));
 
     // Test reactivating RskPeginTransaction monitor
-    store.add_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.add_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 2); // tx_id1 + RskPeginTransaction
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction(_))));
+        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_))));
 
-    store.deactivate_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.deactivate_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 1); // Only tx_id1
 
     // Reactivate
-    store.add_monitor(TypesToMonitor::RskPeginTransaction(None))?;
+    store.add_monitor(TypesToMonitor::RskPegin(None))?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 2);
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPeginTransaction(_))));
+        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_))));
 
     // Test reactivating SpendingUTXOTransaction monitor
     let utxo_monitor =
