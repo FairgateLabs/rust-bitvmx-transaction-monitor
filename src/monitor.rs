@@ -302,7 +302,7 @@ where
             // Only send news when confirmations exactly match the trigger value
             current_confirmations == trigger
         } else {
-            // If None, always send news when current confirmations are less than or equal to the confirmation threshold
+            // If None, always send news when current confirmations are less than the max monitoring confirmations
             current_confirmations < self.settings.max_monitoring_confirmations
         }
     }
