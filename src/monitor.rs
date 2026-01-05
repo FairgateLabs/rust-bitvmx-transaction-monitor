@@ -337,9 +337,9 @@ where
                         current_block_hash,
                     )?;
                 }
-                TypesToMonitorStore::RskPegin(from) => {
+                TypesToMonitorStore::RskPegin(number_confirmation_trigger) => {
                     self.process_rsk_pegin_transaction(
-                        from,
+                        number_confirmation_trigger,
                         &indexer_best_block,
                         indexer_best_block_height,
                         current_block_hash,
