@@ -1,5 +1,5 @@
 use anyhow::{Ok, Result};
-use bitcoind::bitcoind::Bitcoind;
+use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
@@ -31,9 +31,13 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new(&storage_config)?);
 
     let bitcoind = Bitcoind::new(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config.bitcoin.clone(),
+        BitcoindConfig::new(
+            "bitcoin-regtest".to_string(),
+            "bitcoin/bitcoin:29.1".to_string(),
+            Some("sha256:de62c536feb629bed65395f63afd02e3a7a777a3ec82fbed773d50336a739319".to_string()),
+            config.bitcoin.clone(),
+        ),
+        None
     );
 
     bitcoind.start()?;
