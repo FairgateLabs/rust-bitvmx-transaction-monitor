@@ -35,8 +35,8 @@ fn test_pegin_tx_detection() -> Result<(), anyhow::Error> {
             "bitcoin-regtest".to_string(),
             "bitcoin/bitcoin:29.1".to_string(),
             Some("sha256:de62c536feb629bed65395f63afd02e3a7a777a3ec82fbed773d50336a739319".to_string()),
-            config.bitcoin.clone(),
         ),
+        config.bitcoin.clone(),
         None
     );
 
