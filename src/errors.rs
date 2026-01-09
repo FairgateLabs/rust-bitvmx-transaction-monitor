@@ -19,6 +19,9 @@ pub enum MonitorError {
 
     #[error("Transaction not found: {0}")]
     TransactionNotFound(String),
+
+    #[error("Invalid confirmation trigger: requested {0}, max allowed {1}")]
+    InvalidConfirmationTrigger(u32, u32),
 }
 
 #[derive(Error, Debug)]

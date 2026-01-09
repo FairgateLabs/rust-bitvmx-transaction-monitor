@@ -1499,32 +1499,34 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
         settings.max_monitoring_confirmations = 2;
         let monitor = Monitor::new(mock_indexer, store, settings)?;
 
-        // Add the SpendingUTXOTransaction monitor with confirmation trigger 2
+        // Add the SpendingUTXOTransaction monitor with confirmation trigger 1
         monitor.save_monitor(TypesToMonitor::SpendingUTXOTransaction(
             target_tx_id,
             target_utxo_index,
             String::new(),
-            Some(2),
+            Some(1),
         ))?;
 
         monitor.tick()?;
         let monitors = monitor.store.get_monitors()?;
         assert_eq!(monitors.len(), 1);
-        // Transaction was seen but trigger is 2 so no news
-        let news = monitor.get_news()?;
-        assert_eq!(news.len(), 0);
-
-        monitor.tick()?;
-        // Transaction was seen and trigger is 2 so news
+        // Transaction was seen and trigger is 1 so news
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 1);
+
         assert!(
             matches!(news[0].clone(), MonitorNews::SpendingUTXOTransaction(t, u, _, _) if t == target_tx_id && u == target_utxo_index)
         );
+
         monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
             target_tx_id,
             target_utxo_index,
         ))?;
+
+        monitor.tick()?;
+        // Transaction was seen and trigger is 1 so news
+        let news = monitor.get_news()?;
+        assert_eq!(news.len(), 0);
     }
 
     Ok(())
