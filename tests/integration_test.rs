@@ -1,5 +1,5 @@
 use anyhow::{Ok, Result};
-use bitcoind::bitcoind::Bitcoind;
+use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
@@ -37,11 +37,13 @@ fn detect_transaction_monitor() -> Result<(), anyhow::Error> {
 
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let bitcoind = Bitcoind::new(
-        "bitcoin-regtest",
-        "bitcoin/bitcoin:29.1",
-        config.bitcoin.clone(),
+    let bitcoind_config = BitcoindConfig::new(
+        "bitcoin-regtest".to_string(),
+        "bitcoin/bitcoin:29.1".to_string(),
+        None,
     );
+
+    let bitcoind = Bitcoind::new(bitcoind_config, config.bitcoin.clone(), None);
 
     bitcoind.start()?;
 
