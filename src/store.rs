@@ -39,7 +39,7 @@ pub enum MonitoredTypes {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TypesToMonitorStore {
     Transaction(Txid, String, Option<u32>),
-    SpendingUTXOTransaction(Txid, u32, String, Option<Txid>, Option<u32>),
+    SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
     NewBlock,
     RskPegin(Option<u32>),
 }
@@ -416,14 +416,13 @@ impl MonitorStoreApi for MonitorStore {
             .get::<_, Vec<(Txid, u32, String, Option<Txid>, Option<u32>)>>(&spending_utxo_key)?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index, extra_data, tx_id_spending, number_confirmation_trigger) in
+        for (tx_id, utxo_index, extra_data, _tx_id_spending, number_confirmation_trigger) in
             spending_utxos
         {
             let monitor = TypesToMonitorStore::SpendingUTXOTransaction(
                 tx_id,
                 utxo_index,
                 extra_data,
-                tx_id_spending,
                 number_confirmation_trigger,
             );
             monitors.push(monitor);
