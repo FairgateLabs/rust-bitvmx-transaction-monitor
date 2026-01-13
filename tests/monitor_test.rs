@@ -1970,7 +1970,36 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
         ))?;
         monitor.tick()?;
         let monitors = monitor.store.get_monitors()?;
-        assert_eq!(monitors.len(), 1);
+        // After detecting the spending transaction, we should have:
+        // 1. The original SpendingUTXOTransaction monitor
+        // 2. The new Transaction monitor for the spending transaction
+        assert_eq!(monitors.len(), 2);
+
+        // Verify both monitors are present
+        let has_spending_utxo_monitor = monitors.iter().any(|m| {
+            matches!(
+                m,
+                TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, _)
+                    if *t == target_tx_id && *u == target_utxo_index
+            )
+        });
+        assert!(
+            has_spending_utxo_monitor,
+            "SpendingUTXOTransaction monitor should be present"
+        );
+
+        let has_transaction_monitor = monitors.iter().any(|m| {
+            matches!(
+                m,
+                TypesToMonitorStore::Transaction(tx_id, extra_data, _)
+                    if *tx_id == spending_tx_id && extra_data.starts_with("INTERNAL_SPENDING_UTXO")
+            )
+        });
+        assert!(
+            has_transaction_monitor,
+            "Transaction monitor for spending tx should be present"
+        );
+
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 1);
         assert!(
@@ -1982,6 +2011,8 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
         ))?;
         monitor.tick()?;
         let monitors = monitor.store.get_monitors()?;
+        // After second tick, the spending transaction has 2 confirmations which equals max_monitoring_confirmations,
+        // so both monitors should be deactivated
         assert_eq!(monitors.len(), 0);
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 0);
