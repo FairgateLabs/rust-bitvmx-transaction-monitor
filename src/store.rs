@@ -67,6 +67,13 @@ pub trait MonitorStoreApi {
     fn update_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
     fn has_pending_work(&self) -> Result<bool, MonitorStoreError>;
     fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError>;
+
+    fn get_transaction_trigger_sent(&self, tx_id: Txid) -> Result<bool, MonitorStoreError>;
+    fn update_transaction_trigger_sent(
+        &self,
+        tx_id: Txid,
+        trigger_sent: bool,
+    ) -> Result<(), MonitorStoreError>;
 }
 
 impl MonitorStore {
@@ -381,10 +388,10 @@ impl MonitorStoreApi for MonitorStore {
         let txs_key = self.get_key(MonitorKey::Transactions(true));
         let txs = self
             .store
-            .get::<_, Vec<(Txid, String, Option<u32>)>>(&txs_key)?
+            .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&txs_key)?
             .unwrap_or_default();
 
-        for (tx_id, extra_data, number_confirmation_trigger) in txs {
+        for (tx_id, extra_data, number_confirmation_trigger, _) in txs {
             monitors.push(TypesToMonitorStore::Transaction(
                 tx_id,
                 extra_data,
@@ -443,20 +450,20 @@ impl MonitorStoreApi for MonitorStore {
 
                 let mut txs = self
                     .store
-                    .get::<_, Vec<(Txid, String, Option<u32>)>>(&key)?
+                    .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&key)?
                     .unwrap_or_default();
 
                 for txid in &tx_ids {
                     // Add or update in active
-                    if let Some(pos) = txs.iter().position(|(i, _, _)| *i == *txid) {
+                    if let Some(pos) = txs.iter().position(|(i, _, _, _)| *i == *txid) {
                         // Update the existing entry with the new extra_data if it is empty
                         if txs[pos].1.is_empty() {
-                            txs[pos] = (*txid, extra_data.clone(), from);
+                            txs[pos] = (*txid, extra_data.clone(), from, false);
                         }
-                        // Otherwise keep the existing extra_data
+                        // Otherwise keep the existing extra_data and trigger_sent
                     } else {
                         // Add a new entry if the txid doesn't exist
-                        txs.push((*txid, extra_data.clone(), from));
+                        txs.push((*txid, extra_data.clone(), from, false));
                     }
                 }
 
@@ -501,29 +508,41 @@ impl MonitorStoreApi for MonitorStore {
 
                 let mut active_txs = self
                     .store
-                    .get::<_, Vec<(Txid, String, Option<u32>)>>(&active_key)?
+                    .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&active_key)?
                     .unwrap_or_default();
 
                 let mut inactive_txs = self
                     .store
-                    .get::<_, Vec<(Txid, String, Option<u32>)>>(&inactive_key)?
+                    .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&inactive_key)?
                     .unwrap_or_default();
 
                 // Move matching transactions from active to inactive
                 let mut to_move = Vec::new();
-                active_txs.retain(|(txid, extra_data, number_confirmation_trigger)| {
-                    if tx_ids.contains(txid) {
-                        to_move.push((*txid, extra_data.clone(), *number_confirmation_trigger));
-                        false // Remove from active
-                    } else {
-                        true // Keep in active
-                    }
-                });
+                active_txs.retain(
+                    |(txid, extra_data, number_confirmation_trigger, trigger_sent)| {
+                        if tx_ids.contains(txid) {
+                            to_move.push((
+                                *txid,
+                                extra_data.clone(),
+                                *number_confirmation_trigger,
+                                *trigger_sent,
+                            ));
+                            false // Remove from active
+                        } else {
+                            true // Keep in active
+                        }
+                    },
+                );
 
                 // Add to inactive (avoid duplicates)
-                for (txid, extra_data, number_confirmation_trigger) in to_move {
-                    if !inactive_txs.iter().any(|(i, _, _)| *i == txid) {
-                        inactive_txs.push((txid, extra_data, number_confirmation_trigger));
+                for (txid, extra_data, number_confirmation_trigger, trigger_sent) in to_move {
+                    if !inactive_txs.iter().any(|(i, _, _, _)| *i == txid) {
+                        inactive_txs.push((
+                            txid,
+                            extra_data,
+                            number_confirmation_trigger,
+                            trigger_sent,
+                        ));
                     }
                 }
 
@@ -598,16 +617,16 @@ impl MonitorStoreApi for MonitorStore {
 
                 let mut active_txs = self
                     .store
-                    .get::<_, Vec<(Txid, String, Option<u32>)>>(&active_key)?
+                    .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&active_key)?
                     .unwrap_or_default();
 
                 let mut inactive_txs = self
                     .store
-                    .get::<_, Vec<(Txid, String, Option<u32>)>>(&inactive_key)?
+                    .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&inactive_key)?
                     .unwrap_or_default();
 
-                active_txs.retain(|(txid, _, _)| !tx_ids.contains(txid));
-                inactive_txs.retain(|(txid, _, _)| !tx_ids.contains(txid));
+                active_txs.retain(|(txid, _, _, _)| !tx_ids.contains(txid));
+                inactive_txs.retain(|(txid, _, _, _)| !tx_ids.contains(txid));
 
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
@@ -663,6 +682,46 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&key, &txs, None)?;
                 break;
             }
+        }
+
+        Ok(())
+    }
+
+    fn get_transaction_trigger_sent(&self, tx_id: Txid) -> Result<bool, MonitorStoreError> {
+        let key = self.get_key(MonitorKey::Transactions(true));
+        let txs = self
+            .store
+            .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&key)?
+            .unwrap_or_default();
+
+        // Find the transaction and return its trigger_sent flag, return error if not found
+        if let Some((_, _, _, trigger_sent)) = txs.iter().find(|(id, _, _, _)| *id == tx_id) {
+            Ok(*trigger_sent)
+        } else {
+            Err(MonitorStoreError::TransactionNotFound(format!(
+                "Transaction with tx_id {} not found when trying to get trigger_sent flag",
+                tx_id
+            )))
+        }
+    }
+
+    fn update_transaction_trigger_sent(
+        &self,
+        tx_id: Txid,
+        trigger_sent: bool,
+    ) -> Result<(), MonitorStoreError> {
+        let key = self.get_key(MonitorKey::Transactions(true));
+        let mut txs = self
+            .store
+            .get::<_, Vec<(Txid, String, Option<u32>, bool)>>(&key)?
+            .unwrap_or_default();
+
+        // Find and update the transaction's trigger_sent flag
+        if let Some((_, _, _, stored_trigger_sent)) =
+            txs.iter_mut().find(|(id, _, _, _)| *id == tx_id)
+        {
+            *stored_trigger_sent = trigger_sent;
+            self.store.set(&key, &txs, None)?;
         }
 
         Ok(())

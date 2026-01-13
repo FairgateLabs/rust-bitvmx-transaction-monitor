@@ -19,6 +19,8 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::{debug, info};
 
+const INTERNAL_RSK_PEGIN: &str = "INTERNAL_RSK_PEGIN";
+
 pub struct Monitor<I, B>
 where
     I: IndexerApi,
@@ -315,15 +317,25 @@ where
     /// Determines if news should be sent based on the confirmation trigger.
     fn should_send_news(
         &self,
+        tx_id: Txid,
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
-    ) -> bool {
+    ) -> Result<bool, MonitorError> {
+        let trigger_sent = self.store.get_transaction_trigger_sent(tx_id);
+
+        if trigger_sent.is_err() {
+            return Err(MonitorError::UnexpectedError(
+                trigger_sent.unwrap_err().to_string(),
+            ));
+        }
+
         if let Some(trigger) = number_confirmation_trigger {
-            // Only send news when confirmations exactly match the trigger value
-            current_confirmations == trigger
+            // Send news when confirmations are greater than or equal to the trigger value
+            // but only once (when trigger_sent is false)
+            Ok(current_confirmations >= trigger && !trigger_sent.unwrap())
         } else {
             // If None, always send news when current confirmations are less than the max monitoring confirmations
-            current_confirmations < self.settings.max_monitoring_confirmations
+            Ok(current_confirmations < self.settings.max_monitoring_confirmations)
         }
     }
 
@@ -419,21 +431,19 @@ where
         indexer_best_block_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
     ) -> Result<(), MonitorError> {
-        const INTERNAL_RSK_PEGUIN: &str = "INTERNAL_RSK_PEGIN";
-
         let new_txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
 
-        // Add new transactions to monitoring using add_monitor with INTERNAL_RSK_PEGUIN context
+        // Add new transactions to monitoring using add_monitor with INTERNAL_RSK_PEGIN context
         for tx_id in &new_txs_ids {
             self.store.add_monitor(TypesToMonitor::Transactions(
                 vec![*tx_id],
-                INTERNAL_RSK_PEGUIN.to_string(),
+                INTERNAL_RSK_PEGIN.to_string(),
                 number_confirmation_trigger,
             ))?;
 
             self.process_transaction_monitor(
                 *tx_id,
-                INTERNAL_RSK_PEGUIN.to_string(),
+                INTERNAL_RSK_PEGIN.to_string(),
                 number_confirmation_trigger,
                 indexer_best_block_height,
                 current_block_hash,
@@ -463,10 +473,10 @@ where
 
             // Check if we should send news based on number_confirmation_trigger
             let should_send_news =
-                self.should_send_news(number_confirmation_trigger, tx.confirmations);
+                self.should_send_news(tx_id, number_confirmation_trigger, tx.confirmations)?;
 
             if should_send_news {
-                if extra_data == "INTERNAL_RSK_PEGIN" {
+                if extra_data == INTERNAL_RSK_PEGIN {
                     self.store.update_news(
                         MonitoredTypes::RskPeginTransaction(tx_id),
                         current_block_hash,
@@ -482,6 +492,13 @@ where
                     "News for Transaction({}) | Height({}) | Confirmations({})",
                     tx_id, indexer_best_block_height, tx.confirmations,
                 );
+
+                // Update trigger_sent flag if there's a trigger
+                if number_confirmation_trigger.is_some() {
+                    self.store
+                        .update_transaction_trigger_sent(tx_id, true)
+                        .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+                }
             }
 
             // Check if we should deactivate monitor based on max_monitoring_confirmations
@@ -539,8 +556,11 @@ where
                 // Because it is needed to check if there is a new spending transaction.
             } else {
                 // Check if we should send news based on number_confirmation_trigger
-                let should_send_news =
-                    self.should_send_news(number_confirmation_trigger, tx_info.confirmations);
+                let should_send_news = self.should_send_news(
+                    tx_id_spending,
+                    number_confirmation_trigger,
+                    tx_info.confirmations,
+                )?;
 
                 if should_send_news {
                     self.store.update_news(
@@ -560,6 +580,13 @@ where
                         indexer_best_block_height,
                         tx_info.confirmations,
                     );
+
+                    // Update trigger_sent flag if there's a trigger
+                    if number_confirmation_trigger.is_some() {
+                        self.store
+                            .update_transaction_trigger_sent(tx_id_spending, true)
+                            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+                    }
                 }
 
                 // Check if we should deactivate monitor based on max_monitoring_confirmations
@@ -610,8 +637,12 @@ where
                     Some(tx.compute_txid()),
                 ))?;
 
-                let should_send_news =
-                    self.should_send_news(number_confirmation_trigger, tx_info.confirmations);
+                let spending_tx_id = tx.compute_txid();
+                let should_send_news = self.should_send_news(
+                    spending_tx_id,
+                    number_confirmation_trigger,
+                    tx_info.confirmations,
+                )?;
 
                 if should_send_news {
                     self.store.update_news(
@@ -619,7 +650,7 @@ where
                             target_tx_id,
                             target_utxo_index,
                             extra_data.clone(),
-                            tx.compute_txid(),
+                            spending_tx_id,
                         ),
                         current_block_hash,
                     )?;
@@ -631,6 +662,13 @@ where
                         indexer_best_block_height,
                         tx_info.confirmations,
                     );
+
+                    // Update trigger_sent flag if there's a trigger
+                    if number_confirmation_trigger.is_some() {
+                        self.store
+                            .update_transaction_trigger_sent(spending_tx_id, true)
+                            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+                    }
                 }
             }
         }
