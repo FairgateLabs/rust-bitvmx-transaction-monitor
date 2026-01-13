@@ -1101,266 +1101,266 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
 
 #[test]
 fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
-    // //Test Transaction monitor with confirmation trigger
-    // {
-    //     let mut mock_indexer = MockIndexerApi::new();
-    //     let path = format!("test_outputs/{}", generate_random_string());
-    //     let config = StorageConfig::new(path, None);
-    //     let storage = Rc::new(Storage::new(&config)?);
-    //     let store = MonitorStore::new(storage)?;
+    //Test Transaction monitor with confirmation trigger
+    {
+        let mut mock_indexer = MockIndexerApi::new();
+        let path = format!("test_outputs/{}", generate_random_string());
+        let config = StorageConfig::new(path, None);
+        let storage = Rc::new(Storage::new(&config)?);
+        let store = MonitorStore::new(storage)?;
 
-    //     let tx = Transaction {
-    //         version: bitcoin::transaction::Version::TWO,
-    //         lock_time: LockTime::from_time(1653195600).unwrap(),
-    //         input: vec![],
-    //         output: vec![],
-    //     };
-    //     let tx_id = tx.compute_txid();
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::from_time(1653195600).unwrap(),
+            input: vec![],
+            output: vec![],
+        };
+        let tx_id = tx.compute_txid();
 
-    //     let block_100 = FullBlock {
-    //         height: 100,
-    //         hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000001",
-    //         )?,
-    //         prev_hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000000",
-    //         )?,
-    //         txs: vec![],
-    //         orphan: false,
-    //         estimated_fee_rate: 0,
-    //     };
+        let block_100 = FullBlock {
+            height: 100,
+            hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000001",
+            )?,
+            prev_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )?,
+            txs: vec![],
+            orphan: false,
+            estimated_fee_rate: 0,
+        };
 
-    //     let block_101 = FullBlock {
-    //         height: 101,
-    //         hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000002",
-    //         )?,
-    //         prev_hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000001",
-    //         )?,
-    //         txs: vec![],
-    //         orphan: false,
-    //         estimated_fee_rate: 0,
-    //     };
+        let block_101 = FullBlock {
+            height: 101,
+            hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000002",
+            )?,
+            prev_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000001",
+            )?,
+            txs: vec![],
+            orphan: false,
+            estimated_fee_rate: 0,
+        };
 
-    //     let block_102 = FullBlock {
-    //         height: 102,
-    //         hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000003",
-    //         )?,
-    //         prev_hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000002",
-    //         )?,
-    //         txs: vec![],
-    //         orphan: false,
-    //         estimated_fee_rate: 0,
-    //     };
+        let block_102 = FullBlock {
+            height: 102,
+            hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000003",
+            )?,
+            prev_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000002",
+            )?,
+            txs: vec![],
+            orphan: false,
+            estimated_fee_rate: 0,
+        };
 
-    //     let tx_info_1_conf = TransactionInfo {
-    //         tx: tx.clone(),
-    //         block_info: block_100.clone(),
-    //         confirmations: 1,
-    //     };
+        let tx_info_1_conf = TransactionInfo {
+            tx: tx.clone(),
+            block_info: block_100.clone(),
+            confirmations: 1,
+        };
 
-    //     let tx_info_2_conf = TransactionInfo {
-    //         tx: tx.clone(),
-    //         block_info: block_100.clone(),
-    //         confirmations: 2,
-    //     };
+        let tx_info_2_conf = TransactionInfo {
+            tx: tx.clone(),
+            block_info: block_100.clone(),
+            confirmations: 2,
+        };
 
-    //     let best_block_100_clone_1 = block_100.clone();
-    //     let best_block_100_clone_2 = block_100.clone();
-    //     let best_block_101_clone = block_101.clone();
-    //     let best_block_101_clone_2 = block_101.clone();
-    //     let best_block_102_clone = block_102.clone();
-    //     let best_block_102_clone_2 = block_102.clone();
+        let best_block_100_clone_1 = block_100.clone();
+        let best_block_100_clone_2 = block_100.clone();
+        let best_block_101_clone = block_101.clone();
+        let best_block_101_clone_2 = block_101.clone();
+        let best_block_102_clone = block_102.clone();
+        let best_block_102_clone_2 = block_102.clone();
 
-    //     mock_indexer
-    //         .expect_get_best_block()
-    //         .times(1)
-    //         .returning(move || Ok(Some(best_block_100_clone_1.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .with(eq(100))
-    //         .returning(move |_| Ok(Some(best_block_100_clone_2.clone())));
-    //     mock_indexer
-    //         .expect_get_best_block()
-    //         .times(2)
-    //         .returning(move || Ok(Some(best_block_101_clone.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .with(eq(101))
-    //         .returning(move |_| Ok(Some(best_block_101_clone_2.clone())));
-    //     mock_indexer
-    //         .expect_get_best_block()
-    //         .times(2)
-    //         .returning(move || Ok(Some(best_block_102_clone.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .with(eq(102))
-    //         .returning(move |_| Ok(Some(best_block_102_clone_2.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .returning(move |_| Ok(None));
-    //     mock_indexer.expect_tick().returning(move || Ok(()));
+        mock_indexer
+            .expect_get_best_block()
+            .times(1)
+            .returning(move || Ok(Some(best_block_100_clone_1.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .with(eq(100))
+            .returning(move |_| Ok(Some(best_block_100_clone_2.clone())));
+        mock_indexer
+            .expect_get_best_block()
+            .times(2)
+            .returning(move || Ok(Some(best_block_101_clone.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .with(eq(101))
+            .returning(move |_| Ok(Some(best_block_101_clone_2.clone())));
+        mock_indexer
+            .expect_get_best_block()
+            .times(2)
+            .returning(move || Ok(Some(best_block_102_clone.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .with(eq(102))
+            .returning(move |_| Ok(Some(best_block_102_clone_2.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .returning(move |_| Ok(None));
+        mock_indexer.expect_tick().returning(move || Ok(()));
 
-    //     let tx_info_1_conf_clone = tx_info_1_conf.clone();
-    //     mock_indexer
-    //         .expect_get_tx()
-    //         .with(eq(tx_id))
-    //         .times(2)
-    //         .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
-    //     let tx_info_2_conf_clone = tx_info_2_conf.clone();
-    //     mock_indexer
-    //         .expect_get_tx()
-    //         .with(eq(tx_id))
-    //         .times(1)
-    //         .returning(move |_| Ok(Some(tx_info_2_conf_clone.clone())));
-    //     mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+        let tx_info_1_conf_clone = tx_info_1_conf.clone();
+        mock_indexer
+            .expect_get_tx()
+            .with(eq(tx_id))
+            .times(2)
+            .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
+        let tx_info_2_conf_clone = tx_info_2_conf.clone();
+        mock_indexer
+            .expect_get_tx()
+            .with(eq(tx_id))
+            .times(1)
+            .returning(move |_| Ok(Some(tx_info_2_conf_clone.clone())));
+        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
 
-    //     let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
-    //     settings.max_monitoring_confirmations = 2;
-    //     let monitor = Monitor::new(mock_indexer, store, settings)?;
+        let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
+        settings.max_monitoring_confirmations = 2;
+        let monitor = Monitor::new(mock_indexer, store, settings)?;
 
-    //     monitor.save_monitor(TypesToMonitor::Transactions(
-    //         vec![tx_id],
-    //         String::new(),
-    //         Some(1),
-    //     ))?;
-    //     monitor.tick()?;
-    //     let news = monitor.get_news()?;
-    //     assert_eq!(news.len(), 1);
-    //     assert!(matches!(news[0].clone(), MonitorNews::Transaction(t, _, _) if t == tx_id));
-    //     monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
-    //     monitor.tick()?;
-    //     let news = monitor.get_news()?;
-    //     assert_eq!(news.len(), 0);
-    //     monitor.tick()?;
-    //     let monitors = monitor.store.get_monitors()?;
-    //     assert_eq!(monitors.len(), 0);
-    // }
+        monitor.save_monitor(TypesToMonitor::Transactions(
+            vec![tx_id],
+            String::new(),
+            Some(1),
+        ))?;
+        monitor.tick()?;
+        let news = monitor.get_news()?;
+        assert_eq!(news.len(), 1);
+        assert!(matches!(news[0].clone(), MonitorNews::Transaction(t, _, _) if t == tx_id));
+        monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
+        monitor.tick()?;
+        let news = monitor.get_news()?;
+        assert_eq!(news.len(), 0);
+        monitor.tick()?;
+        let monitors = monitor.store.get_monitors()?;
+        assert_eq!(monitors.len(), 0);
+    }
 
-    // // Test RskPeginTransaction monitor with confirmation trigger
-    // {
-    //     let mut mock_indexer = MockIndexerApi::new();
-    //     let path = format!("test_outputs/{}", generate_random_string());
-    //     let config = StorageConfig::new(path, None);
-    //     let storage = Rc::new(Storage::new(&config)?);
-    //     let store = MonitorStore::new(storage)?;
+    // Test RskPeginTransaction monitor with confirmation trigger
+    {
+        let mut mock_indexer = MockIndexerApi::new();
+        let path = format!("test_outputs/{}", generate_random_string());
+        let config = StorageConfig::new(path, None);
+        let storage = Rc::new(Storage::new(&config)?);
+        let store = MonitorStore::new(storage)?;
 
-    //     let pegin_tx = create_pegin_tx();
-    //     let block_100 = FullBlock {
-    //         height: 100,
-    //         hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000001",
-    //         )?,
-    //         prev_hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000000",
-    //         )?,
-    //         txs: vec![pegin_tx.clone()],
-    //         orphan: false,
-    //         estimated_fee_rate: 0,
-    //     };
-    //     let pegin_tx_id_from_block = block_100.txs[0].compute_txid();
-    //     let block_101 = FullBlock {
-    //         height: 101,
-    //         hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000002",
-    //         )?,
-    //         prev_hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000001",
-    //         )?,
-    //         txs: vec![],
-    //         orphan: false,
-    //         estimated_fee_rate: 0,
-    //     };
-    //     let block_102 = FullBlock {
-    //         height: 102,
-    //         hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000003",
-    //         )?,
-    //         prev_hash: BlockHash::from_str(
-    //             "0000000000000000000000000000000000000000000000000000000000000002",
-    //         )?,
-    //         txs: vec![],
-    //         orphan: false,
-    //         estimated_fee_rate: 0,
-    //     };
+        let pegin_tx = create_pegin_tx();
+        let block_100 = FullBlock {
+            height: 100,
+            hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000001",
+            )?,
+            prev_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )?,
+            txs: vec![pegin_tx.clone()],
+            orphan: false,
+            estimated_fee_rate: 0,
+        };
+        let pegin_tx_id_from_block = block_100.txs[0].compute_txid();
+        let block_101 = FullBlock {
+            height: 101,
+            hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000002",
+            )?,
+            prev_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000001",
+            )?,
+            txs: vec![],
+            orphan: false,
+            estimated_fee_rate: 0,
+        };
+        let block_102 = FullBlock {
+            height: 102,
+            hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000003",
+            )?,
+            prev_hash: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000002",
+            )?,
+            txs: vec![],
+            orphan: false,
+            estimated_fee_rate: 0,
+        };
 
-    //     let tx_info_1_conf = TransactionInfo {
-    //         tx: pegin_tx.clone(),
-    //         block_info: block_100.clone(),
-    //         confirmations: 1,
-    //     };
+        let tx_info_1_conf = TransactionInfo {
+            tx: pegin_tx.clone(),
+            block_info: block_100.clone(),
+            confirmations: 1,
+        };
 
-    //     let best_block_100_clone_1 = block_100.clone();
-    //     let best_block_100_clone_2 = block_100.clone();
-    //     let best_block_101_clone = block_101.clone();
-    //     let best_block_101_clone_2 = block_101.clone();
-    //     let best_block_102_clone = block_102.clone();
-    //     let best_block_102_clone_2 = block_102.clone();
+        let best_block_100_clone_1 = block_100.clone();
+        let best_block_100_clone_2 = block_100.clone();
+        let best_block_101_clone = block_101.clone();
+        let best_block_101_clone_2 = block_101.clone();
+        let best_block_102_clone = block_102.clone();
+        let best_block_102_clone_2 = block_102.clone();
 
-    //     mock_indexer
-    //         .expect_get_best_block()
-    //         .times(1)
-    //         .returning(move || Ok(Some(best_block_100_clone_1.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .with(eq(100))
-    //         .returning(move |_| Ok(Some(best_block_100_clone_2.clone())));
-    //     mock_indexer
-    //         .expect_get_best_block()
-    //         .times(2)
-    //         .returning(move || Ok(Some(best_block_101_clone.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .with(eq(101))
-    //         .returning(move |_| Ok(Some(best_block_101_clone_2.clone())));
-    //     mock_indexer
-    //         .expect_get_best_block()
-    //         .times(2)
-    //         .returning(move || Ok(Some(best_block_102_clone.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .with(eq(102))
-    //         .returning(move |_| Ok(Some(best_block_102_clone_2.clone())));
-    //     mock_indexer
-    //         .expect_get_block_by_height()
-    //         .returning(move |_| Ok(None));
-    //     mock_indexer.expect_tick().returning(move || Ok(()));
+        mock_indexer
+            .expect_get_best_block()
+            .times(1)
+            .returning(move || Ok(Some(best_block_100_clone_1.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .with(eq(100))
+            .returning(move |_| Ok(Some(best_block_100_clone_2.clone())));
+        mock_indexer
+            .expect_get_best_block()
+            .times(2)
+            .returning(move || Ok(Some(best_block_101_clone.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .with(eq(101))
+            .returning(move |_| Ok(Some(best_block_101_clone_2.clone())));
+        mock_indexer
+            .expect_get_best_block()
+            .times(2)
+            .returning(move || Ok(Some(best_block_102_clone.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .with(eq(102))
+            .returning(move |_| Ok(Some(best_block_102_clone_2.clone())));
+        mock_indexer
+            .expect_get_block_by_height()
+            .returning(move |_| Ok(None));
+        mock_indexer.expect_tick().returning(move || Ok(()));
 
-    //     let tx_info_1_conf_clone = tx_info_1_conf.clone();
-    //     mock_indexer
-    //         .expect_get_tx()
-    //         .with(eq(pegin_tx_id_from_block))
-    //         .times(2)
-    //         .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
-    //     mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+        let tx_info_1_conf_clone = tx_info_1_conf.clone();
+        mock_indexer
+            .expect_get_tx()
+            .with(eq(pegin_tx_id_from_block))
+            .times(2)
+            .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
+        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
 
-    //     let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
-    //     settings.max_monitoring_confirmations = 2;
-    //     let monitor = Monitor::new(mock_indexer, store, settings)?;
+        let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
+        settings.max_monitoring_confirmations = 2;
+        let monitor = Monitor::new(mock_indexer, store, settings)?;
 
-    //     monitor.save_monitor(TypesToMonitor::RskPegin(Some(1)))?;
-    //     monitor.tick()?;
-    //     let news = monitor.get_news()?;
-    //     assert_eq!(news.len(), 1);
-    //     assert!(
-    //         matches!(news[0].clone(), MonitorNews::RskPeginTransaction(t, _) if t == pegin_tx_id_from_block)
-    //     );
-    //     monitor.ack_news(AckMonitorNews::RskPeginTransaction(pegin_tx_id_from_block))?;
-    //     monitor.tick()?;
-    //     let news = monitor.get_news()?;
-    //     assert_eq!(news.len(), 0);
-    //     monitor.tick()?;
-    //     let monitors = monitor.store.get_monitors()?;
-    //     assert_eq!(monitors.len(), 2);
-    //     assert!(matches!(monitors[1], TypesToMonitorStore::RskPegin(_)));
-    //     assert!(matches!(
-    //         monitors[0],
-    //         TypesToMonitorStore::Transaction(_, _, _)
-    //     ));
-    // }
+        monitor.save_monitor(TypesToMonitor::RskPegin(Some(1)))?;
+        monitor.tick()?;
+        let news = monitor.get_news()?;
+        assert_eq!(news.len(), 1);
+        assert!(
+            matches!(news[0].clone(), MonitorNews::RskPeginTransaction(t, _) if t == pegin_tx_id_from_block)
+        );
+        monitor.ack_news(AckMonitorNews::RskPeginTransaction(pegin_tx_id_from_block))?;
+        monitor.tick()?;
+        let news = monitor.get_news()?;
+        assert_eq!(news.len(), 0);
+        monitor.tick()?;
+        let monitors = monitor.store.get_monitors()?;
+        assert_eq!(monitors.len(), 2);
+        assert!(matches!(monitors[1], TypesToMonitorStore::RskPegin(_)));
+        assert!(matches!(
+            monitors[0],
+            TypesToMonitorStore::Transaction(_, _, _)
+        ));
+    }
 
     // Test SpendingUTXOTransaction monitor with confirmation trigger
     {
@@ -1509,7 +1509,36 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
 
         monitor.tick()?;
         let monitors = monitor.store.get_monitors()?;
-        assert_eq!(monitors.len(), 1);
+        // After detecting the spending transaction, we should have:
+        // 1. The original SpendingUTXOTransaction monitor
+        // 2. The new Transaction monitor for the spending transaction
+        assert_eq!(monitors.len(), 2);
+
+        // Verify both monitors are present
+        let has_spending_utxo_monitor = monitors.iter().any(|m| {
+            matches!(
+                m,
+                TypesToMonitorStore::SpendingUTXOTransaction(t, u, _, _)
+                    if *t == target_tx_id && *u == target_utxo_index
+            )
+        });
+        assert!(
+            has_spending_utxo_monitor,
+            "SpendingUTXOTransaction monitor should be present"
+        );
+
+        let has_transaction_monitor = monitors.iter().any(|m| {
+            matches!(
+                m,
+                TypesToMonitorStore::Transaction(tx_id, extra_data, _)
+                    if *tx_id == spending_tx_id && extra_data.starts_with("INTERNAL_SPENDING_UTXO")
+            )
+        });
+        assert!(
+            has_transaction_monitor,
+            "Transaction monitor for spending tx should be present"
+        );
+
         // Transaction was seen and trigger is 1 so news
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 1);
