@@ -139,6 +139,7 @@ pub enum MonitorNews {
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
 
     // Rsk pegin transaction news
+    // - Txid: The transaction ID
     // - TransactionStatus: The status of the transaction
     RskPeginTransaction(Txid, TransactionStatus),
 

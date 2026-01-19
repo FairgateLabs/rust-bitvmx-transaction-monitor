@@ -358,18 +358,15 @@ where
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
     ) -> Result<bool, MonitorError> {
-        let trigger_sent = self.store.get_transaction_trigger_sent(tx_id);
-
-        if trigger_sent.is_err() {
-            return Err(MonitorError::UnexpectedError(
-                trigger_sent.unwrap_err().to_string(),
-            ));
-        }
+        let trigger_sent = self
+            .store
+            .get_transaction_trigger_sent(tx_id)
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
 
         if let Some(trigger) = number_confirmation_trigger {
             // Send news when confirmations are greater than or equal to the trigger value
             // but only once (when trigger_sent is false)
-            Ok(current_confirmations >= trigger && !trigger_sent.unwrap())
+            Ok(current_confirmations >= trigger && !trigger_sent)
         } else {
             // If None, always send news when current confirmations are less than the max monitoring confirmations
             Ok(current_confirmations < self.settings.max_monitoring_confirmations)
@@ -463,7 +460,7 @@ where
         &self,
         number_confirmation_trigger: Option<u32>,
         indexer_best_block: &FullBlock,
-        indexer_best_block_height: BlockHeight,
+        indexer_best_block_height: u32,
         current_block_hash: bitcoin::BlockHash,
     ) -> Result<(), MonitorError> {
         let new_txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;

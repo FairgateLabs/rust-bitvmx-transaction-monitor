@@ -37,11 +37,7 @@ fn detect_transaction_monitor() -> Result<(), anyhow::Error> {
 
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let bitcoind_config = BitcoindConfig::new(
-        "bitcoin-regtest".to_string(),
-        "bitcoin/bitcoin:29.1".to_string(),
-        Some("sha256:de62c536feb629bed65395f63afd02e3a7a777a3ec82fbed773d50336a739319".to_string()),
-    );
+    let bitcoind_config = BitcoindConfig::default();
 
     let bitcoind = Bitcoind::new(bitcoind_config, config.bitcoin.clone(), None);
 
