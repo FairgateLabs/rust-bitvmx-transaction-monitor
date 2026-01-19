@@ -27,4 +27,5 @@ jobs:
       cargo_lock_path: 'rust-bitvmx-transaction-monitor/Cargo.lock'
       target_path: 'rust-bitvmx-transaction-monitor/target'
       submodule_branches: '{}'
+      single_thread_tests: true
     secrets: inherit

@@ -101,17 +101,51 @@ impl BlockInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypesToMonitor {
-    Transactions(Vec<Txid>, String),
-    SpendingUTXOTransaction(Txid, u32, String),
-    RskPeginTransaction,
+    // Transactions to monitor
+    // - Vec<Txid>: The transaction IDs to monitor
+    // - String: The context of the transaction
+    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
+    Transactions(Vec<Txid>, String, Option<u32>),
+
+    // Spending UTXO transaction to monitor
+    // - Txid: The transaction ID to monitor
+    // - u32: The vout index of the UTXO to monitor
+    // - String: The context of the transaction
+    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
+    SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
+
+    // Rsk pegin transaction to monitor
+    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
+    RskPegin(Option<u32>),
+
+    // New block to monitor
+    // - BlockHeight: The block height to monitor
     NewBlock,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MonitorNews {
+    // Transaction news
+    // - Txid: The transaction ID
+    // - TransactionStatus: The status of the transaction
+    // - String: The context of the transaction previously sent to the monitor
     Transaction(Txid, TransactionStatus, String),
+
+    // Spending UTXO transaction news
+    // - Txid: The transaction ID
+    // - u32: The vout index of the UTXO
+    // - TransactionStatus: The status of the transaction
+    // - String: The context of the transaction previously sent to the monitor
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
+
+    // Rsk pegin transaction news
+    // - Txid: The transaction ID
+    // - TransactionStatus: The status of the transaction
     RskPeginTransaction(Txid, TransactionStatus),
+
+    // New block news
+    // - BlockHeight: The block height
+    // - BlockHash: The block hash
     NewBlock(BlockHeight, BlockHash),
 }
 
