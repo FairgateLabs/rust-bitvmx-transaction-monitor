@@ -29,6 +29,27 @@ The monitor is built on three primary components:
 
 Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory.
 
+At minimum, your config should include `settings.indexer_settings.confirmation_threshold` (required by the indexer settings schema). Example:
+
+```yaml
+bitcoin:
+  network: regtest
+  url: http://127.0.0.1:18443
+  username: foo
+  password: rpcpassword
+  wallet: test_wallet
+
+settings:
+  confirmation_threshold: 6
+  max_monitoring_confirmations: 100
+  indexer_settings:
+    checkpoint_height: 10
+    confirmation_threshold: 6
+
+storage:
+  path: data
+```
+
 ## Methods
 
 The `Monitor` struct implements the `MonitorApi` trait, offering the following methods:

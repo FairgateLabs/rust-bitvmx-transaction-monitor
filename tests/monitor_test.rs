@@ -9,7 +9,7 @@ use bitcoin::{
 };
 use bitcoin_indexer::{
     indexer::MockIndexerApi,
-    types::{FullBlock, TransactionInfo},
+    types::{FullBlock, TransactionInfo, TransactionStatus},
 };
 use bitvmx_transaction_monitor::{
     config::{MonitorSettings, MonitorSettingsConfig},
@@ -22,6 +22,39 @@ use std::{rc::Rc, str::FromStr};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
 mod utils;
+
+const TEST_CONFIRMATION_THRESHOLD: u32 = 6;
+
+fn tx_info_confirmed(
+    tx: &Transaction,
+    block_info: &FullBlock,
+    confirmations: u32,
+) -> TransactionInfo {
+    TransactionInfo {
+        tx: Some(tx.clone()),
+        block_info: Some(block_info.clone()),
+        confirmations,
+        status: TransactionStatus::Confirmed,
+        confirmation_threshold: TEST_CONFIRMATION_THRESHOLD,
+    }
+}
+
+fn tx_info_orphan(tx: &Transaction, prev_block_info: &FullBlock) -> TransactionInfo {
+    // `TransactionInfo::is_orphan()` requires:
+    // - confirmations == 0
+    // - block_info.orphan == true
+    // - status == Orphan
+    let mut orphan_block = prev_block_info.clone();
+    orphan_block.orphan = true;
+
+    TransactionInfo {
+        tx: Some(tx.clone()),
+        block_info: Some(orphan_block),
+        confirmations: 0,
+        status: TransactionStatus::Orphan,
+        confirmation_threshold: TEST_CONFIRMATION_THRESHOLD,
+    }
+}
 
 fn create_pegin_tx() -> Transaction {
     let secp = Secp256k1::new();
@@ -189,17 +222,8 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     let tx_id = tx.compute_txid();
     let tx_id_2 = tx_to_seen.compute_txid();
 
-    let tx_to_seen_info = TransactionInfo {
-        tx: tx_to_seen.clone(),
-        block_info: block_200.clone(),
-        confirmations: 1,
-    };
-
-    let tx_info = TransactionInfo {
-        tx: tx.clone(),
-        block_info: block_200.clone(),
-        confirmations: 1,
-    };
+    let tx_to_seen_info = tx_info_confirmed(&tx_to_seen, &block_200, 1);
+    let tx_info = tx_info_confirmed(&tx, &block_200, 1);
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -208,14 +232,14 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
         .returning(move || Ok(Some(block_200.clone())));
 
     mock_indexer
-        .expect_get_tx()
-        .with(eq(tx_id_2))
-        .returning(move |_| Ok(Some(tx_to_seen_info.clone())));
+        .expect_get_transaction()
+        .withf(move |id| *id == tx_id_2)
+        .returning(move |_| Ok(tx_to_seen_info.clone()));
 
     mock_indexer
-        .expect_get_tx()
-        .with(eq(tx_id))
-        .returning(move |_| Ok(Some(tx_info.clone())));
+        .expect_get_transaction()
+        .withf(move |id| *id == tx_id)
+        .returning(move |_| Ok(tx_info.clone()));
 
     let monitor = Monitor::new(
         mock_indexer,
@@ -324,17 +348,13 @@ fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Err
         estimated_fee_rate: 0,
     };
 
-    let tx_info = TransactionInfo {
-        tx: tx.clone(),
-        block_info,
-        confirmations: 101, // More than 100 confirmations
-    };
+    let tx_info = tx_info_confirmed(&tx, &block_info, 101); // More than 100 confirmations
 
     mock_indexer
-        .expect_get_tx()
-        .with(eq(tx_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == tx_id)
         .times(1)
-        .returning(move |_| Ok(Some(tx_info.clone())));
+        .returning(move |_| Ok(tx_info.clone()));
 
     let block_200_clone = block_200.clone();
     let block_200_clone_1 = block_200.clone();
@@ -723,24 +743,18 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     };
 
     // Create transaction info for the spending transaction (orphan)
-    let spending_tx1 = TransactionInfo {
-        tx: spending_tx1.clone(),
-        block_info: block_100.clone(),
-        confirmations: 1,
-    };
+    let spending_tx1_info_conf1 = tx_info_confirmed(&spending_tx1, &block_100, 1);
+    let spending_tx1_info_conf2 = tx_info_confirmed(&spending_tx1, &block_100, 2);
+    let spending_tx1_info_orphan = tx_info_orphan(&spending_tx1, &block_100);
 
-    let spending_tx2 = TransactionInfo {
-        tx: spending_tx2.clone(),
-        block_info: block_100_reorg.clone(),
-        confirmations: 1,
-    };
+    let spending_tx2_info_conf1 = tx_info_confirmed(&spending_tx2, &block_100_reorg, 1);
 
-    let spending_tx2_id = spending_tx2.tx.compute_txid();
+    let spending_tx2_id = spending_tx2.compute_txid();
 
-    let spending_tx1_clone = spending_tx1.clone();
-    let mut spending_tx1_clone_2 = spending_tx1_clone.clone();
-    let spending_tx2_clone = spending_tx2.clone();
-    let spending_tx2_clone_2 = spending_tx2_clone.clone();
+    let spending_tx1_info_conf1_clone = spending_tx1_info_conf1.clone();
+    let spending_tx1_info_conf2_clone = spending_tx1_info_conf2.clone();
+    let spending_tx1_info_orphan_clone = spending_tx1_info_orphan.clone();
+    let spending_tx2_info_conf1_clone = spending_tx2_info_conf1.clone();
 
     mock_indexer.expect_tick().returning(move || Ok(()));
 
@@ -782,39 +796,35 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     // - get_tx is called from process_spending_utxo_transaction -> process_transaction_monitor
     // - get_tx is called from get_news() -> get_tx_status()
     mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx1_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == spending_tx1_id)
         .times(2)
-        .returning(move |_| Ok(Some(spending_tx1_clone.clone())));
+        .returning(move |_| Ok(spending_tx1_info_conf1_clone.clone()));
 
     // Second tick: process the spending_tx1 monitor (it now has 2 confirmations)
     // - get_tx is called from process_transaction_monitor
     // - get_tx is called from get_news() -> get_tx_status()
-    spending_tx1_clone_2.confirmations = 2;
     mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx1_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == spending_tx1_id)
         .times(2)
-        .returning(move |_| Ok(Some(spending_tx1_clone_2.clone())));
+        .returning(move |_| Ok(spending_tx1_info_conf2_clone.clone()));
 
     // Third tick: reorg detected, spending_tx1 becomes orphan, detect spending_tx2
     // - get_tx is called for spending_tx1 (to check orphan status)
     // - get_tx is called from process_spending_utxo_transaction -> process_transaction_monitor for spending_tx2
     // - get_tx is called from get_news() -> get_tx_status() for spending_tx2
     mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx1_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == spending_tx1_id)
         .times(1)
-        .returning(move |_| Ok(Some(spending_tx2.clone())));
+        .returning(move |_| Ok(spending_tx1_info_orphan_clone.clone()));
 
     mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx2_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == spending_tx2_id)
         .times(2)
-        .returning(move |_| Ok(Some(spending_tx2_clone.clone())));
-
-    // Handle any other get_tx calls that might happen
-    mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+        .returning(move |_| Ok(spending_tx2_info_conf1_clone.clone()));
 
     let monitor = Monitor::new(
         mock_indexer,
@@ -839,7 +849,10 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     assert!(matches!(
         news[0].clone(),
         MonitorNews::SpendingUTXOTransaction(t, u, tx_status, _)
-            if t == target_tx_id && u == target_utxo_index && tx_status.tx_id == spending_tx1.tx.compute_txid() && tx_status.confirmations == 1
+            if t == target_tx_id
+                && u == target_utxo_index
+                && tx_status.tx.as_ref().is_some_and(|tx| tx.compute_txid() == spending_tx1_id)
+                && tx_status.confirmations == 1
     ));
 
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
@@ -856,7 +869,10 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     assert!(matches!(
         news[0].clone(),
         MonitorNews::SpendingUTXOTransaction(t, u, tx_status, _)
-            if t == target_tx_id && u == target_utxo_index && tx_status.tx_id == spending_tx1.tx.compute_txid() && tx_status.confirmations == 2
+            if t == target_tx_id
+                && u == target_utxo_index
+                && tx_status.tx.as_ref().is_some_and(|tx| tx.compute_txid() == spending_tx1_id)
+                && tx_status.confirmations == 2
     ));
 
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
@@ -873,7 +889,10 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     assert!(matches!(
         news[0].clone(),
         MonitorNews::SpendingUTXOTransaction(t, u, tx_status, _)
-            if t == target_tx_id && u == target_utxo_index && tx_status.tx_id == spending_tx2_clone_2.tx.compute_txid() && tx_status.confirmations == 1
+            if t == target_tx_id
+                && u == target_utxo_index
+                && tx_status.tx.as_ref().is_some_and(|tx| tx.compute_txid() == spending_tx2_id)
+                && tx_status.confirmations == 1
     ));
 
     clear_output();
@@ -962,20 +981,12 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
         estimated_fee_rate: 0,
     };
 
-    let spending_tx_info_at_100 = TransactionInfo {
-        tx: spending_tx.clone(),
-        block_info: block_with_spending_tx.clone(),
-        confirmations: 1,
-    };
+    let spending_tx_info_at_100 = tx_info_confirmed(&spending_tx, &block_with_spending_tx, 1);
 
     // Transaction info for the spending transaction at each confirmation level
     // block_info should be the block where the transaction was mined (block 100)
     // confirmations is the number of blocks mined after the transaction's block
-    let spending_tx_info_at_101 = TransactionInfo {
-        tx: spending_tx.clone(),
-        block_info: block_with_spending_tx.clone(),
-        confirmations: 2,
-    };
+    let spending_tx_info_at_101 = tx_info_confirmed(&spending_tx, &block_with_spending_tx, 2);
 
     // Set expectations for each tick: block 100, then 101, then 102
     let best_block_100_clone_1 = block_with_spending_tx.clone();
@@ -1021,21 +1032,18 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     mock_indexer.expect_tick().returning(move || Ok(()));
 
     mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == spending_tx_id)
         .times(4)
-        .returning(move |_| Ok(Some(spending_tx_info_at_100.clone())));
+        .returning(move |_| Ok(spending_tx_info_at_100.clone()));
 
     // Second tick: confirmations reach 2, should send news and deactivate
     // get_tx() is called from tick() and then from get_news() -> get_tx_status()
     mock_indexer
-        .expect_get_tx()
-        .with(eq(spending_tx_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == spending_tx_id)
         // Allow multiple calls - from tick() -> process_transaction_monitor and from get_news() -> get_tx_status()
-        .returning(move |_| Ok(Some(spending_tx_info_at_101.clone())));
-
-    // Handle any other get_tx calls that might happen
-    mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+        .returning(move |_| Ok(spending_tx_info_at_101.clone()));
 
     let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
     settings.max_monitoring_confirmations = 2;
@@ -1199,17 +1207,9 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
             estimated_fee_rate: 0,
         };
 
-        let tx_info_1_conf = TransactionInfo {
-            tx: tx.clone(),
-            block_info: block_100.clone(),
-            confirmations: 1,
-        };
+        let tx_info_1_conf = tx_info_confirmed(&tx, &block_100, 1);
 
-        let tx_info_2_conf = TransactionInfo {
-            tx: tx.clone(),
-            block_info: block_100.clone(),
-            confirmations: 2,
-        };
+        let tx_info_2_conf = tx_info_confirmed(&tx, &block_100, 2);
 
         let best_block_100_clone_1 = block_100.clone();
         let best_block_100_clone_2 = block_100.clone();
@@ -1249,17 +1249,25 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
 
         let tx_info_1_conf_clone = tx_info_1_conf.clone();
         mock_indexer
-            .expect_get_tx()
+            .expect_get_transaction()
             .with(eq(tx_id))
             .times(2)
-            .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
+            .returning(move |_| Ok(tx_info_1_conf_clone.clone()));
         let tx_info_2_conf_clone = tx_info_2_conf.clone();
         mock_indexer
-            .expect_get_tx()
+            .expect_get_transaction()
             .with(eq(tx_id))
             .times(1)
-            .returning(move |_| Ok(Some(tx_info_2_conf_clone.clone())));
-        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+            .returning(move |_| Ok(tx_info_2_conf_clone.clone()));
+        mock_indexer.expect_get_transaction().returning(move |_| {
+            Ok(TransactionInfo {
+                tx: None,
+                block_info: None,
+                confirmations: 0,
+                status: TransactionStatus::NotFound,
+                confirmation_threshold: 6,
+            })
+        });
 
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
         settings.max_monitoring_confirmations = 2;
@@ -1330,11 +1338,7 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
             estimated_fee_rate: 0,
         };
 
-        let tx_info_1_conf = TransactionInfo {
-            tx: pegin_tx.clone(),
-            block_info: block_100.clone(),
-            confirmations: 1,
-        };
+        let tx_info_1_conf = tx_info_confirmed(&pegin_tx, &block_100, 1);
 
         let best_block_100_clone_1 = block_100.clone();
         let best_block_100_clone_2 = block_100.clone();
@@ -1374,11 +1378,11 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
 
         let tx_info_1_conf_clone = tx_info_1_conf.clone();
         mock_indexer
-            .expect_get_tx()
-            .with(eq(pegin_tx_id_from_block))
-            .times(2)
-            .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
-        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+            .expect_get_transaction()
+            .withf(move |id| *id == pegin_tx_id_from_block)
+            // Calls: tick #1 + get_news after tick #1 + tick #2 + tick #3
+            .times(4)
+            .returning(move |_| Ok(tx_info_1_conf_clone.clone()));
 
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
         settings.max_monitoring_confirmations = 2;
@@ -1475,17 +1479,21 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
             estimated_fee_rate: 0,
         };
 
-        let spending_tx_info_at_100 = TransactionInfo {
-            tx: spending_tx.clone(),
-            block_info: block_with_spending_tx.clone(),
-            confirmations: 1,
-        };
+        let spending_tx_info_at_100 = TransactionInfo::new(
+            spending_tx.clone(),
+            block_with_spending_tx.clone(),
+            TransactionStatus::Confirmed,
+            1,
+            0,
+        );
 
-        let spending_tx_info_at_101 = TransactionInfo {
-            tx: spending_tx.clone(),
-            block_info: block_102.clone(),
-            confirmations: 2,
-        };
+        let spending_tx_info_at_101 = TransactionInfo::new(
+            spending_tx.clone(),
+            block_with_spending_tx.clone(),
+            TransactionStatus::Confirmed,
+            2,
+            0,
+        );
 
         let best_block_100_clone_1 = block_with_spending_tx.clone();
         let best_block_100_clone_2 = block_with_spending_tx.clone();
@@ -1525,19 +1533,17 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
 
         // First tick: detect spending tx (multiple calls from tick() and get_news())
         mock_indexer
-            .expect_get_tx()
-            .with(eq(spending_tx_id))
+            .expect_get_transaction()
+            .withf(move |id| *id == spending_tx_id)
             .times(1)
-            .returning(move |_| Ok(Some(spending_tx_info_at_100.clone())));
+            .returning(move |_| Ok(spending_tx_info_at_100.clone()));
         // Second tick: check confirmations (from tick() only, get_news() might call get_tx() if there are unacknowledged news)
         mock_indexer
-            .expect_get_tx()
-            .with(eq(spending_tx_id))
-            .returning(move |_| Ok(Some(spending_tx_info_at_101.clone())));
+            .expect_get_transaction()
+            .withf(move |id| *id == spending_tx_id)
+            .returning(move |_| Ok(spending_tx_info_at_101.clone()));
         // If get_news() is called and there are unacknowledged news, it will call get_tx_status() which calls get_tx()
         // But since we ack_news() after the first tick, there should be no news, so get_news() won't call get_tx()
-        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
-
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
         settings.max_monitoring_confirmations = 2;
         let monitor = Monitor::new(mock_indexer, store, settings)?;
@@ -1662,17 +1668,9 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
             estimated_fee_rate: 0,
         };
 
-        let tx_info_1_conf = TransactionInfo {
-            tx: tx.clone(),
-            block_info: block_100.clone(),
-            confirmations: 1,
-        };
+        let tx_info_1_conf = tx_info_confirmed(&tx, &block_100, 1);
 
-        let tx_info_2_conf = TransactionInfo {
-            tx: tx.clone(),
-            block_info: block_100.clone(),
-            confirmations: 2,
-        };
+        let tx_info_2_conf = tx_info_confirmed(&tx, &block_100, 2);
 
         let best_block_100_clone_1 = block_100.clone();
         let best_block_100_clone_2 = block_100.clone();
@@ -1712,17 +1710,25 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
 
         let tx_info_1_conf_clone = tx_info_1_conf.clone();
         mock_indexer
-            .expect_get_tx()
+            .expect_get_transaction()
             .with(eq(tx_id))
             .times(2)
-            .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
+            .returning(move |_| Ok(tx_info_1_conf_clone.clone()));
         let tx_info_2_conf_clone = tx_info_2_conf.clone();
         mock_indexer
-            .expect_get_tx()
+            .expect_get_transaction()
             .with(eq(tx_id))
             .times(1)
-            .returning(move |_| Ok(Some(tx_info_2_conf_clone.clone())));
-        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+            .returning(move |_| Ok(tx_info_2_conf_clone.clone()));
+        mock_indexer.expect_get_transaction().returning(move |_| {
+            Ok(TransactionInfo {
+                tx: None,
+                block_info: None,
+                confirmations: 0,
+                status: TransactionStatus::NotFound,
+                confirmation_threshold: 6,
+            })
+        });
 
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
         settings.max_monitoring_confirmations = 2;
@@ -1794,11 +1800,7 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
             estimated_fee_rate: 0,
         };
 
-        let tx_info_1_conf = TransactionInfo {
-            tx: pegin_tx.clone(),
-            block_info: block_100.clone(),
-            confirmations: 1,
-        };
+        let tx_info_1_conf = tx_info_confirmed(&pegin_tx, &block_100, 1);
 
         let best_block_100_clone_1 = block_100.clone();
         let best_block_100_clone_2 = block_100.clone();
@@ -1838,11 +1840,11 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
 
         let tx_info_1_conf_clone = tx_info_1_conf.clone();
         mock_indexer
-            .expect_get_tx()
-            .with(eq(pegin_tx_id_from_block))
-            .times(2)
-            .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
-        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+            .expect_get_transaction()
+            .withf(move |id| *id == pegin_tx_id_from_block)
+            // Calls: tick #1 + get_news after tick #1 + tick #2 + tick #3
+            .times(4)
+            .returning(move |_| Ok(tx_info_1_conf_clone.clone()));
 
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
         settings.max_monitoring_confirmations = 2;
@@ -1939,17 +1941,9 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
             estimated_fee_rate: 0,
         };
 
-        let spending_tx_info_at_100 = TransactionInfo {
-            tx: spending_tx.clone(),
-            block_info: block_with_spending_tx.clone(),
-            confirmations: 1,
-        };
+        let spending_tx_info_at_100 = tx_info_confirmed(&spending_tx, &block_with_spending_tx, 1);
 
-        let spending_tx_info_at_101 = TransactionInfo {
-            tx: spending_tx.clone(),
-            block_info: block_with_spending_tx.clone(),
-            confirmations: 2,
-        };
+        let spending_tx_info_at_101 = tx_info_confirmed(&spending_tx, &block_with_spending_tx, 2);
 
         let best_block_100_clone_1 = block_with_spending_tx.clone();
         let best_block_100_clone_2 = block_with_spending_tx.clone();
@@ -1989,17 +1983,16 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
 
         let spending_tx_info_at_100_clone = spending_tx_info_at_100.clone();
         mock_indexer
-            .expect_get_tx()
-            .with(eq(spending_tx_id))
+            .expect_get_transaction()
+            .withf(move |id| *id == spending_tx_id)
             .times(1)
-            .returning(move |_| Ok(Some(spending_tx_info_at_100_clone.clone())));
+            .returning(move |_| Ok(spending_tx_info_at_100_clone.clone()));
         let spending_tx_info_at_101_clone = spending_tx_info_at_101.clone();
         mock_indexer
-            .expect_get_tx()
-            .with(eq(spending_tx_id))
+            .expect_get_transaction()
+            .withf(move |id| *id == spending_tx_id)
             .times(2)
-            .returning(move |_| Ok(Some(spending_tx_info_at_101_clone.clone())));
-        mock_indexer.expect_get_tx().returning(move |_| Ok(None));
+            .returning(move |_| Ok(spending_tx_info_at_101_clone.clone()));
 
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
         settings.max_monitoring_confirmations = 2;
@@ -2127,25 +2120,13 @@ fn test_transaction_monitor_deactivation_after_max_confirmations() -> Result<(),
     };
 
     // Transaction info with 1 confirmation
-    let tx_info_1_conf = TransactionInfo {
-        tx: tx.clone(),
-        block_info: block_100.clone(),
-        confirmations: 1,
-    };
+    let tx_info_1_conf = tx_info_confirmed(&tx, &block_100, 1);
 
     // Transaction info with 2 confirmations (reaches max)
-    let tx_info_2_conf = TransactionInfo {
-        tx: tx.clone(),
-        block_info: block_100.clone(),
-        confirmations: 2,
-    };
+    let tx_info_2_conf = tx_info_confirmed(&tx, &block_100, 2);
 
     // Transaction info with 2 confirmations (reaches max)
-    let tx_info_3_conf = TransactionInfo {
-        tx: tx.clone(),
-        block_info: block_100.clone(),
-        confirmations: 3,
-    };
+    let tx_info_3_conf = tx_info_confirmed(&tx, &block_100, 3);
 
     // Set expectations for each tick
     let best_block_100_clone_1 = block_100.clone();
@@ -2196,24 +2177,24 @@ fn test_transaction_monitor_deactivation_after_max_confirmations() -> Result<(),
     // First tick: from tick() and get_news()
     let tx_info_1_conf_clone = tx_info_1_conf.clone();
     mock_indexer
-        .expect_get_tx()
-        .with(eq(tx_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == tx_id)
         .times(2) // Once from tick(), once from get_news() -> get_tx_status()
-        .returning(move |_| Ok(Some(tx_info_1_conf_clone.clone())));
+        .returning(move |_| Ok(tx_info_1_conf_clone.clone()));
 
     // Second tick: from tick() and get_news()
     let tx_info_2_conf_clone = tx_info_2_conf.clone();
     mock_indexer
-        .expect_get_tx()
-        .with(eq(tx_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == tx_id)
         .times(2)
-        .returning(move |_| Ok(Some(tx_info_2_conf_clone.clone())));
+        .returning(move |_| Ok(tx_info_2_conf_clone.clone()));
 
     mock_indexer
-        .expect_get_tx()
-        .with(eq(tx_id))
+        .expect_get_transaction()
+        .withf(move |id| *id == tx_id)
         .times(1)
-        .returning(move |_| Ok(Some(tx_info_3_conf.clone())));
+        .returning(move |_| Ok(tx_info_3_conf.clone()));
 
     let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
     settings.max_monitoring_confirmations = 3;

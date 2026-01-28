@@ -2,14 +2,13 @@ use crate::config::{MonitorSettings, MonitorSettingsConfig};
 use crate::errors::MonitorError;
 use crate::helper::{is_a_pegin_tx, is_spending_output};
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
-use crate::types::{
-    AckMonitorNews, MonitorNews, TransactionBlockchainStatus, TransactionStatus, TypesToMonitor,
-};
+use crate::types::{AckMonitorNews, MonitorNews, TypesToMonitor};
 use bitcoin::Txid;
+use bitcoin_indexer::config::IndexerSettings;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
-use bitcoin_indexer::types::FullBlock;
+use bitcoin_indexer::types::{FullBlock, TransactionInfo};
 use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
@@ -40,8 +39,15 @@ impl Monitor<IndexerType, MonitorStore> {
     ) -> Result<Self, MonitorError> {
         let settings = MonitorSettings::from(settings.unwrap_or_default());
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let indexer_store = IndexerStore::new(storage.clone())
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let indexer_store = IndexerStore::new(
+            storage.clone(),
+            settings
+                .indexer_settings
+                .as_ref()
+                .unwrap_or(&IndexerSettings::default())
+                .confirmation_threshold,
+        )
+        .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
         let indexer = Indexer::new(
             bitcoin_client,
             Rc::new(indexer_store),
@@ -164,10 +170,9 @@ pub trait MonitorApi {
     /// * `tx_id` - Hash of the transaction to check
     ///
     /// # Returns
-    /// - `Ok(TransactionStatus)`: Current status of the transaction
-    /// - `Err(MonitorError::TransactionNotFound)`: If the transaction is not found
+    /// - `Ok(TransactionInfo)`: Current information of the transaction
     /// - `Err`: If there was an error retrieving the status
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionInfo, MonitorError>;
 
     fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError>;
 }
@@ -205,7 +210,7 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
         self.ack_news(data)
     }
 
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionInfo, MonitorError> {
         self.get_tx_status(tx_id)
     }
 
@@ -493,66 +498,68 @@ where
         indexer_best_block_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
     ) -> Result<(), MonitorError> {
-        let tx_info = self.indexer.get_tx(&tx_id)?;
+        let tx_info = self.indexer.get_transaction(&tx_id)?;
 
-        if let Some(tx) = tx_info {
-            if tx.block_info.orphan {
-                info!(
-                    "Orphan Transaction({}) | Height({})",
-                    tx_id, tx.block_info.height
-                );
+        // TODO: MIRAR ESTO MAS EN DETALLE
+        if tx_info.is_not_found() || tx_info.is_in_mempool() {
+            return Ok(());
+        }
+
+        if tx_info.is_orphan() {
+            info!(
+                "Orphan Transaction({}) | Height({})",
+                tx_id,
+                tx_info.block_info.unwrap().height
+            );
+        }
+
+        // Check if we should send news based on number_confirmation_trigger
+        let should_send_news =
+            self.should_send_news(tx_id, number_confirmation_trigger, tx_info.confirmations)?;
+
+        if should_send_news {
+            if extra_data == INTERNAL_RSK_PEGIN {
+                self.store.update_news(
+                    MonitoredTypes::RskPeginTransaction(tx_id),
+                    current_block_hash,
+                )?;
             }
 
-            // Check if we should send news based on number_confirmation_trigger
-            let should_send_news =
-                self.should_send_news(tx_id, number_confirmation_trigger, tx.confirmations)?;
+            if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
+                Self::parse_spending_utxo_context(&extra_data)
+            {
+                self.store.update_news(
+                    MonitoredTypes::SpendingUTXOTransaction(
+                        target_tx_id,
+                        target_utxo_index,
+                        original_extra_data,
+                        tx_id,
+                    ),
+                    current_block_hash,
+                )?;
+            }
 
-            if should_send_news {
-                if extra_data == INTERNAL_RSK_PEGIN {
-                    self.store.update_news(
-                        MonitoredTypes::RskPeginTransaction(tx_id),
-                        current_block_hash,
-                    )?;
-                }
+            if extra_data != INTERNAL_RSK_PEGIN && !extra_data.starts_with(INTERNAL_SPENDING_UTXO) {
+                self.store.update_news(
+                    MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                    current_block_hash,
+                )?;
+            }
 
-                if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
-                    Self::parse_spending_utxo_context(&extra_data)
-                {
-                    self.store.update_news(
-                        MonitoredTypes::SpendingUTXOTransaction(
-                            target_tx_id,
-                            target_utxo_index,
-                            original_extra_data,
-                            tx_id,
-                        ),
-                        current_block_hash,
-                    )?;
-                }
+            info!(
+                "News for Transaction({}) | Height({}) | Confirmations({})",
+                tx_id, indexer_best_block_height, tx_info.confirmations,
+            );
 
-                if extra_data != INTERNAL_RSK_PEGIN
-                    && !extra_data.starts_with(INTERNAL_SPENDING_UTXO)
-                {
-                    self.store.update_news(
-                        MonitoredTypes::Transaction(tx_id, extra_data.clone()),
-                        current_block_hash,
-                    )?;
-                }
-
-                info!(
-                    "News for Transaction({}) | Height({}) | Confirmations({})",
-                    tx_id, indexer_best_block_height, tx.confirmations,
-                );
-
-                // Update trigger_sent flag if there's a trigger
-                if number_confirmation_trigger.is_some() {
-                    self.store
-                        .update_transaction_trigger_sent(tx_id, true)
-                        .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
-                }
+            // Update trigger_sent flag if there's a trigger
+            if number_confirmation_trigger.is_some() {
+                self.store
+                    .update_transaction_trigger_sent(tx_id, true)
+                    .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
             }
 
             // Check if we should deactivate monitor based on max_monitoring_confirmations
-            if tx.confirmations >= self.settings.max_monitoring_confirmations {
+            if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
                 self.store.deactivate_monitor(TypesToMonitor::Transactions(
                     vec![tx_id],
                     extra_data.clone(),
@@ -674,28 +681,8 @@ where
         Ok(())
     }
 
-    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
-        let tx_status = self
-            .indexer
-            .get_tx(tx_id)?
-            .ok_or_else(|| MonitorError::TransactionNotFound(tx_id.to_string()))?;
-
-        let status = if tx_status.block_info.orphan {
-            TransactionBlockchainStatus::Orphan
-        } else if tx_status.confirmations >= self.settings.confirmation_threshold {
-            TransactionBlockchainStatus::Finalized
-        } else {
-            TransactionBlockchainStatus::Confirmed
-        };
-
-        let return_tx_status = TransactionStatus::new(
-            tx_status.tx,
-            tx_status.block_info,
-            status,
-            tx_status.confirmations,
-        );
-
-        Ok(return_tx_status)
+    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionInfo, MonitorError> {
+        Ok(self.indexer.get_transaction(tx_id)?)
     }
 
     pub fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
