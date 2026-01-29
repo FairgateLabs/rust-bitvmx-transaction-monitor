@@ -206,8 +206,8 @@ impl MonitorStoreApi for MonitorStore {
         data: MonitoredTypes,
         current_block_hash: BlockHash,
     ) -> Result<(), MonitorStoreError> {
-        // Notifiaction will be updated if the block_hash is different
-        // If the notification is already in the store, it will be updated with the new block_hash and ack in false.
+        // Notification will be updated if the block_hash is different
+        // If the notification is already in the store, it will be updated with the new block_hash and ack set to false.
 
         match data {
             MonitoredTypes::Transaction(tx_id, extra_data) => {
