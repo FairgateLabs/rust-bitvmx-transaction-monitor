@@ -1,6 +1,10 @@
 use crate::{
     errors::MonitorStoreError,
-    types::{AckMonitorNews, TypesToMonitor},
+    types::{
+        AckMonitorNews, NewsAck, RskPeginMonitorState, RskPeginNewsEntry, SpendingUTXOMonitor,
+        SpendingUTXOMonitorEntry, SpendingUTXONewsEntry, TransactionMonitor,
+        TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
+    },
 };
 use bitcoin::{BlockHash, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
@@ -153,52 +157,44 @@ impl MonitorStoreApi for MonitorStore {
         let mut news = Vec::new();
 
         let key = self.get_key(MonitorKey::TransactionsNews);
-        let txs_news = self
-            .store
-            .get::<_, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
-            .unwrap_or_default();
+        let txs_news: Vec<TransactionNewsEntry> = self.store.get(&key)?.unwrap_or_default();
 
-        for (tx_id, extra_data, (_, ack)) in txs_news {
-            if !ack {
-                news.push(MonitoredTypes::Transaction(tx_id, extra_data));
+        for entry in txs_news {
+            if !entry.ack.acknowledged {
+                news.push(MonitoredTypes::Transaction(entry.tx_id, entry.extra_data));
             }
         }
 
         let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-        let rsk_news = self
-            .store
-            .get::<_, Vec<(Txid, (BlockHash, bool))>>(&rsk_news_key)?
-            .unwrap_or_default();
+        let rsk_news: Vec<RskPeginNewsEntry> = self.store.get(&rsk_news_key)?.unwrap_or_default();
 
-        for (tx_id, (_, ack)) in rsk_news {
-            if !ack {
-                news.push(MonitoredTypes::RskPeginTransaction(tx_id));
+        for entry in rsk_news {
+            if !entry.ack.acknowledged {
+                news.push(MonitoredTypes::RskPeginTransaction(entry.tx_id));
             }
         }
 
         let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
-        let spending_news = self
-            .store
-            .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&spending_news_key)?
-            .unwrap_or_default();
+        let spending_news: Vec<SpendingUTXONewsEntry> =
+            self.store.get(&spending_news_key)?.unwrap_or_default();
 
-        for (tx_id, utxo_index, extra_data, spender_tx_id, (_, ack)) in spending_news {
-            if !ack {
+        for entry in spending_news {
+            if !entry.ack.acknowledged {
                 news.push(MonitoredTypes::SpendingUTXOTransaction(
-                    tx_id,
-                    utxo_index,
-                    extra_data,
-                    spender_tx_id,
+                    entry.tx_id,
+                    entry.utxo_index,
+                    entry.extra_data,
+                    entry.spender_tx_id,
                 ));
             }
         }
 
         let block_news_key = self.get_key(MonitorKey::NewBlockNews);
-        let block_news = self.store.get::<_, (BlockHash, bool)>(&block_news_key)?;
+        let block_news: Option<NewsAck> = self.store.get(&block_news_key)?;
 
-        if let Some((hash, ack)) = block_news {
-            if !ack {
-                news.push(MonitoredTypes::NewBlock(hash));
+        if let Some(ack) = block_news {
+            if !ack.acknowledged {
+                news.push(MonitoredTypes::NewBlock(ack.block_hash));
             }
         }
 
@@ -216,27 +212,31 @@ impl MonitorStoreApi for MonitorStore {
         match data {
             MonitoredTypes::Transaction(tx_id, extra_data) => {
                 let key = self.get_key(MonitorKey::TransactionsNews);
-                let mut txs_news = self
-                    .store
-                    .get::<_, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
-                    .unwrap_or_default();
+                let mut txs_news: Vec<TransactionNewsEntry> =
+                    self.store.get(&key)?.unwrap_or_default();
 
-                let is_new_news = txs_news.iter().position(|(id, _, _)| id == &tx_id);
+                let is_new_news = txs_news.iter().position(|e| e.tx_id == tx_id);
 
                 match is_new_news {
                     None => {
                         // Insert news with current block hash and ack in false
-                        txs_news.push((tx_id, extra_data.clone(), (current_block_hash, false)));
+                        txs_news.push(TransactionNewsEntry {
+                            tx_id,
+                            extra_data: extra_data.clone(),
+                            ack: NewsAck::new(current_block_hash, false),
+                        });
                     }
                     Some(pos) => {
-                        let (_, _, (existing_block_hash, _)) = &txs_news[pos];
-                        if existing_block_hash == &current_block_hash {
+                        if txs_news[pos].ack.block_hash == current_block_hash {
                             // We already have this news, do not update
                             return Ok(());
                         } else {
                             // Replace the notification if the block hash is different
-                            txs_news[pos] =
-                                (tx_id, extra_data.clone(), (current_block_hash, false));
+                            txs_news[pos] = TransactionNewsEntry {
+                                tx_id,
+                                extra_data: extra_data.clone(),
+                                ack: NewsAck::new(current_block_hash, false),
+                            };
                         }
                     }
                 }
@@ -245,23 +245,26 @@ impl MonitorStoreApi for MonitorStore {
             }
             MonitoredTypes::RskPeginTransaction(tx_id) => {
                 let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut rsk_news = self
-                    .store
-                    .get::<_, Vec<(Txid, (BlockHash, bool))>>(&rsk_news_key)?
-                    .unwrap_or_default();
+                let mut rsk_news: Vec<RskPeginNewsEntry> =
+                    self.store.get(&rsk_news_key)?.unwrap_or_default();
 
-                let is_new_news = rsk_news.iter().position(|(id, _)| id == &tx_id);
+                let is_new_news = rsk_news.iter().position(|e| e.tx_id == tx_id);
 
                 match is_new_news {
-                    None => rsk_news.push((tx_id, (current_block_hash, false))),
+                    None => rsk_news.push(RskPeginNewsEntry {
+                        tx_id,
+                        ack: NewsAck::new(current_block_hash, false),
+                    }),
                     Some(pos) => {
-                        let (_, (existing_block_hash, _)) = &rsk_news[pos];
-                        if existing_block_hash == &current_block_hash {
+                        if rsk_news[pos].ack.block_hash == current_block_hash {
                             // We already have this news, do not update
                             return Ok(());
                         } else {
                             // Replace the notification if the block hash is different
-                            rsk_news[pos] = (tx_id, (current_block_hash, false));
+                            rsk_news[pos] = RskPeginNewsEntry {
+                                tx_id,
+                                ack: NewsAck::new(current_block_hash, false),
+                            };
                         }
                     }
                 }
@@ -275,33 +278,30 @@ impl MonitorStoreApi for MonitorStore {
                 spender_tx_id,
             ) => {
                 let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
-                let mut utxo_news = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&utxo_news_key)?
-                    .unwrap_or_default();
+                let mut utxo_news: Vec<SpendingUTXONewsEntry> =
+                    self.store.get(&utxo_news_key)?.unwrap_or_default();
 
                 let is_new_news = utxo_news
                     .iter()
-                    .position(|(id, utxo_i, _, _, _)| id == &tx_id && *utxo_i == utxo_index);
+                    .position(|e| e.tx_id == tx_id && e.utxo_index == utxo_index);
 
                 match is_new_news {
-                    None => utxo_news.push((
+                    None => utxo_news.push(SpendingUTXONewsEntry {
                         tx_id,
                         utxo_index,
-                        extra_data.clone(),
+                        extra_data: extra_data.clone(),
                         spender_tx_id,
-                        (current_block_hash, false),
-                    )),
+                        ack: NewsAck::new(current_block_hash, false),
+                    }),
                     Some(pos) => {
-                        let (_, _, _, _, (_, _)) = &utxo_news[pos];
                         // Replace the notification if the block hash is different
-                        utxo_news[pos] = (
+                        utxo_news[pos] = SpendingUTXONewsEntry {
                             tx_id,
                             utxo_index,
-                            extra_data.clone(),
+                            extra_data: extra_data.clone(),
                             spender_tx_id,
-                            (current_block_hash, false),
-                        );
+                            ack: NewsAck::new(current_block_hash, false),
+                        };
                     }
                 }
 
@@ -310,19 +310,21 @@ impl MonitorStoreApi for MonitorStore {
             MonitoredTypes::NewBlock(hash) => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
 
-                let data = self.store.get::<_, (BlockHash, bool)>(&key)?;
+                let data: Option<NewsAck> = self.store.get(&key)?;
 
-                if let Some((last_block_hash, _)) = data {
-                    if last_block_hash == hash {
+                if let Some(ack) = data {
+                    if ack.block_hash == hash {
                         // We already have this new block news, do not update
                         return Ok(());
                     } else {
                         // Replace the notification if the block hash is different
-                        self.store.set(&key, (current_block_hash, false), None)?;
+                        self.store
+                            .set(&key, NewsAck::new(current_block_hash, false), None)?;
                     }
+                } else {
+                    self.store
+                        .set(&key, NewsAck::new(current_block_hash, false), None)?;
                 }
-
-                self.store.set(&key, (current_block_hash, false), None)?;
             }
         }
 
@@ -333,51 +335,43 @@ impl MonitorStoreApi for MonitorStore {
         match data {
             AckMonitorNews::Transaction(tx_id) => {
                 let key = self.get_key(MonitorKey::TransactionsNews);
-                let mut txs_news = self
-                    .store
-                    .get::<_, Vec<(Txid, String, (BlockHash, bool))>>(&key)?
-                    .unwrap_or_default();
+                let mut txs_news: Vec<TransactionNewsEntry> =
+                    self.store.get(&key)?.unwrap_or_default();
 
-                if let Some((_, _, (_, ack))) =
-                    txs_news.iter_mut().find(|(txid, _, _)| txid == &tx_id)
-                {
-                    *ack = true;
+                if let Some(entry) = txs_news.iter_mut().find(|e| e.tx_id == tx_id) {
+                    entry.ack.acknowledged = true;
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
             AckMonitorNews::RskPeginTransaction(tx_id) => {
                 let key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut txs_news = self
-                    .store
-                    .get::<_, Vec<(Txid, (BlockHash, bool))>>(&key)?
-                    .unwrap_or_default();
+                let mut txs_news: Vec<RskPeginNewsEntry> =
+                    self.store.get(&key)?.unwrap_or_default();
 
-                if let Some((_, (_, ack))) = txs_news.iter_mut().find(|(txid, _)| txid == &tx_id) {
-                    *ack = true;
+                if let Some(entry) = txs_news.iter_mut().find(|e| e.tx_id == tx_id) {
+                    entry.ack.acknowledged = true;
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
             AckMonitorNews::SpendingUTXOTransaction(tx_id, utxo_index) => {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
-                let mut txs_news = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, String, Txid, (BlockHash, bool))>>(&key)?
-                    .unwrap_or_default();
+                let mut txs_news: Vec<SpendingUTXONewsEntry> =
+                    self.store.get(&key)?.unwrap_or_default();
 
-                if let Some((_, _, _, _, (_, ack))) = txs_news
+                if let Some(entry) = txs_news
                     .iter_mut()
-                    .find(|(tx, utxo_i, _, _, _)| *tx == tx_id && *utxo_i == utxo_index)
+                    .find(|e| e.tx_id == tx_id && e.utxo_index == utxo_index)
                 {
-                    *ack = true;
+                    entry.ack.acknowledged = true;
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
             AckMonitorNews::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
-                let mut new_block_news = self.store.get::<_, (BlockHash, bool)>(&key)?;
+                let mut new_block_news: Option<NewsAck> = self.store.get(&key)?;
 
-                if let Some((block_hash, _)) = new_block_news.as_mut() {
-                    new_block_news = Some((*block_hash, true));
+                if let Some(ack) = new_block_news.as_mut() {
+                    ack.acknowledged = true;
                     self.store.set(&key, new_block_news, None)?;
                 }
             }
@@ -391,47 +385,40 @@ impl MonitorStoreApi for MonitorStore {
 
         // Get active transactions
         let txs_key = self.get_key(MonitorKey::Transactions(true));
-        let txs = self
-            .store
-            .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&txs_key)?
-            .unwrap_or_default();
+        let txs: Vec<TransactionMonitor> = self.store.get(&txs_key)?.unwrap_or_default();
 
-        for (tx_id, tx_data) in txs {
-            for (extra_data, confirmations, _) in tx_data {
+        for monitor in txs {
+            for entry in monitor.entries {
                 monitors.push(TypesToMonitorStore::Transaction(
-                    tx_id,
-                    extra_data,
-                    confirmations,
+                    monitor.tx_id,
+                    entry.extra_data,
+                    entry.confirmation_trigger,
                 ));
             }
         }
 
         // Get RSK pegin monitor (if active)
         let rsk_pegin_key = self.get_key(MonitorKey::RskPegin);
-        let rsk_pegin_active: Option<(bool, Option<u32>)> = self.store.get(&rsk_pegin_key)?;
+        let rsk_pegin_active: Option<RskPeginMonitorState> = self.store.get(&rsk_pegin_key)?;
 
-        if let Some((active, from)) = rsk_pegin_active {
-            if active {
-                monitors.push(TypesToMonitorStore::RskPegin(from));
+        if let Some(state) = rsk_pegin_active {
+            if state.active {
+                monitors.push(TypesToMonitorStore::RskPegin(state.confirmation_trigger));
             }
         }
 
         // Get active spending UTXO transactions from list
         let spending_utxo_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-        let spending_utxos = self
-            .store
-            .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(
-                &spending_utxo_key,
-            )?
-            .unwrap_or_default();
+        let spending_utxos: Vec<SpendingUTXOMonitor> =
+            self.store.get(&spending_utxo_key)?.unwrap_or_default();
 
-        for (tx_id, utxo_index, tx_data) in spending_utxos {
-            for (extra_data, _spender_tx_id, confirmations) in tx_data {
+        for monitor in spending_utxos {
+            for entry in monitor.entries {
                 monitors.push(TypesToMonitorStore::SpendingUTXOTransaction(
-                    tx_id,
-                    utxo_index,
-                    extra_data,
-                    confirmations,
+                    monitor.tx_id,
+                    monitor.vout,
+                    entry.extra_data,
+                    entry.confirmation_trigger,
                 ));
             }
         }
@@ -454,24 +441,39 @@ impl MonitorStoreApi for MonitorStore {
         match data {
             TypesToMonitor::Transactions(tx_ids, extra_data, from) => {
                 let key = self.get_key(MonitorKey::Transactions(true));
-                let mut txs = self
-                    .store
-                    .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&key)?
-                    .unwrap_or_default();
+                let mut txs: Vec<TransactionMonitor> = self.store.get(&key)?.unwrap_or_default();
 
                 for txid in &tx_ids {
-                    if let Some((_, tx_data)) = txs.iter_mut().find(|(id, _)| id == txid) {
+                    if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == *txid) {
                         // If tx exists and extra_data is the same, override Option<u32> and move trigger sent in false
-                        if let Some(pos) = tx_data.iter().position(|(e, _, _)| e == &extra_data) {
-                            let (_, _, _) = tx_data[pos].clone();
-                            tx_data[pos] = (extra_data.clone(), from, false);
+                        if let Some(pos) = monitor
+                            .entries
+                            .iter()
+                            .position(|e| e.extra_data == extra_data)
+                        {
+                            monitor.entries[pos] = TransactionMonitorEntry {
+                                extra_data: extra_data.clone(),
+                                confirmation_trigger: from,
+                                trigger_sent: false,
+                            };
                         } else {
                             // If extra_data is different, add it as a new tx_id-to-monitor entry
-                            tx_data.push((extra_data.clone(), from, false));
+                            monitor.entries.push(TransactionMonitorEntry {
+                                extra_data: extra_data.clone(),
+                                confirmation_trigger: from,
+                                trigger_sent: false,
+                            });
                         }
                     } else {
                         // New txid, store it with its first (extra_data, trigger) entry
-                        txs.push((*txid, vec![(extra_data.clone(), from, false)]));
+                        txs.push(TransactionMonitor {
+                            tx_id: *txid,
+                            entries: vec![TransactionMonitorEntry {
+                                extra_data: extra_data.clone(),
+                                confirmation_trigger: from,
+                                trigger_sent: false,
+                            }],
+                        });
                     }
                 }
 
@@ -479,32 +481,51 @@ impl MonitorStoreApi for MonitorStore {
             }
             TypesToMonitor::RskPegin(from) => {
                 let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(&key, (true, from), None)?;
+                self.store.set(
+                    &key,
+                    RskPeginMonitorState {
+                        active: true,
+                        confirmation_trigger: from,
+                    },
+                    None,
+                )?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, from) => {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-                let mut txs = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(&key)?
-                    .unwrap_or_default();
+                let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key)?.unwrap_or_default();
 
-                if let Some((_, _, tx_data)) =
-                    txs.iter_mut().find(|(t, v, _)| *t == txid && *v == vout)
-                {
+                if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == txid && m.vout == vout) {
                     // If extra_data is the same, override confirmation trigger and keep spender_tx_id
-                    if let Some(pos) = tx_data
+                    if let Some(pos) = monitor
+                        .entries
                         .iter()
-                        .position(|(e, _spender, _from)| e == &extra_data)
+                        .position(|e| e.extra_data == extra_data)
                     {
-                        let (_, existing_spender_tx_id, _) = tx_data[pos].clone();
-                        tx_data[pos] = (extra_data.clone(), existing_spender_tx_id, from);
+                        let existing_spender_tx_id = monitor.entries[pos].spender_tx_id;
+                        monitor.entries[pos] = SpendingUTXOMonitorEntry {
+                            extra_data: extra_data.clone(),
+                            spender_tx_id: existing_spender_tx_id,
+                            confirmation_trigger: from,
+                        };
                     } else {
                         // If extra_data is different, add it as a new entry
-                        tx_data.push((extra_data.clone(), None, from));
+                        monitor.entries.push(SpendingUTXOMonitorEntry {
+                            extra_data: extra_data.clone(),
+                            spender_tx_id: None,
+                            confirmation_trigger: from,
+                        });
                     }
                 } else {
                     // New (txid,vout)
-                    txs.push((txid, vout, vec![(extra_data.clone(), None, from)]));
+                    txs.push(SpendingUTXOMonitor {
+                        tx_id: txid,
+                        vout,
+                        entries: vec![SpendingUTXOMonitorEntry {
+                            extra_data: extra_data.clone(),
+                            spender_tx_id: None,
+                            confirmation_trigger: from,
+                        }],
+                    });
                 }
 
                 self.store.set(&key, &txs, None)?;
@@ -524,55 +545,56 @@ impl MonitorStoreApi for MonitorStore {
                 let active_key = self.get_key(MonitorKey::Transactions(true));
                 let inactive_key = self.get_key(MonitorKey::Transactions(false));
 
-                let mut active_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&active_key)?
-                    .unwrap_or_default();
+                let mut active_txs: Vec<TransactionMonitor> =
+                    self.store.get(&active_key)?.unwrap_or_default();
 
-                let mut inactive_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&inactive_key)?
-                    .unwrap_or_default();
+                let mut inactive_txs: Vec<TransactionMonitor> =
+                    self.store.get(&inactive_key)?.unwrap_or_default();
 
                 // Move matching transactions from active to inactive
                 // For each matching txid, move only the entry with matching extra_data
                 let mut to_move = Vec::new();
                 for txid in &tx_ids {
-                    if let Some((_, tx_info)) = active_txs.iter_mut().find(|(id, _)| *id == *txid) {
+                    if let Some(monitor) = active_txs.iter_mut().find(|m| m.tx_id == *txid) {
                         // Find and remove the entry with matching extra_data
-                        tx_info.retain(|(context_data, confirmations, trigger_sent)| {
-                            if *context_data == extra_data {
-                                to_move.push((
-                                    *txid,
-                                    context_data.clone(),
-                                    *confirmations,
-                                    *trigger_sent,
-                                ));
+                        let mut entry_to_move = None;
+                        monitor.entries.retain(|e| {
+                            if e.extra_data == extra_data {
+                                entry_to_move = Some(e.clone());
                                 false // Remove from active
                             } else {
                                 true // Keep in active
                             }
                         });
 
-                        // If no tx_data left for this txid, remove the txid entirely
-                        if tx_info.is_empty() {
-                            active_txs.retain(|(id, _)| *id != *txid);
+                        // If no entries left for this txid, remove the txid entirely
+                        if monitor.entries.is_empty() {
+                            active_txs.retain(|m| m.tx_id != *txid);
+                        }
+
+                        if let Some(entry) = entry_to_move {
+                            to_move.push((*txid, entry));
                         }
                     }
                 }
 
                 // Add moved entries to inactive
-                for (txid, extra_data, confirmations, trigger_sent) in to_move {
-                    if let Some((_, inactive_tx_data)) =
-                        inactive_txs.iter_mut().find(|(id, _)| *id == txid)
-                    {
+                for (txid, entry) in to_move {
+                    if let Some(monitor) = inactive_txs.iter_mut().find(|m| m.tx_id == txid) {
                         // Add to existing inactive txid (avoid duplicates)
-                        if !inactive_tx_data.iter().any(|(ie, _, _)| *ie == extra_data) {
-                            inactive_tx_data.push((extra_data, confirmations, trigger_sent));
+                        if !monitor
+                            .entries
+                            .iter()
+                            .any(|e| e.extra_data == entry.extra_data)
+                        {
+                            monitor.entries.push(entry);
                         }
                     } else {
                         // Create new inactive txid entry
-                        inactive_txs.push((txid, vec![(extra_data, confirmations, trigger_sent)]));
+                        inactive_txs.push(TransactionMonitor {
+                            tx_id: txid,
+                            entries: vec![entry],
+                        });
                     }
                 }
 
@@ -588,62 +610,56 @@ impl MonitorStoreApi for MonitorStore {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                 let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
 
-                let mut active_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(
-                        &active_key,
-                    )?
-                    .unwrap_or_default();
+                let mut active_txs: Vec<SpendingUTXOMonitor> =
+                    self.store.get(&active_key)?.unwrap_or_default();
 
-                let mut inactive_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(
-                        &inactive_key,
-                    )?
-                    .unwrap_or_default();
+                let mut inactive_txs: Vec<SpendingUTXOMonitor> =
+                    self.store.get(&inactive_key)?.unwrap_or_default();
 
                 // Move matching transaction from active to inactive
                 // Find the matching (txid, vout) and move only the entry with matching extra_data
-                let mut to_move = None;
-                if let Some((_, _, tx_data)) = active_txs
+                let mut entry_to_move = None;
+                if let Some(monitor) = active_txs
                     .iter_mut()
-                    .find(|(t, v, _)| *t == txid && *v == vout)
+                    .find(|m| m.tx_id == txid && m.vout == vout)
                 {
                     // Find and remove the entry with matching extra_data
-                    tx_data.retain(|(context_data, spender, confirmation_trigger)| {
-                        if *context_data == extra_data {
-                            to_move = Some((
-                                txid,
-                                vout,
-                                context_data.clone(),
-                                *spender,
-                                *confirmation_trigger,
-                            ));
+                    monitor.entries.retain(|e| {
+                        if e.extra_data == extra_data {
+                            entry_to_move = Some(e.clone());
                             false // Remove from active
                         } else {
                             true // Keep in active
                         }
                     });
 
-                    // If no tx_data left for this (txid, vout), remove it entirely
-                    if tx_data.is_empty() {
-                        active_txs.retain(|(t, v, _)| *t != txid || *v != vout);
+                    // If no entries left for this (txid, vout), remove it entirely
+                    if monitor.entries.is_empty() {
+                        active_txs.retain(|m| m.tx_id != txid || m.vout != vout);
                     }
                 }
 
                 // Add moved entry to inactive
-                if let Some((t, v, e, spender, confirmations)) = to_move {
-                    if let Some((_, _, inactive_tx_data)) = inactive_txs
+                if let Some(entry) = entry_to_move {
+                    if let Some(monitor) = inactive_txs
                         .iter_mut()
-                        .find(|(ti, vi, _)| *ti == t && *vi == v)
+                        .find(|m| m.tx_id == txid && m.vout == vout)
                     {
                         // Add to existing inactive (txid, vout) (avoid duplicates)
-                        if !inactive_tx_data.iter().any(|(ie, _, _)| *ie == e) {
-                            inactive_tx_data.push((e, spender, confirmations));
+                        if !monitor
+                            .entries
+                            .iter()
+                            .any(|e| e.extra_data == entry.extra_data)
+                        {
+                            monitor.entries.push(entry);
                         }
                     } else {
                         // Create new inactive (txid, vout) entry
-                        inactive_txs.push((t, v, vec![(e, spender, confirmations)]));
+                        inactive_txs.push(SpendingUTXOMonitor {
+                            tx_id: txid,
+                            vout,
+                            entries: vec![entry],
+                        });
                     }
                 }
 
@@ -665,34 +681,29 @@ impl MonitorStoreApi for MonitorStore {
                 let active_key = self.get_key(MonitorKey::Transactions(true));
                 let inactive_key = self.get_key(MonitorKey::Transactions(false));
 
-                let mut active_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&active_key)?
-                    .unwrap_or_default();
+                let mut active_txs: Vec<TransactionMonitor> =
+                    self.store.get(&active_key)?.unwrap_or_default();
 
-                let mut inactive_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&inactive_key)?
-                    .unwrap_or_default();
+                let mut inactive_txs: Vec<TransactionMonitor> =
+                    self.store.get(&inactive_key)?.unwrap_or_default();
 
                 // Remove only the entry with matching extra_data for each txid
                 for txid in &tx_ids {
                     // Remove from active
-                    if let Some((_, tx_data)) = active_txs.iter_mut().find(|(id, _)| *id == *txid) {
-                        tx_data.retain(|(e, _, _)| *e != extra_data);
-                        // If no tx_data left for this txid, remove the txid entirely
-                        if tx_data.is_empty() {
-                            active_txs.retain(|(id, _)| *id != *txid);
+                    if let Some(monitor) = active_txs.iter_mut().find(|m| m.tx_id == *txid) {
+                        monitor.entries.retain(|e| e.extra_data != extra_data);
+                        // If no entries left for this txid, remove the txid entirely
+                        if monitor.entries.is_empty() {
+                            active_txs.retain(|m| m.tx_id != *txid);
                         }
                     }
 
                     // Remove from inactive
-                    if let Some((_, tx_data)) = inactive_txs.iter_mut().find(|(id, _)| *id == *txid)
-                    {
-                        tx_data.retain(|(e, _, _)| *e != extra_data);
-                        // If no tx_data left for this txid, remove the txid entirely
-                        if tx_data.is_empty() {
-                            inactive_txs.retain(|(id, _)| *id != *txid);
+                    if let Some(monitor) = inactive_txs.iter_mut().find(|m| m.tx_id == *txid) {
+                        monitor.entries.retain(|e| e.extra_data != extra_data);
+                        // If no entries left for this txid, remove the txid entirely
+                        if monitor.entries.is_empty() {
+                            inactive_txs.retain(|m| m.tx_id != *txid);
                         }
                     }
                 }
@@ -702,47 +713,46 @@ impl MonitorStoreApi for MonitorStore {
             }
             TypesToMonitor::RskPegin(from) => {
                 let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(&key, (false, from), None)?;
+                self.store.set(
+                    &key,
+                    RskPeginMonitorState {
+                        active: false,
+                        confirmation_trigger: from,
+                    },
+                    None,
+                )?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                 let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
 
-                let mut active_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(
-                        &active_key,
-                    )?
-                    .unwrap_or_default();
+                let mut active_txs: Vec<SpendingUTXOMonitor> =
+                    self.store.get(&active_key)?.unwrap_or_default();
 
-                let mut inactive_txs = self
-                    .store
-                    .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(
-                        &inactive_key,
-                    )?
-                    .unwrap_or_default();
+                let mut inactive_txs: Vec<SpendingUTXOMonitor> =
+                    self.store.get(&inactive_key)?.unwrap_or_default();
 
                 // Remove only the entry with matching extra_data from active
-                if let Some((_, _, tx_data)) = active_txs
+                if let Some(monitor) = active_txs
                     .iter_mut()
-                    .find(|(t, v, _)| *t == txid && *v == vout)
+                    .find(|m| m.tx_id == txid && m.vout == vout)
                 {
-                    tx_data.retain(|(e, _, _)| *e != extra_data);
-                    // If no tx_data left for this (txid, vout), remove it entirely
-                    if tx_data.is_empty() {
-                        active_txs.retain(|(t, v, _)| *t != txid || *v != vout);
+                    monitor.entries.retain(|e| e.extra_data != extra_data);
+                    // If no entries left for this (txid, vout), remove it entirely
+                    if monitor.entries.is_empty() {
+                        active_txs.retain(|m| m.tx_id != txid || m.vout != vout);
                     }
                 }
 
                 // Remove only the entry with matching extra_data from inactive
-                if let Some((_, _, tx_data)) = inactive_txs
+                if let Some(monitor) = inactive_txs
                     .iter_mut()
-                    .find(|(t, v, _)| *t == txid && *v == vout)
+                    .find(|m| m.tx_id == txid && m.vout == vout)
                 {
-                    tx_data.retain(|(e, _, _)| *e != extra_data);
-                    // If no tx_data left for this (txid, vout), remove it entirely
-                    if tx_data.is_empty() {
-                        inactive_txs.retain(|(t, v, _)| *t != txid || *v != vout);
+                    monitor.entries.retain(|e| e.extra_data != extra_data);
+                    // If no entries left for this (txid, vout), remove it entirely
+                    if monitor.entries.is_empty() {
+                        inactive_txs.retain(|m| m.tx_id != txid || m.vout != vout);
                     }
                 }
 
@@ -764,17 +774,14 @@ impl MonitorStoreApi for MonitorStore {
     ) -> Result<(), MonitorStoreError> {
         // Update spender_tx_id for the given (txid,vout) across all entries.
         let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-        let mut txs = self
-            .store
-            .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(&key)?
-            .unwrap_or_default();
+        let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key)?.unwrap_or_default();
 
-        if let Some((_, _, tx_data)) = txs
+        if let Some(monitor) = txs
             .iter_mut()
-            .find(|(txid, vout, _)| *txid == data.0 && *vout == data.1)
+            .find(|m| m.tx_id == data.0 && m.vout == data.1)
         {
-            for (_extra_data, spender_tx_id, _from) in tx_data.iter_mut() {
-                *spender_tx_id = data.2;
+            for entry in monitor.entries.iter_mut() {
+                entry.spender_tx_id = data.2;
             }
             self.store.set(&key, &txs, None)?;
         }
@@ -788,14 +795,11 @@ impl MonitorStoreApi for MonitorStore {
         extra_data: &str,
     ) -> Result<bool, MonitorStoreError> {
         let key = self.get_key(MonitorKey::Transactions(true));
-        let txs = self
-            .store
-            .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&key)?
-            .unwrap_or_default();
+        let txs: Vec<TransactionMonitor> = self.store.get(&key)?.unwrap_or_default();
 
-        if let Some((_, tx_data)) = txs.iter().find(|(id, _)| *id == tx_id) {
-            if let Some((_, _, trigger_sent)) = tx_data.iter().find(|(e, _, _)| e == extra_data) {
-                Ok(*trigger_sent)
+        if let Some(monitor) = txs.iter().find(|m| m.tx_id == tx_id) {
+            if let Some(entry) = monitor.entries.iter().find(|e| e.extra_data == extra_data) {
+                Ok(entry.trigger_sent)
             } else {
                 Err(MonitorStoreError::TransactionNotFound(format!(
                     "Transaction with tx_id {} and extra_data {} not found when trying to get trigger_sent flag",
@@ -817,15 +821,15 @@ impl MonitorStoreApi for MonitorStore {
         trigger_sent: bool,
     ) -> Result<(), MonitorStoreError> {
         let key = self.get_key(MonitorKey::Transactions(true));
-        let mut txs = self
-            .store
-            .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&key)?
-            .unwrap_or_default();
+        let mut txs: Vec<TransactionMonitor> = self.store.get(&key)?.unwrap_or_default();
 
-        if let Some((_, tx_data)) = txs.iter_mut().find(|(id, _)| *id == tx_id) {
-            if let Some(pos) = tx_data.iter().position(|(e, _, _)| e == extra_data) {
-                let (e, from, _) = tx_data[pos].clone();
-                tx_data[pos] = (e, from, trigger_sent);
+        if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
+            if let Some(entry) = monitor
+                .entries
+                .iter_mut()
+                .find(|e| e.extra_data == extra_data)
+            {
+                entry.trigger_sent = trigger_sent;
                 self.store.set(&key, &txs, None)?;
             }
         }
