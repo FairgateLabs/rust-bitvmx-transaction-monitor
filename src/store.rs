@@ -294,14 +294,17 @@ impl MonitorStoreApi for MonitorStore {
                         ack: NewsAck::new(current_block_hash, false),
                     }),
                     Some(pos) => {
-                        // Replace the notification if the block hash is different
-                        utxo_news[pos] = SpendingUTXONewsEntry {
-                            tx_id,
-                            utxo_index,
-                            extra_data: extra_data.clone(),
-                            spender_tx_id,
-                            ack: NewsAck::new(current_block_hash, false),
-                        };
+                        // Replace the notification only if the block hash is different
+                        // This prevents updating the news when confirmations increase but trigger was already sent
+                        if utxo_news[pos].ack.block_hash != current_block_hash {
+                            utxo_news[pos] = SpendingUTXONewsEntry {
+                                tx_id,
+                                utxo_index,
+                                extra_data: extra_data.clone(),
+                                spender_tx_id,
+                                ack: NewsAck::new(current_block_hash, false),
+                            };
+                        }
                     }
                 }
 
