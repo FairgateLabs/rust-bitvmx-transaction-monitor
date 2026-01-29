@@ -396,12 +396,12 @@ impl MonitorStoreApi for MonitorStore {
             .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&txs_key)?
             .unwrap_or_default();
 
-        for (tx_id, entries) in txs {
-            for (extra_data, number_confirmation_trigger, _) in entries {
+        for (tx_id, tx_data) in txs {
+            for (extra_data, confirmations, _) in tx_data {
                 monitors.push(TypesToMonitorStore::Transaction(
                     tx_id,
                     extra_data,
-                    number_confirmation_trigger,
+                    confirmations,
                 ));
             }
         }
@@ -425,13 +425,13 @@ impl MonitorStoreApi for MonitorStore {
             )?
             .unwrap_or_default();
 
-        for (tx_id, utxo_index, entries) in spending_utxos {
-            for (extra_data, _spender_tx_id, number_confirmation_trigger) in entries {
+        for (tx_id, utxo_index, tx_data) in spending_utxos {
+            for (extra_data, _spender_tx_id, confirmations) in tx_data {
                 monitors.push(TypesToMonitorStore::SpendingUTXOTransaction(
                     tx_id,
                     utxo_index,
                     extra_data,
-                    number_confirmation_trigger,
+                    confirmations,
                 ));
             }
         }
@@ -460,14 +460,14 @@ impl MonitorStoreApi for MonitorStore {
                     .unwrap_or_default();
 
                 for txid in &tx_ids {
-                    if let Some((_, entries)) = txs.iter_mut().find(|(id, _)| id == txid) {
+                    if let Some((_, tx_data)) = txs.iter_mut().find(|(id, _)| id == txid) {
                         // If tx exists and extra_data is the same, override Option<u32> and move trigger sent in false
-                        if let Some(pos) = entries.iter().position(|(e, _, _)| e == &extra_data) {
-                            let (_, _, _) = entries[pos].clone();
-                            entries[pos] = (extra_data.clone(), from, false);
+                        if let Some(pos) = tx_data.iter().position(|(e, _, _)| e == &extra_data) {
+                            let (_, _, _) = tx_data[pos].clone();
+                            tx_data[pos] = (extra_data.clone(), from, false);
                         } else {
                             // If extra_data is different, add it as a new tx_id-to-monitor entry
-                            entries.push((extra_data.clone(), from, false));
+                            tx_data.push((extra_data.clone(), from, false));
                         }
                     } else {
                         // New txid, store it with its first (extra_data, trigger) entry
@@ -488,19 +488,19 @@ impl MonitorStoreApi for MonitorStore {
                     .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(&key)?
                     .unwrap_or_default();
 
-                if let Some((_, _, entries)) =
+                if let Some((_, _, tx_data)) =
                     txs.iter_mut().find(|(t, v, _)| *t == txid && *v == vout)
                 {
                     // If extra_data is the same, override confirmation trigger and keep spender_tx_id
-                    if let Some(pos) = entries
+                    if let Some(pos) = tx_data
                         .iter()
                         .position(|(e, _spender, _from)| e == &extra_data)
                     {
-                        let (_, existing_spender_tx_id, _) = entries[pos].clone();
-                        entries[pos] = (extra_data.clone(), existing_spender_tx_id, from);
+                        let (_, existing_spender_tx_id, _) = tx_data[pos].clone();
+                        tx_data[pos] = (extra_data.clone(), existing_spender_tx_id, from);
                     } else {
                         // If extra_data is different, add it as a new entry
-                        entries.push((extra_data.clone(), None, from));
+                        tx_data.push((extra_data.clone(), None, from));
                     }
                 } else {
                     // New (txid,vout)
@@ -540,16 +540,21 @@ impl MonitorStoreApi for MonitorStore {
                 for txid in &tx_ids {
                     if let Some((_, tx_info)) = active_txs.iter_mut().find(|(id, _)| *id == *txid) {
                         // Find and remove the entry with matching extra_data
-                        tx_info.retain(|(data, confirmations, trigger_sent)| {
-                            if *data == extra_data {
-                                to_move.push((*txid, data.clone(), *confirmations, *trigger_sent));
+                        tx_info.retain(|(context_data, confirmations, trigger_sent)| {
+                            if *context_data == extra_data {
+                                to_move.push((
+                                    *txid,
+                                    context_data.clone(),
+                                    *confirmations,
+                                    *trigger_sent,
+                                ));
                                 false // Remove from active
                             } else {
                                 true // Keep in active
                             }
                         });
 
-                        // If no entries left for this txid, remove the txid entirely
+                        // If no tx_data left for this txid, remove the txid entirely
                         if tx_info.is_empty() {
                             active_txs.retain(|(id, _)| *id != *txid);
                         }
@@ -557,24 +562,17 @@ impl MonitorStoreApi for MonitorStore {
                 }
 
                 // Add moved entries to inactive
-                for (txid, extra_data, number_confirmation_trigger, trigger_sent) in to_move {
-                    if let Some((_, inactive_entries)) =
+                for (txid, extra_data, confirmations, trigger_sent) in to_move {
+                    if let Some((_, inactive_tx_data)) =
                         inactive_txs.iter_mut().find(|(id, _)| *id == txid)
                     {
                         // Add to existing inactive txid (avoid duplicates)
-                        if !inactive_entries.iter().any(|(ie, _, _)| *ie == extra_data) {
-                            inactive_entries.push((
-                                extra_data,
-                                number_confirmation_trigger,
-                                trigger_sent,
-                            ));
+                        if !inactive_tx_data.iter().any(|(ie, _, _)| *ie == extra_data) {
+                            inactive_tx_data.push((extra_data, confirmations, trigger_sent));
                         }
                     } else {
                         // Create new inactive txid entry
-                        inactive_txs.push((
-                            txid,
-                            vec![(extra_data, number_confirmation_trigger, trigger_sent)],
-                        ));
+                        inactive_txs.push((txid, vec![(extra_data, confirmations, trigger_sent)]));
                     }
                 }
 
@@ -607,39 +605,45 @@ impl MonitorStoreApi for MonitorStore {
                 // Move matching transaction from active to inactive
                 // Find the matching (txid, vout) and move only the entry with matching extra_data
                 let mut to_move = None;
-                if let Some((_, _, entries)) = active_txs
+                if let Some((_, _, tx_data)) = active_txs
                     .iter_mut()
                     .find(|(t, v, _)| *t == txid && *v == vout)
                 {
                     // Find and remove the entry with matching extra_data
-                    entries.retain(|(e, spender, trigger)| {
-                        if *e == extra_data {
-                            to_move = Some((txid, vout, e.clone(), *spender, *trigger));
+                    tx_data.retain(|(context_data, spender, confirmation_trigger)| {
+                        if *context_data == extra_data {
+                            to_move = Some((
+                                txid,
+                                vout,
+                                context_data.clone(),
+                                *spender,
+                                *confirmation_trigger,
+                            ));
                             false // Remove from active
                         } else {
                             true // Keep in active
                         }
                     });
 
-                    // If no entries left for this (txid, vout), remove it entirely
-                    if entries.is_empty() {
+                    // If no tx_data left for this (txid, vout), remove it entirely
+                    if tx_data.is_empty() {
                         active_txs.retain(|(t, v, _)| *t != txid || *v != vout);
                     }
                 }
 
                 // Add moved entry to inactive
-                if let Some((t, v, e, spender, trigger)) = to_move {
-                    if let Some((_, _, inactive_entries)) = inactive_txs
+                if let Some((t, v, e, spender, confirmations)) = to_move {
+                    if let Some((_, _, inactive_tx_data)) = inactive_txs
                         .iter_mut()
                         .find(|(ti, vi, _)| *ti == t && *vi == v)
                     {
                         // Add to existing inactive (txid, vout) (avoid duplicates)
-                        if !inactive_entries.iter().any(|(ie, _, _)| *ie == e) {
-                            inactive_entries.push((e, spender, trigger));
+                        if !inactive_tx_data.iter().any(|(ie, _, _)| *ie == e) {
+                            inactive_tx_data.push((e, spender, confirmations));
                         }
                     } else {
                         // Create new inactive (txid, vout) entry
-                        inactive_txs.push((t, v, vec![(e, spender, trigger)]));
+                        inactive_txs.push((t, v, vec![(e, spender, confirmations)]));
                     }
                 }
 
@@ -674,20 +678,20 @@ impl MonitorStoreApi for MonitorStore {
                 // Remove only the entry with matching extra_data for each txid
                 for txid in &tx_ids {
                     // Remove from active
-                    if let Some((_, entries)) = active_txs.iter_mut().find(|(id, _)| *id == *txid) {
-                        entries.retain(|(e, _, _)| *e != extra_data);
-                        // If no entries left for this txid, remove the txid entirely
-                        if entries.is_empty() {
+                    if let Some((_, tx_data)) = active_txs.iter_mut().find(|(id, _)| *id == *txid) {
+                        tx_data.retain(|(e, _, _)| *e != extra_data);
+                        // If no tx_data left for this txid, remove the txid entirely
+                        if tx_data.is_empty() {
                             active_txs.retain(|(id, _)| *id != *txid);
                         }
                     }
 
                     // Remove from inactive
-                    if let Some((_, entries)) = inactive_txs.iter_mut().find(|(id, _)| *id == *txid)
+                    if let Some((_, tx_data)) = inactive_txs.iter_mut().find(|(id, _)| *id == *txid)
                     {
-                        entries.retain(|(e, _, _)| *e != extra_data);
-                        // If no entries left for this txid, remove the txid entirely
-                        if entries.is_empty() {
+                        tx_data.retain(|(e, _, _)| *e != extra_data);
+                        // If no tx_data left for this txid, remove the txid entirely
+                        if tx_data.is_empty() {
                             inactive_txs.retain(|(id, _)| *id != *txid);
                         }
                     }
@@ -719,25 +723,25 @@ impl MonitorStoreApi for MonitorStore {
                     .unwrap_or_default();
 
                 // Remove only the entry with matching extra_data from active
-                if let Some((_, _, entries)) = active_txs
+                if let Some((_, _, tx_data)) = active_txs
                     .iter_mut()
                     .find(|(t, v, _)| *t == txid && *v == vout)
                 {
-                    entries.retain(|(e, _, _)| *e != extra_data);
-                    // If no entries left for this (txid, vout), remove it entirely
-                    if entries.is_empty() {
+                    tx_data.retain(|(e, _, _)| *e != extra_data);
+                    // If no tx_data left for this (txid, vout), remove it entirely
+                    if tx_data.is_empty() {
                         active_txs.retain(|(t, v, _)| *t != txid || *v != vout);
                     }
                 }
 
                 // Remove only the entry with matching extra_data from inactive
-                if let Some((_, _, entries)) = inactive_txs
+                if let Some((_, _, tx_data)) = inactive_txs
                     .iter_mut()
                     .find(|(t, v, _)| *t == txid && *v == vout)
                 {
-                    entries.retain(|(e, _, _)| *e != extra_data);
-                    // If no entries left for this (txid, vout), remove it entirely
-                    if entries.is_empty() {
+                    tx_data.retain(|(e, _, _)| *e != extra_data);
+                    // If no tx_data left for this (txid, vout), remove it entirely
+                    if tx_data.is_empty() {
                         inactive_txs.retain(|(t, v, _)| *t != txid || *v != vout);
                     }
                 }
@@ -765,11 +769,11 @@ impl MonitorStoreApi for MonitorStore {
             .get::<_, Vec<(Txid, u32, Vec<(String, Option<Txid>, Option<u32>)>)>>(&key)?
             .unwrap_or_default();
 
-        if let Some((_, _, entries)) = txs
+        if let Some((_, _, tx_data)) = txs
             .iter_mut()
             .find(|(txid, vout, _)| *txid == data.0 && *vout == data.1)
         {
-            for (_extra_data, spender_tx_id, _from) in entries.iter_mut() {
+            for (_extra_data, spender_tx_id, _from) in tx_data.iter_mut() {
                 *spender_tx_id = data.2;
             }
             self.store.set(&key, &txs, None)?;
@@ -789,8 +793,8 @@ impl MonitorStoreApi for MonitorStore {
             .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&key)?
             .unwrap_or_default();
 
-        if let Some((_, entries)) = txs.iter().find(|(id, _)| *id == tx_id) {
-            if let Some((_, _, trigger_sent)) = entries.iter().find(|(e, _, _)| e == extra_data) {
+        if let Some((_, tx_data)) = txs.iter().find(|(id, _)| *id == tx_id) {
+            if let Some((_, _, trigger_sent)) = tx_data.iter().find(|(e, _, _)| e == extra_data) {
                 Ok(*trigger_sent)
             } else {
                 Err(MonitorStoreError::TransactionNotFound(format!(
@@ -818,10 +822,10 @@ impl MonitorStoreApi for MonitorStore {
             .get::<_, Vec<(Txid, Vec<(String, Option<u32>, bool)>)>>(&key)?
             .unwrap_or_default();
 
-        if let Some((_, entries)) = txs.iter_mut().find(|(id, _)| *id == tx_id) {
-            if let Some(pos) = entries.iter().position(|(e, _, _)| e == extra_data) {
-                let (e, from, _) = entries[pos].clone();
-                entries[pos] = (e, from, trigger_sent);
+        if let Some((_, tx_data)) = txs.iter_mut().find(|(id, _)| *id == tx_id) {
+            if let Some(pos) = tx_data.iter().position(|(e, _, _)| e == extra_data) {
+                let (e, from, _) = tx_data[pos].clone();
+                tx_data[pos] = (e, from, trigger_sent);
                 self.store.set(&key, &txs, None)?;
             }
         }
