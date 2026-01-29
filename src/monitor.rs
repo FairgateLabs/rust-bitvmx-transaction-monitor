@@ -355,12 +355,13 @@ where
     fn should_send_news(
         &self,
         tx_id: Txid,
+        extra_data: &str,
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
     ) -> Result<bool, MonitorError> {
         let trigger_sent = self
             .store
-            .get_transaction_trigger_sent(tx_id)
+            .get_transaction_trigger_sent(tx_id, extra_data)
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
 
         if let Some(trigger) = number_confirmation_trigger {
@@ -504,8 +505,12 @@ where
             }
 
             // Check if we should send news based on number_confirmation_trigger
-            let should_send_news =
-                self.should_send_news(tx_id, number_confirmation_trigger, tx.confirmations)?;
+            let should_send_news = self.should_send_news(
+                tx_id,
+                &extra_data,
+                number_confirmation_trigger,
+                tx.confirmations,
+            )?;
 
             if should_send_news {
                 if extra_data == INTERNAL_RSK_PEGIN {
@@ -546,7 +551,7 @@ where
                 // Update trigger_sent flag if there's a trigger
                 if number_confirmation_trigger.is_some() {
                     self.store
-                        .update_transaction_trigger_sent(tx_id, true)
+                        .update_transaction_trigger_sent(tx_id, &extra_data, true)
                         .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
                 }
             }

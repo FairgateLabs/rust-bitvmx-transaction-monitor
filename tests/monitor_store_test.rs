@@ -233,10 +233,10 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
         .iter()
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id3)));
 
-    // Deactivate tx_id2
+    // Deactivate tx_id2 (using the same extra_data that was used when adding)
     store.deactivate_monitor(TypesToMonitor::Transactions(
         vec![tx_id2],
-        String::new(),
+        "extra2".to_string(),
         None,
     ))?;
 
@@ -253,10 +253,10 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
         .iter()
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id3)));
 
-    // Deactivate tx_id1 as well
+    // Deactivate tx_id1 as well (using the same extra_data that was used when adding)
     store.deactivate_monitor(TypesToMonitor::Transactions(
         vec![tx_id1],
-        String::new(),
+        "extra1".to_string(),
         None,
     ))?;
 
@@ -294,9 +294,10 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id3)));
 
     // Cancel tx_id2 (should remove from both active and inactive)
+    // Cancel the reactivated entry with "extra2_reactivated"
     store.cancel_monitor(TypesToMonitor::Transactions(
         vec![tx_id2],
-        String::new(),
+        "extra2_reactivated".to_string(),
         None,
     ))?;
 
@@ -452,12 +453,13 @@ fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
     store.deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
         tx_id1,
         0,
-        String::new(),
+        "extra1".to_string(),
         None,
     ))?;
 
     // Two should remain active
     let monitors = store.get_monitors()?;
+
     assert_eq!(monitors.len(), 2);
     assert!(!monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 0)));
     assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 1)));
@@ -475,17 +477,34 @@ fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 3);
 
-    // Cancel one
+    // Cancel one monitor
     store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
         tx_id1,
-        0,
-        String::new(),
+        1,
+        "extra2".to_string(),
         None,
     ))?;
 
     // Two should remain
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 2);
+
+    store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra1_reactivated".to_string(),
+        None,
+    ))?;
+
+    store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id2,
+        0,
+        "extra3".to_string(),
+        None,
+    ))?;
+
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 0);
 
     clear_output();
 
