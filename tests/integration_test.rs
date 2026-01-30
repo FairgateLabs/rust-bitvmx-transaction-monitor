@@ -83,7 +83,7 @@ fn detect_transaction_monitor() -> Result<(), anyhow::Error> {
     }
 
     // Acknowledge the news
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
+    monitor.ack_news(AckMonitorNews::Transaction(tx_id, "Txid".to_string()))?;
 
     // Add a new block monitor
     let best_block_monitor = TypesToMonitor::NewBlock;

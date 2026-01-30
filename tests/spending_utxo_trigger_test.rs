@@ -225,6 +225,12 @@ fn test_spending_utxo_confirmation_trigger() -> Result<(), anyhow::Error> {
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         transaction1_txid,
         transaction1_vout,
+        "context_1".to_string(),
+    ))?;
+    monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
+        transaction1_txid,
+        transaction1_vout,
+        "context_2".to_string(),
     ))?;
 
     // 11) Mine 10 more blocks, do 10 ticks

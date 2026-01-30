@@ -250,8 +250,8 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     }
 
     // Acknowledge the news
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id_2))?;
+    monitor.ack_news(AckMonitorNews::Transaction(tx_id, "test".to_string()))?;
+    monitor.ack_news(AckMonitorNews::Transaction(tx_id_2, "test 2".to_string()))?;
 
     // Verify news are gone after acknowledgment
     let news_after_ack = monitor.get_news()?;
@@ -845,6 +845,7 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         target_tx_id,
         target_utxo_index,
+        String::new(),
     ))?;
 
     // Second tick - should confirm the spending transaction (2 confirmations)
@@ -862,6 +863,7 @@ fn test_spending_utxo_monitor_orphan_handling() -> Result<(), anyhow::Error> {
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         target_tx_id,
         target_utxo_index,
+        String::new(),
     ))?;
 
     // Third tick - Reorg with block 100, and should detect the new spending transaction tx2
@@ -1099,6 +1101,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         target_tx_id,
         target_utxo_index,
+        String::new(),
     ))?;
 
     // Second tick: confirmations reach the threshold; the monitor should send news and then be deactivated
@@ -1127,6 +1130,7 @@ fn test_spending_utxo_monitor_deactivation_after_max_confirmations() -> Result<(
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         target_tx_id,
         target_utxo_index,
+        String::new(),
     ))?;
 
     // Third tick: monitor is already deactivated, so no processing should happen
@@ -1274,7 +1278,7 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 1);
         assert!(matches!(news[0].clone(), MonitorNews::Transaction(t, _, _) if t == tx_id));
-        monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
+        monitor.ack_news(AckMonitorNews::Transaction(tx_id, String::new()))?;
         monitor.tick()?;
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 0);
@@ -1593,6 +1597,7 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
         monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
             target_tx_id,
             target_utxo_index,
+            String::new(),
         ))?;
 
         monitor.tick()?;
@@ -1737,7 +1742,7 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 1);
         assert!(matches!(news[0].clone(), MonitorNews::Transaction(t, _, _) if t == tx_id));
-        monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
+        monitor.ack_news(AckMonitorNews::Transaction(tx_id, String::new()))?;
         monitor.tick()?;
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 0);
@@ -2051,6 +2056,7 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
         monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
             target_tx_id,
             target_utxo_index,
+            String::new(),
         ))?;
         monitor.tick()?;
         let monitors = monitor.store.get_monitors()?;
@@ -2237,7 +2243,7 @@ fn test_transaction_monitor_deactivation_after_max_confirmations() -> Result<(),
         MonitorNews::Transaction(t, _, _) if t == tx_id
     ));
 
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
+    monitor.ack_news(AckMonitorNews::Transaction(tx_id, String::new()))?;
 
     // Second tick: should send news and then deactivate
     monitor.tick()?;
@@ -2249,7 +2255,7 @@ fn test_transaction_monitor_deactivation_after_max_confirmations() -> Result<(),
         MonitorNews::Transaction(t, _, _) if t == tx_id
     ));
 
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id))?;
+    monitor.ack_news(AckMonitorNews::Transaction(tx_id, String::new()))?;
 
     // Third tick: should deactivate
     monitor.tick()?;
