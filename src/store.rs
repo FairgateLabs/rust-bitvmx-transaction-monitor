@@ -215,7 +215,11 @@ impl MonitorStoreApi for MonitorStore {
                 let mut txs_news: Vec<TransactionNewsEntry> =
                     self.store.get(&key)?.unwrap_or_default();
 
-                let is_new_news = txs_news.iter().position(|e| e.tx_id == tx_id);
+                // Check if news already exists for this (tx_id, extra_data) combination
+                // Different extra_data should generate separate news entries
+                let is_new_news = txs_news
+                    .iter()
+                    .position(|e| e.tx_id == tx_id && e.extra_data == extra_data);
 
                 match is_new_news {
                     None => {
@@ -248,6 +252,8 @@ impl MonitorStoreApi for MonitorStore {
                 let mut rsk_news: Vec<RskPeginNewsEntry> =
                     self.store.get(&rsk_news_key)?.unwrap_or_default();
 
+                // Check if news already exists for this tx_id
+                // RskPeginTransaction doesn't have extra_data, so we only check by tx_id
                 let is_new_news = rsk_news.iter().position(|e| e.tx_id == tx_id);
 
                 match is_new_news {
@@ -281,9 +287,11 @@ impl MonitorStoreApi for MonitorStore {
                 let mut utxo_news: Vec<SpendingUTXONewsEntry> =
                     self.store.get(&utxo_news_key)?.unwrap_or_default();
 
-                let is_new_news = utxo_news
-                    .iter()
-                    .position(|e| e.tx_id == tx_id && e.utxo_index == utxo_index);
+                // Check if news already exists for this (tx_id, utxo_index, extra_data)
+                // Different extra_data should generate separate news entries
+                let is_new_news = utxo_news.iter().position(|e| {
+                    e.tx_id == tx_id && e.utxo_index == utxo_index && e.extra_data == extra_data
+                });
 
                 match is_new_news {
                     None => utxo_news.push(SpendingUTXONewsEntry {
@@ -341,8 +349,18 @@ impl MonitorStoreApi for MonitorStore {
                 let mut txs_news: Vec<TransactionNewsEntry> =
                     self.store.get(&key)?.unwrap_or_default();
 
-                if let Some(entry) = txs_news.iter_mut().find(|e| e.tx_id == tx_id) {
-                    entry.ack.acknowledged = true;
+                //TODO: THIS SHOULD change, we need to start sending context to ack a news.
+                // Acknowledge all news entries for this tx_id
+                // Multiple entries may exist with different extra_data
+                let mut found_any = false;
+                for entry in txs_news.iter_mut() {
+                    if entry.tx_id == tx_id {
+                        entry.ack.acknowledged = true;
+                        found_any = true;
+                    }
+                }
+
+                if found_any {
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
@@ -351,8 +369,18 @@ impl MonitorStoreApi for MonitorStore {
                 let mut txs_news: Vec<RskPeginNewsEntry> =
                     self.store.get(&key)?.unwrap_or_default();
 
-                if let Some(entry) = txs_news.iter_mut().find(|e| e.tx_id == tx_id) {
-                    entry.ack.acknowledged = true;
+                //TODO: THIS SHOULD change, we need to start sending context to ack a news.
+                // Acknowledge all news entries for this tx_id
+                // RskPeginTransaction doesn't have extra_data, but we acknowledge all entries for consistency
+                let mut found_any = false;
+                for entry in txs_news.iter_mut() {
+                    if entry.tx_id == tx_id {
+                        entry.ack.acknowledged = true;
+                        found_any = true;
+                    }
+                }
+
+                if found_any {
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
@@ -361,11 +389,18 @@ impl MonitorStoreApi for MonitorStore {
                 let mut txs_news: Vec<SpendingUTXONewsEntry> =
                     self.store.get(&key)?.unwrap_or_default();
 
-                if let Some(entry) = txs_news
-                    .iter_mut()
-                    .find(|e| e.tx_id == tx_id && e.utxo_index == utxo_index)
-                {
-                    entry.ack.acknowledged = true;
+                //TODO: THIS SHOULD change.
+                // Acknowledge all news entries for this (tx_id, utxo_index)
+                // Multiple entries may exist with different extra_data
+                let mut found_any = false;
+                for entry in txs_news.iter_mut() {
+                    if entry.tx_id == tx_id && entry.utxo_index == utxo_index {
+                        entry.ack.acknowledged = true;
+                        found_any = true;
+                    }
+                }
+
+                if found_any {
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
