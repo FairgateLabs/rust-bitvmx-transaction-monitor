@@ -151,9 +151,22 @@ pub enum MonitorNews {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AckMonitorNews {
-    Transaction(Txid),
+    // Transaction news
+    // - Txid: The transaction ID
+    // - String: The context of the transaction
+    Transaction(Txid, String),
+
+    // Rsk pegin transaction news
+    // - Txid: The transaction ID
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid, u32),
+
+    // Spending UTXO transaction news
+    // - Txid: The transaction ID
+    // - u32: The vout index of the UTXO
+    // - String: The context of the transaction
+    SpendingUTXOTransaction(Txid, u32, String),
+
+    // New block news
     NewBlock,
 }
 
