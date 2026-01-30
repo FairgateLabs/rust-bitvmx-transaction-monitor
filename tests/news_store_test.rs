@@ -49,7 +49,7 @@ fn news_test() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000001")?;
 
     // Test one transaction news
-    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), String::new());
+    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string());
     store.update_news(tx_news.clone(), block_hash)?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
@@ -58,9 +58,8 @@ fn news_test() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
-    // Update the existing news with a different block hash
-    let context_data = Uuid::new_v4();
-    let txs_news = MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string());
+    // Update the existing news with same block hash
+    let txs_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string());
     store.update_news(txs_news.clone(), block_hash)?;
 
     // Verify we have a No news because for this block hash we already have an ack

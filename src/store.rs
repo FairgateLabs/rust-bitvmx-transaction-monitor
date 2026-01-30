@@ -231,11 +231,8 @@ impl MonitorStoreApi for MonitorStore {
                         });
                     }
                     Some(pos) => {
-                        if txs_news[pos].ack.block_hash == current_block_hash {
-                            // We already have this news, do not update
-                            return Ok(());
-                        } else {
-                            // Replace the notification if the block hash is different
+                        if txs_news[pos].ack.block_hash != current_block_hash {
+                            // Replace the notification with the new block hash
                             txs_news[pos] = TransactionNewsEntry {
                                 tx_id,
                                 extra_data: extra_data.clone(),
@@ -262,11 +259,8 @@ impl MonitorStoreApi for MonitorStore {
                         ack: NewsAck::new(current_block_hash, false),
                     }),
                     Some(pos) => {
-                        if rsk_news[pos].ack.block_hash == current_block_hash {
-                            // We already have this news, do not update
-                            return Ok(());
-                        } else {
-                            // Replace the notification if the block hash is different
+                        if rsk_news[pos].ack.block_hash != current_block_hash {
+                            // Replace the notification with the new block hash
                             rsk_news[pos] = RskPeginNewsEntry {
                                 tx_id,
                                 ack: NewsAck::new(current_block_hash, false),
@@ -303,7 +297,6 @@ impl MonitorStoreApi for MonitorStore {
                     }),
                     Some(pos) => {
                         // Replace the notification only if the block hash is different
-                        // This prevents updating the news when confirmations increase but trigger was already sent
                         if utxo_news[pos].ack.block_hash != current_block_hash {
                             utxo_news[pos] = SpendingUTXONewsEntry {
                                 tx_id,
@@ -324,11 +317,8 @@ impl MonitorStoreApi for MonitorStore {
                 let data: Option<NewsAck> = self.store.get(&key)?;
 
                 if let Some(ack) = data {
-                    if ack.block_hash == hash {
-                        // We already have this new block news, do not update
-                        return Ok(());
-                    } else {
-                        // Replace the notification if the block hash is different
+                    if ack.block_hash != hash {
+                        // Replace the notification with the new block hash
                         self.store
                             .set(&key, NewsAck::new(current_block_hash, false), None)?;
                     }
