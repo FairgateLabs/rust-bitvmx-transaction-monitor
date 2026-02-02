@@ -6,7 +6,6 @@ bitcoin:
   wallet: test_wallet
 
 settings:
-  confirmation_threshold: 6
   max_monitoring_confirmations: 100
   indexer_settings:
     checkpoint_height: 10

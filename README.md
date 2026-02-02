@@ -40,7 +40,6 @@ bitcoin:
   wallet: test_wallet
 
 settings:
-  confirmation_threshold: 6
   max_monitoring_confirmations: 100
   indexer_settings:
     checkpoint_height: 10
@@ -74,9 +73,6 @@ The `Monitor` struct implements the `MonitorApi` trait, offering the following m
 - **`cancel(data: TypesToMonitor)`**: Completely stops monitoring a specific transaction or entity. Existing transaction news is retained, but no further updates will be generated.
 
 ### Blockchain Information
-
-- **`get_confirmation_threshold()`**: Retrieves the configured confirmation threshold for transactions.
-  - Indicates the number of confirmations required for a transaction to be considered final.
 
 - **`get_monitor_height()`**: Provides the current block height processed by the monitor.
   - Useful for evaluating synchronization status.
@@ -115,10 +111,6 @@ Here's how you can use the `Monitor` struct and its methods in your application:
   // Stop monitoring a specific transaction or entity
   let cancel_data = /* create your TypesToMonitor instance */;
   monitor.cancel(cancel_data) 
-
-  // Retrieve the confirmation count needed for a transaction to achieve finality
-  let threshold = monitor.get_confirmation_threshold();
-  println!("Confirmation threshold: {}", threshold);
 
   // Get the current block height processed by the monitor
   match monitor.get_monitor_height() {

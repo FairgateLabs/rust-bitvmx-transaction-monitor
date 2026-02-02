@@ -97,16 +97,6 @@ pub trait MonitorApi {
     /// - `Err`: If there was an error retrieving the block
     fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError>;
 
-    /// Gets the configured confirmation threshold for transactions.
-    ///
-    /// The confirmation threshold determines when a transaction is considered final.
-    /// A transaction needs this many confirmations (blocks mined on top of its block)
-    /// before the monitor considers it irreversible.
-    ///
-    /// # Returns
-    /// The number of confirmations required for finality
-    fn get_confirmation_threshold(&self) -> u32;
-
     /// Starts monitoring transactions based on the provided monitor type.
     ///
     /// # Arguments
@@ -217,10 +207,6 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
     fn is_ready(&self) -> Result<bool, MonitorError> {
         let is_ready = self.indexer.is_ready()?;
         Ok(is_ready)
-    }
-
-    fn get_confirmation_threshold(&self) -> u32 {
-        self.settings.confirmation_threshold
     }
 
     fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
