@@ -233,10 +233,10 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
         .iter()
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id3)));
 
-    // Deactivate tx_id2
+    // Deactivate tx_id2 (using the same extra_data that was used when adding)
     store.deactivate_monitor(TypesToMonitor::Transactions(
         vec![tx_id2],
-        String::new(),
+        "extra2".to_string(),
         None,
     ))?;
 
@@ -253,10 +253,10 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
         .iter()
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id3)));
 
-    // Deactivate tx_id1 as well
+    // Deactivate tx_id1 as well (using the same extra_data that was used when adding)
     store.deactivate_monitor(TypesToMonitor::Transactions(
         vec![tx_id1],
-        String::new(),
+        "extra1".to_string(),
         None,
     ))?;
 
@@ -294,9 +294,10 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _) if *id == tx_id3)));
 
     // Cancel tx_id2 (should remove from both active and inactive)
+    // Cancel the reactivated entry with "extra2_reactivated"
     store.cancel_monitor(TypesToMonitor::Transactions(
         vec![tx_id2],
-        String::new(),
+        "extra2_reactivated".to_string(),
         None,
     ))?;
 
@@ -452,12 +453,13 @@ fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
     store.deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
         tx_id1,
         0,
-        String::new(),
+        "extra1".to_string(),
         None,
     ))?;
 
     // Two should remain active
     let monitors = store.get_monitors()?;
+
     assert_eq!(monitors.len(), 2);
     assert!(!monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 0)));
     assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, idx, _, _) if *id == tx_id1 && *idx == 1)));
@@ -475,17 +477,34 @@ fn test_active_inactive_spending_utxo_monitors() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 3);
 
-    // Cancel one
+    // Cancel one monitor
     store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
         tx_id1,
-        0,
-        String::new(),
+        1,
+        "extra2".to_string(),
         None,
     ))?;
 
     // Two should remain
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 2);
+
+    store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra1_reactivated".to_string(),
+        None,
+    ))?;
+
+    store.cancel_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id2,
+        0,
+        "extra3".to_string(),
+        None,
+    ))?;
+
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 0);
 
     clear_output();
 
@@ -606,5 +625,359 @@ fn test_reactivate_monitor() -> Result<(), anyhow::Error> {
 
     clear_output();
 
+    Ok(())
+}
+
+/// This test verifies that multiple entries can be added for the same txid with different extra_data
+#[test]
+fn test_multiple_entries_same_txid() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+
+    // Add same txid with different extra_data values
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+        Some(1),
+    ))?;
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra2".to_string(),
+        Some(2),
+    ))?;
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra3".to_string(),
+        Some(3),
+    ))?;
+
+    // All three entries should be present
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 3);
+
+    let tx_monitors: Vec<_> = monitors
+        .iter()
+        .filter_map(|m| match m {
+            TypesToMonitorStore::Transaction(id, extra, conf) if *id == tx_id1 => {
+                Some((extra.clone(), *conf))
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(tx_monitors.len(), 3);
+    assert!(tx_monitors
+        .iter()
+        .any(|(e, c)| e == "extra1" && *c == Some(1)));
+    assert!(tx_monitors
+        .iter()
+        .any(|(e, c)| e == "extra2" && *c == Some(2)));
+    assert!(tx_monitors
+        .iter()
+        .any(|(e, c)| e == "extra3" && *c == Some(3)));
+
+    // Update existing entry with same extra_data should update confirmation_trigger
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+        Some(10),
+    ))?;
+
+    let monitors = store.get_monitors()?;
+    let tx_monitors: Vec<_> = monitors
+        .iter()
+        .filter_map(|m| match m {
+            TypesToMonitorStore::Transaction(id, extra, conf) if *id == tx_id1 => {
+                Some((extra.clone(), *conf))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // Should still have 3 entries, but extra1 should have updated confirmation
+    assert_eq!(tx_monitors.len(), 3);
+    assert!(tx_monitors
+        .iter()
+        .any(|(e, c)| e == "extra1" && *c == Some(10)));
+    assert!(tx_monitors
+        .iter()
+        .any(|(e, c)| e == "extra2" && *c == Some(2)));
+    assert!(tx_monitors
+        .iter()
+        .any(|(e, c)| e == "extra3" && *c == Some(3)));
+
+    clear_output();
+    Ok(())
+}
+
+/// This test verifies get_transaction_trigger_sent and update_transaction_trigger_sent
+#[test]
+fn test_transaction_trigger_sent() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+
+    // Add monitor with extra_data
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+        Some(1),
+    ))?;
+
+    // Initially trigger_sent should be false
+    let trigger_sent = store.get_transaction_trigger_sent(tx_id1, "extra1")?;
+    assert_eq!(trigger_sent, false);
+
+    // Update trigger_sent to true
+    store.update_transaction_trigger_sent(tx_id1, "extra1", true)?;
+    let trigger_sent = store.get_transaction_trigger_sent(tx_id1, "extra1")?;
+    assert_eq!(trigger_sent, true);
+
+    // Add another entry with different extra_data
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra2".to_string(),
+        Some(2),
+    ))?;
+
+    // extra2 should have trigger_sent = false
+    let trigger_sent = store.get_transaction_trigger_sent(tx_id1, "extra2")?;
+    assert_eq!(trigger_sent, false);
+
+    // extra1 should still be true
+    let trigger_sent = store.get_transaction_trigger_sent(tx_id1, "extra1")?;
+    assert_eq!(trigger_sent, true);
+
+    // Update extra2 trigger_sent
+    store.update_transaction_trigger_sent(tx_id1, "extra2", true)?;
+    let trigger_sent = store.get_transaction_trigger_sent(tx_id1, "extra2")?;
+    assert_eq!(trigger_sent, true);
+
+    // Test error case - non-existent txid
+    let non_existent_txid =
+        Txid::from_str("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")?;
+    let result = store.get_transaction_trigger_sent(non_existent_txid, "extra1");
+    assert!(result.is_err());
+
+    // Test error case - non-existent extra_data
+    let result = store.get_transaction_trigger_sent(tx_id1, "non_existent");
+    assert!(result.is_err());
+
+    clear_output();
+    Ok(())
+}
+
+/// This test verifies update_spending_utxo_monitor and multiple entries for same (txid, vout)
+#[test]
+fn test_spending_utxo_multiple_entries_and_update() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx2 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195601).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+    let tx_id2 = tx2.compute_txid();
+
+    // Add same (txid, vout) with different extra_data values
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra1".to_string(),
+        Some(1),
+    ))?;
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra2".to_string(),
+        Some(2),
+    ))?;
+
+    // Both entries should be present
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+
+    // Update spender_tx_id for all entries of (tx_id1, 0)
+    store.update_spending_utxo_monitor((tx_id1, 0, Some(tx_id2)))?;
+
+    // Verify both entries still exist
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+
+    // Update existing entry with same extra_data should preserve spender_tx_id
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra1".to_string(),
+        Some(10),
+    ))?;
+
+    // Verify both entries still exist and confirmation trigger is updated
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, vout, extra, conf) if *id == tx_id1 && *vout == 0 && *extra == "extra1" && *conf == Some(10))));
+    assert!(monitors.iter().any(|m| matches!(m, TypesToMonitorStore::SpendingUTXOTransaction(id, vout, extra, conf) if *id == tx_id1 && *vout == 0 && *extra == "extra2" && *conf == Some(2))));
+
+    // Should still have 2 entries (extra1 updated, extra2 unchanged)
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 2);
+
+    // Add new entry with different extra_data should have spender_tx_id = None initially
+    store.add_monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id1,
+        0,
+        "extra3".to_string(),
+        Some(3),
+    ))?;
+
+    // Now should have 3 entries
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 3);
+
+    clear_output();
+    Ok(())
+}
+
+/// This test verifies edge cases: deactivating/canceling non-existent entries
+#[test]
+fn test_edge_cases_non_existent_entries() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+
+    // Add a monitor
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+        None,
+    ))?;
+
+    // Try to deactivate with wrong extra_data - should not fail, just do nothing
+    store.deactivate_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "wrong_extra".to_string(),
+        None,
+    ))?;
+
+    // Monitor should still be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+
+    // Try to cancel with wrong extra_data - should not fail, just do nothing
+    store.cancel_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "wrong_extra".to_string(),
+        None,
+    ))?;
+
+    // Monitor should still be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+
+    // Try to deactivate/cancel non-existent txid - should not fail
+    let non_existent_txid =
+        Txid::from_str("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")?;
+    store.deactivate_monitor(TypesToMonitor::Transactions(
+        vec![non_existent_txid],
+        "extra1".to_string(),
+        None,
+    ))?;
+    store.cancel_monitor(TypesToMonitor::Transactions(
+        vec![non_existent_txid],
+        "extra1".to_string(),
+        None,
+    ))?;
+
+    // Original monitor should still be active
+    let monitors = store.get_monitors()?;
+    assert_eq!(monitors.len(), 1);
+
+    clear_output();
+    Ok(())
+}
+
+/// This test verifies that when updating an existing entry, trigger_sent is reset to false
+#[test]
+fn test_update_entry_resets_trigger_sent() -> Result<(), anyhow::Error> {
+    let path = format!("test_outputs/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&config)?);
+    let store = MonitorStore::new(storage)?;
+
+    let tx1 = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::from_time(1653195600).unwrap(),
+        input: vec![],
+        output: vec![],
+    };
+
+    let tx_id1 = tx1.compute_txid();
+
+    // Add monitor
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+        Some(1),
+    ))?;
+
+    // Set trigger_sent to true
+    store.update_transaction_trigger_sent(tx_id1, "extra1", true)?;
+    assert_eq!(store.get_transaction_trigger_sent(tx_id1, "extra1")?, true);
+
+    // Update the entry with same extra_data - should reset trigger_sent to false
+    store.add_monitor(TypesToMonitor::Transactions(
+        vec![tx_id1],
+        "extra1".to_string(),
+        Some(10),
+    ))?;
+
+    // trigger_sent should be reset to false
+    assert_eq!(store.get_transaction_trigger_sent(tx_id1, "extra1")?, false);
+
+    clear_output();
     Ok(())
 }

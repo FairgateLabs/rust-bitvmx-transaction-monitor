@@ -88,9 +88,22 @@ pub enum MonitorNews {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AckMonitorNews {
-    Transaction(Txid),
+    // Transaction news
+    // - Txid: The transaction ID
+    // - String: The context of the transaction
+    Transaction(Txid, String),
+
+    // Rsk pegin transaction news
+    // - Txid: The transaction ID
     RskPeginTransaction(Txid),
-    SpendingUTXOTransaction(Txid, u32),
+
+    // Spending UTXO transaction news
+    // - Txid: The transaction ID
+    // - u32: The vout index of the UTXO
+    // - String: The context of the transaction
+    SpendingUTXOTransaction(Txid, u32, String),
+
+    // New block news
     NewBlock,
 }
 
@@ -99,3 +112,84 @@ pub type Id = Uuid;
 pub type MonitorType = Monitor<IndexerType, MonitorStore>;
 
 pub type FullBlock = bitcoin_indexer::types::FullBlock;
+
+// Storage types for monitor store
+
+/// News acknowledgment info (block_hash, acknowledged)
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct NewsAck {
+    pub block_hash: BlockHash,
+    pub acknowledged: bool,
+}
+
+impl NewsAck {
+    pub fn new(block_hash: BlockHash, acknowledged: bool) -> Self {
+        Self {
+            block_hash,
+            acknowledged,
+        }
+    }
+}
+
+/// Transaction news entry stored in storage
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TransactionNewsEntry {
+    pub tx_id: Txid,
+    pub extra_data: String,
+    pub ack: NewsAck,
+}
+
+/// RskPegin transaction news entry stored in storage
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RskPeginNewsEntry {
+    pub tx_id: Txid,
+    pub ack: NewsAck,
+}
+
+/// SpendingUTXO transaction news entry stored in storage
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SpendingUTXONewsEntry {
+    pub tx_id: Txid,
+    pub utxo_index: u32,
+    pub extra_data: String,
+    pub spender_tx_id: Txid,
+    pub ack: NewsAck,
+}
+
+/// Transaction monitor entry (extra_data, confirmation_trigger, trigger_sent)
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TransactionMonitorEntry {
+    pub extra_data: String,
+    pub confirmation_trigger: Option<u32>,
+    pub trigger_sent: bool,
+}
+
+/// Transaction monitor stored in active/inactive lists
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TransactionMonitor {
+    pub tx_id: Txid,
+    pub entries: Vec<TransactionMonitorEntry>,
+}
+
+/// SpendingUTXO monitor entry (extra_data, spender_tx_id, confirmation_trigger)
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SpendingUTXOMonitorEntry {
+    pub extra_data: String,
+    pub spender_tx_id: Option<Txid>,
+    pub confirmation_trigger: Option<u32>,
+}
+
+/// SpendingUTXO monitor stored in active/inactive lists
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SpendingUTXOMonitor {
+    pub tx_id: Txid,
+    pub vout: u32,
+    pub entries: Vec<SpendingUTXOMonitorEntry>,
+}
+
+/// RskPegin monitor state (active, confirmation_trigger)
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RskPeginMonitorState {
+    pub active: bool,
+    pub confirmation_trigger: Option<u32>,
+}

@@ -360,13 +360,11 @@ where
     fn should_send_news(
         &self,
         tx_id: Txid,
+        extra_data: &str,
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
     ) -> Result<bool, MonitorError> {
-        let trigger_sent = self
-            .store
-            .get_transaction_trigger_sent(tx_id)
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let trigger_sent = self.store.get_transaction_trigger_sent(tx_id, extra_data)?;
 
         if let Some(trigger) = number_confirmation_trigger {
             // Send news when confirmations are greater than or equal to the trigger value
@@ -514,36 +512,43 @@ where
         }
 
         // Check if we should send news based on number_confirmation_trigger
-        let should_send_news =
-            self.should_send_news(tx_id, number_confirmation_trigger, tx_info.confirmations)?;
+        let should_send_news = self.should_send_news(
+            tx_id,
+            &extra_data,
+            number_confirmation_trigger,
+            tx_info.confirmations,
+        )?;
 
         if should_send_news {
-            if extra_data == INTERNAL_RSK_PEGIN {
-                self.store.update_news(
-                    MonitoredTypes::RskPeginTransaction(tx_id),
-                    current_block_hash,
-                )?;
-            }
-
-            if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
-                Self::parse_spending_utxo_context(&extra_data)
-            {
-                self.store.update_news(
-                    MonitoredTypes::SpendingUTXOTransaction(
-                        target_tx_id,
-                        target_utxo_index,
-                        original_extra_data,
-                        tx_id,
-                    ),
-                    current_block_hash,
-                )?;
-            }
-
-            if extra_data != INTERNAL_RSK_PEGIN && !extra_data.starts_with(INTERNAL_SPENDING_UTXO) {
-                self.store.update_news(
-                    MonitoredTypes::Transaction(tx_id, extra_data.clone()),
-                    current_block_hash,
-                )?;
+            //  news update dispatch based on extra_data pattern
+            match extra_data.as_str() {
+                ed if ed == INTERNAL_RSK_PEGIN => {
+                    self.store.update_news(
+                        MonitoredTypes::RskPeginTransaction(tx_id),
+                        current_block_hash,
+                    )?;
+                }
+                ed if ed.starts_with(INTERNAL_SPENDING_UTXO) => {
+                    if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
+                        Self::parse_spending_utxo_context(ed)
+                    {
+                        self.store.update_news(
+                            MonitoredTypes::SpendingUTXOTransaction(
+                                target_tx_id,
+                                target_utxo_index,
+                                original_extra_data,
+                                tx_id,
+                            ),
+                            current_block_hash,
+                        )?;
+                    }
+                }
+                _ => {
+                    self.store.update_news(
+                        MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                        current_block_hash,
+                    )?;
+                }
             }
 
             info!(
@@ -554,43 +559,43 @@ where
             // Update trigger_sent flag if there's a trigger
             if number_confirmation_trigger.is_some() {
                 self.store
-                    .update_transaction_trigger_sent(tx_id, true)
+                    .update_transaction_trigger_sent(tx_id, &extra_data, true)
                     .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
             }
+        }
 
-            // Check if we should deactivate monitor based on max_monitoring_confirmations
-            if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
-                self.store.deactivate_monitor(TypesToMonitor::Transactions(
-                    vec![tx_id],
-                    extra_data.clone(),
-                    number_confirmation_trigger,
-                ))?;
+        // Check if we should deactivate monitor based on max_monitoring_confirmations
+        if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
+            self.store.deactivate_monitor(TypesToMonitor::Transactions(
+                vec![tx_id],
+                extra_data.clone(),
+                number_confirmation_trigger,
+            ))?;
+
+            info!(
+                "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
+                tx_id, indexer_best_block_height, self.settings.max_monitoring_confirmations,
+            );
+
+            // If this is a spending UTXO transaction, also deactivate the SpendingUTXOTransaction monitor
+            if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
+                Self::parse_spending_utxo_context(&extra_data)
+            {
+                self.store
+                    .deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
+                        target_tx_id,
+                        target_utxo_index,
+                        original_extra_data,
+                        number_confirmation_trigger,
+                    ))?;
 
                 info!(
-                    "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
-                    tx_id, indexer_best_block_height, self.settings.max_monitoring_confirmations,
-                );
-
-                // If this is a spending UTXO transaction, also deactivate the SpendingUTXOTransaction monitor
-                if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
-                    Self::parse_spending_utxo_context(&extra_data)
-                {
-                    self.store
-                        .deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
-                            target_tx_id,
-                            target_utxo_index,
-                            original_extra_data,
-                            number_confirmation_trigger,
-                        ))?;
-
-                    info!(
                         "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
                         target_tx_id,
                         target_utxo_index,
                         indexer_best_block_height,
                         self.settings.max_monitoring_confirmations,
                     );
-                }
             }
         }
 

@@ -49,18 +49,20 @@ fn news_test() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000001")?;
 
     // Test one transaction news
-    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), String::new());
+    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string());
     store.update_news(tx_news.clone(), block_hash)?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
     // Make ack to that news
-    store.ack_news(AckMonitorNews::Transaction(tx.compute_txid()))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx.compute_txid(),
+        "Context_1".to_string(),
+    ))?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
-    // Update the existing news with a different block hash
-    let context_data = Uuid::new_v4();
-    let txs_news = MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string());
+    // Update the existing news with same block hash
+    let txs_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string());
     store.update_news(txs_news.clone(), block_hash)?;
 
     // Verify we have a No news because for this block hash we already have an ack
@@ -75,7 +77,10 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news[0], txs_news);
 
     // Make ack to that news and verify we have no news
-    store.ack_news(AckMonitorNews::Transaction(tx.compute_txid()))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx.compute_txid(),
+        "Context_1".to_string(),
+    ))?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
@@ -151,7 +156,10 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should still only have 1 entry
     assert_eq!(news[0], tx_news);
-    store.ack_news(AckMonitorNews::Transaction(tx.compute_txid()))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx.compute_txid(),
+        String::new(),
+    ))?;
 
     // Test duplicate group transaction news
     let context_data = Uuid::new_v4();
@@ -161,7 +169,10 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should have only group tx
     assert!(news.contains(&monitored_tx));
-    store.ack_news(AckMonitorNews::Transaction(tx.compute_txid()))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx.compute_txid(),
+        context_data.to_string(),
+    ))?;
 
     // Test duplicate RSK pegin transaction news
     let rsk_tx_news = MonitoredTypes::RskPeginTransaction(tx.compute_txid());
@@ -187,6 +198,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         tx.compute_txid(),
         0,
+        String::new(),
     ))?;
 
     // Test duplicate new block news
@@ -254,9 +266,18 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&monitor_tx2));
     assert!(news.contains(&monitor_tx3));
 
-    store.ack_news(AckMonitorNews::Transaction(tx1.compute_txid()))?;
-    store.ack_news(AckMonitorNews::Transaction(tx2.compute_txid()))?;
-    store.ack_news(AckMonitorNews::Transaction(tx3.compute_txid()))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx1.compute_txid(),
+        String::new(),
+    ))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx2.compute_txid(),
+        String::new(),
+    ))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx3.compute_txid(),
+        String::new(),
+    ))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
@@ -280,9 +301,18 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&monitored_tx2));
     assert!(news.contains(&monitored_tx3));
 
-    store.ack_news(AckMonitorNews::Transaction(tx1.compute_txid()))?;
-    store.ack_news(AckMonitorNews::Transaction(tx2.compute_txid()))?;
-    store.ack_news(AckMonitorNews::Transaction(tx3.compute_txid()))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx1.compute_txid(),
+        context_data1.to_string(),
+    ))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx2.compute_txid(),
+        context_data2.to_string(),
+    ))?;
+    store.ack_news(AckMonitorNews::Transaction(
+        tx3.compute_txid(),
+        context_data3.to_string(),
+    ))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
@@ -342,14 +372,17 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         tx1.compute_txid(),
         0,
+        String::new(),
     ))?;
     store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         tx2.compute_txid(),
         1,
+        String::new(),
     ))?;
     store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
         tx3.compute_txid(),
         2,
+        String::new(),
     ))?;
 
     let news = store.get_news()?;
