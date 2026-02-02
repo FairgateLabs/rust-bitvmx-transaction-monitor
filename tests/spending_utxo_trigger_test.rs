@@ -186,22 +186,24 @@ fn test_spending_utxo_confirmation_trigger() -> Result<(), anyhow::Error> {
                     tx_status.confirmations
                 );
                 assert_eq!(
-                    tx_status.tx_id, transaction2_txid,
+                    tx_status.tx.as_ref().unwrap().compute_txid(),
+                    transaction2_txid,
                     "Expected spender tx_id {}, got {}",
-                    transaction2_txid, tx_status.tx_id
+                    transaction2_txid,
+                    tx_status.tx.as_ref().unwrap().compute_txid()
                 );
 
                 if extra_data == "context_1" {
                     found_first_context = true;
                     info!(
                         "Received SpendingUTXOTransaction news for ({}, {}) with context '{}', spender {} and {} confirmations",
-                        txid, vout, extra_data, tx_status.tx_id, tx_status.confirmations
+                        txid, vout, extra_data, tx_status.tx.as_ref().unwrap().compute_txid(), tx_status.confirmations
                     );
                 } else if extra_data == "context_2" {
                     found_second_context = true;
                     info!(
                         "Received SpendingUTXOTransaction news for ({}, {}) with context '{}', spender {} and {} confirmations",
-                        txid, vout, extra_data, tx_status.tx_id, tx_status.confirmations
+                        txid, vout, extra_data, tx_status.tx.as_ref().unwrap().compute_txid(), tx_status.confirmations
                     );
                 }
             }

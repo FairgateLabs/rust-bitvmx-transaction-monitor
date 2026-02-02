@@ -1609,7 +1609,6 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
         monitor.tick()?;
         // Transaction was seen and trigger is 1 so news
         let news = monitor.get_news()?;
-        println!("news: {:?}", news);
         assert_eq!(news.len(), 0);
     }
 
@@ -1779,7 +1778,7 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
             orphan: false,
             estimated_fee_rate: 0,
         };
-        let pegin_tx_id_from_block = block_100.txs[0].compute_txid();
+        let pegin_tx_id = block_100.txs[0].compute_txid();
         let block_101 = FullBlock {
             height: 101,
             hash: BlockHash::from_str(
@@ -1846,9 +1845,9 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
         let tx_info_1_conf_clone = tx_info_1_conf.clone();
         mock_indexer
             .expect_get_transaction()
-            .withf(move |id| *id == pegin_tx_id_from_block)
+            .withf(move |id| *id == pegin_tx_id)
             // Calls: tick #1 + get_news after tick #1 + tick #2 + tick #3
-            .times(4)
+            .times(5)
             .returning(move |_| Ok(tx_info_1_conf_clone.clone()));
 
         let mut settings = MonitorSettings::from(MonitorSettingsConfig::default());
@@ -1860,12 +1859,16 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
         let news = monitor.get_news()?;
         assert_eq!(news.len(), 1);
         assert!(
-            matches!(news[0].clone(), MonitorNews::RskPeginTransaction(t, _) if t == pegin_tx_id_from_block)
+            matches!(news[0].clone(), MonitorNews::RskPeginTransaction(t, i) if t == pegin_tx_id && i.confirmations == 1)
         );
-        monitor.ack_news(AckMonitorNews::RskPeginTransaction(pegin_tx_id_from_block))?;
+
+        // Acknowledge the news
+        monitor.ack_news(AckMonitorNews::RskPeginTransaction(pegin_tx_id))?;
+
+        // Tick again to check if the news is still present, there is a new block so the news should be still present
         monitor.tick()?;
         let news = monitor.get_news()?;
-        assert_eq!(news.len(), 0);
+        assert_eq!(news.len(), 1);
         monitor.tick()?;
         let monitors = monitor.store.get_monitors()?;
         assert_eq!(monitors.len(), 2);

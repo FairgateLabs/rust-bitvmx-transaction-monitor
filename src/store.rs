@@ -259,8 +259,11 @@ impl MonitorStoreApi for MonitorStore {
                         ack: NewsAck::new(current_block_hash, false),
                     }),
                     Some(pos) => {
+                        // Only update if block_hash is different
+                        // If block_hash is the same, don't update (preserve current state)
                         if rsk_news[pos].ack.block_hash != current_block_hash {
                             // Replace the notification with the new block hash
+                            // Reset acknowledged to false for new block hash
                             rsk_news[pos] = RskPeginNewsEntry {
                                 tx_id,
                                 ack: NewsAck::new(current_block_hash, false),
@@ -353,7 +356,6 @@ impl MonitorStoreApi for MonitorStore {
                 let mut txs_news: Vec<RskPeginNewsEntry> =
                     self.store.get(&key)?.unwrap_or_default();
 
-                //TODO: THIS SHOULD change, we need to start sending context to ack a news.
                 // Acknowledge all news entries for this tx_id
                 // RskPeginTransaction doesn't have extra_data, but we acknowledge all entries for consistency
                 let mut found_any = false;
