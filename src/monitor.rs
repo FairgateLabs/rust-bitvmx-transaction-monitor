@@ -8,7 +8,7 @@ use bitcoin_indexer::config::IndexerSettings;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
-use bitcoin_indexer::types::{FullBlock, TransactionInfo};
+use bitcoin_indexer::types::{FullBlock, TransactionStatus};
 use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
@@ -162,7 +162,7 @@ pub trait MonitorApi {
     /// # Returns
     /// - `Ok(TransactionInfo)`: Current information of the transaction
     /// - `Err`: If there was an error retrieving the status
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionInfo, MonitorError>;
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
 
     fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError>;
 }
@@ -200,7 +200,7 @@ impl MonitorApi for Monitor<IndexerType, MonitorStore> {
         self.ack_news(data)
     }
 
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionInfo, MonitorError> {
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
         self.get_tx_status(tx_id)
     }
 
@@ -672,7 +672,7 @@ where
         Ok(())
     }
 
-    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionInfo, MonitorError> {
+    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
         Ok(self.indexer.get_transaction(tx_id)?)
     }
 

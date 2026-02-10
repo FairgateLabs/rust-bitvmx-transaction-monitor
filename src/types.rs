@@ -1,5 +1,5 @@
 use bitcoin::{BlockHash, Transaction, Txid};
-use bitcoin_indexer::{types::TransactionInfo, IndexerType};
+use bitcoin_indexer::{types::TransactionStatus, IndexerType};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -66,19 +66,19 @@ pub enum MonitorNews {
     // - Txid: The transaction ID
     // - TransactionInfo: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
-    Transaction(Txid, TransactionInfo, String),
+    Transaction(Txid, TransactionStatus, String),
 
     // Spending UTXO transaction news
     // - Txid: The transaction ID
     // - u32: The vout index of the UTXO
     // - TransactionInfo: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
-    SpendingUTXOTransaction(Txid, u32, TransactionInfo, String),
+    SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
 
     // Rsk pegin transaction news
     // - Txid: The transaction ID
     // - TransactionInfo: The information of the transaction indexed
-    RskPeginTransaction(Txid, TransactionInfo),
+    RskPeginTransaction(Txid, TransactionStatus),
 
     // New block news
     // - BlockHeight: The block height

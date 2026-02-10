@@ -5,4 +5,4 @@ pub mod monitor;
 pub mod settings;
 pub mod store;
 pub mod types;
-pub use bitcoin_indexer::types::TransactionInfo;
+pub use bitcoin_indexer::types::TransactionStatus;

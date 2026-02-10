@@ -9,7 +9,7 @@ use bitcoin::{
 };
 use bitcoin_indexer::{
     indexer::MockIndexerApi,
-    types::{FullBlock, TransactionInfo, TransactionStatus},
+    types::{FullBlock, TransactionBlockchainStatus, TransactionStatus},
 };
 use bitvmx_transaction_monitor::{
     config::{MonitorSettings, MonitorSettingsConfig},
@@ -29,17 +29,17 @@ fn tx_info_confirmed(
     tx: &Transaction,
     block_info: &FullBlock,
     confirmations: u32,
-) -> TransactionInfo {
-    TransactionInfo {
+) -> TransactionStatus {
+    TransactionStatus {
         tx: Some(tx.clone()),
         block_info: Some(block_info.clone()),
         confirmations,
-        status: TransactionStatus::Confirmed,
+        status: TransactionBlockchainStatus::Confirmed,
         confirmation_threshold: TEST_CONFIRMATION_THRESHOLD,
     }
 }
 
-fn tx_info_orphan(tx: &Transaction, prev_block_info: &FullBlock) -> TransactionInfo {
+fn tx_info_orphan(tx: &Transaction, prev_block_info: &FullBlock) -> TransactionStatus {
     // `TransactionInfo::is_orphan()` requires:
     // - confirmations == 0
     // - block_info.orphan == true
@@ -47,11 +47,11 @@ fn tx_info_orphan(tx: &Transaction, prev_block_info: &FullBlock) -> TransactionI
     let mut orphan_block = prev_block_info.clone();
     orphan_block.orphan = true;
 
-    TransactionInfo {
+    TransactionStatus {
         tx: Some(tx.clone()),
         block_info: Some(orphan_block),
         confirmations: 0,
-        status: TransactionStatus::Orphan,
+        status: TransactionBlockchainStatus::Orphan,
         confirmation_threshold: TEST_CONFIRMATION_THRESHOLD,
     }
 }
@@ -1264,11 +1264,11 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
             .times(1)
             .returning(move |_| Ok(tx_info_2_conf_clone.clone()));
         mock_indexer.expect_get_transaction().returning(move |_| {
-            Ok(TransactionInfo {
+            Ok(TransactionStatus {
                 tx: None,
                 block_info: None,
                 confirmations: 0,
-                status: TransactionStatus::NotFound,
+                status: TransactionBlockchainStatus::NotFound,
                 confirmation_threshold: 6,
             })
         });
@@ -1483,18 +1483,18 @@ fn test_all_monitors_with_confirmation_trigger() -> Result<(), anyhow::Error> {
             estimated_fee_rate: 0,
         };
 
-        let spending_tx_info_at_100 = TransactionInfo::new(
+        let spending_tx_info_at_100 = TransactionStatus::new(
             spending_tx.clone(),
             block_with_spending_tx.clone(),
-            TransactionStatus::Confirmed,
+            TransactionBlockchainStatus::Confirmed,
             1,
             0,
         );
 
-        let spending_tx_info_at_101 = TransactionInfo::new(
+        let spending_tx_info_at_101 = TransactionStatus::new(
             spending_tx.clone(),
             block_with_spending_tx.clone(),
-            TransactionStatus::Confirmed,
+            TransactionBlockchainStatus::Confirmed,
             2,
             0,
         );
@@ -1725,11 +1725,11 @@ fn test_all_monitors_without_confirmation_trigger() -> Result<(), anyhow::Error>
             .times(1)
             .returning(move |_| Ok(tx_info_2_conf_clone.clone()));
         mock_indexer.expect_get_transaction().returning(move |_| {
-            Ok(TransactionInfo {
+            Ok(TransactionStatus {
                 tx: None,
                 block_info: None,
                 confirmations: 0,
-                status: TransactionStatus::NotFound,
+                status: TransactionBlockchainStatus::NotFound,
                 confirmation_threshold: 6,
             })
         });
