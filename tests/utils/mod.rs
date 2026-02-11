@@ -334,9 +334,147 @@ pub fn ack_spending_utxo_monitor(
     Ok(())
 }
 
-fn ack_rsk_pegin_monitor(monitor: &Monitor, tx_id: Txid) -> Result<()> {
+pub fn ack_rsk_pegin_monitor(monitor: &Monitor, tx_id: Txid) -> Result<()> {
     monitor.ack_news(AckMonitorNews::RskPeginTransaction(tx_id))?;
     Ok(())
+}
+
+/// Helper function to assert RskPeginTransaction news.
+pub fn assert_rsk_pegin_news(
+    news: &MonitorNews,
+    expected_txid: Txid,
+    confirmations: u32,
+) -> Result<()> {
+    match news {
+        MonitorNews::RskPeginTransaction(tx_id, tx_status) => {
+            assert_eq!(
+                *tx_id, expected_txid,
+                "Expected RSK pegin txid {}",
+                expected_txid
+            );
+            assert_eq!(
+                tx_status.confirmations, confirmations,
+                "Expected {} confirmations, got {}",
+                confirmations, tx_status.confirmations
+            );
+        }
+        _ => panic!("Expected RskPeginTransaction news, got {:?}", news),
+    }
+    Ok(())
+}
+
+pub fn create_and_send_rsk_pegin_transaction(
+    bitcoin_client: &BitcoinClient,
+) -> Result<(Transaction, Txid)> {
+    use bitcoin::{
+        hex::FromHex,
+        key::{rand::thread_rng, Secp256k1},
+        opcodes::all::OP_RETURN,
+        script::Builder,
+        secp256k1::PublicKey,
+        Address, Network, TxOut,
+    };
+
+    use bitcoin::{
+        absolute::LockTime, consensus::Encodable, OutPoint, ScriptBuf, Sequence, TxIn, Witness,
+    };
+
+    let secp = Secp256k1::new();
+
+    // Generate committee N address (taproot internal key)
+    let sk = bitcoin::secp256k1::SecretKey::new(&mut thread_rng());
+    let pubk = PublicKey::from_secret_key(&secp, &sk);
+    let committee_n = Address::p2tr(&secp, pubk.x_only_public_key().0, None, Network::Bitcoin);
+
+    // Generate reimbursement address (R)
+    let sk_reimburse = bitcoin::secp256k1::SecretKey::new(&mut thread_rng());
+    let pk_reimburse = PublicKey::from_secret_key(&secp, &sk_reimburse);
+    let reimbursement_xpk = pk_reimburse.x_only_public_key().0;
+
+    // Create the taproot output
+    let taproot_output = TxOut {
+        value: Amount::from_sat(100_000), // 0.001 BTC
+        script_pubkey: committee_n.script_pubkey(),
+    };
+
+    let packet_number: u64 = 0;
+    let mut rootstock_address = [0u8; 20];
+    rootstock_address.copy_from_slice(
+        Vec::from_hex("7ac5496aee77c1ba1f0854206a26dda82a81d6d8")
+            .unwrap()
+            .as_slice(),
+    );
+
+    let mut data = [0u8; 69];
+    data.copy_from_slice(
+        [
+            b"RSK_PEGIN".as_slice(),
+            &packet_number.to_be_bytes(),
+            &rootstock_address,
+            &reimbursement_xpk.serialize(),
+        ]
+        .concat()
+        .as_slice(),
+    );
+
+    let (_, funding_txid, funding_vout) = create_and_send_funding_transaction(bitcoin_client)?;
+
+    // Create the OP_RETURN output
+    let op_return_output = TxOut {
+        value: Amount::ZERO,
+        script_pubkey: Builder::new()
+            .push_opcode(OP_RETURN)
+            .push_slice(&data)
+            .into_script(),
+    };
+
+    // Build the transaction manually
+    let transaction = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: funding_txid,
+                vout: funding_vout,
+            },
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: Witness::new(),
+        }],
+        output: vec![taproot_output, op_return_output],
+    };
+
+    // Encode the transaction
+    let mut encoded = Vec::new();
+    transaction.consensus_encode(&mut encoded)?;
+    let raw_tx_bytes = encoded;
+
+    // Sign the transaction
+    let signed_tx =
+        bitcoin_client
+            .client
+            .sign_raw_transaction_with_wallet(&raw_tx_bytes, None, None)?;
+
+    if !signed_tx.complete {
+        return Err(anyhow::anyhow!(
+            "Transaction signing incomplete: {:?}",
+            signed_tx.errors
+        ));
+    }
+
+    // Decode the signed transaction
+    let transaction: Transaction =
+        bitcoin::consensus::Decodable::consensus_decode(&mut &signed_tx.hex[..])?;
+
+    let txid = transaction.compute_txid();
+
+    info!("Sending RSK PegIn Transaction({})", txid);
+    // Send the transaction to the network
+    bitcoin_client.client.send_raw_transaction(&signed_tx.hex)?;
+
+    mine_blocks(bitcoin_client, 1)?;
+
+    Ok((transaction, txid))
 }
 
 pub fn assert_tx_news(
