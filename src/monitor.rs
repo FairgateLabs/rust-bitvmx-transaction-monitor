@@ -13,7 +13,6 @@ use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use mockall::automock;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::{debug, info};
@@ -21,17 +20,13 @@ use tracing::{debug, info};
 const INTERNAL_RSK_PEGIN: &str = "INTERNAL_RSK_PEGIN";
 const INTERNAL_SPENDING_UTXO: &str = "INTERNAL_SPENDING_UTXO";
 
-pub struct Monitor<I, B>
-where
-    I: IndexerApi,
-    B: MonitorStoreApi,
-{
-    pub indexer: I,
-    pub store: B,
+pub struct Monitor {
+    pub indexer: IndexerType,
+    pub store: MonitorStore,
     pub settings: MonitorSettings,
 }
 
-impl Monitor<IndexerType, MonitorStore> {
+impl Monitor {
     pub fn new_with_paths(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
@@ -53,189 +48,26 @@ impl Monitor<IndexerType, MonitorStore> {
             Rc::new(indexer_store),
             settings.indexer_settings.clone(),
         )?;
-        let bitvmx_store = MonitorStore::new(storage)?;
-        let monitor = Monitor::new(indexer, bitvmx_store, settings)?;
+
+        let store = MonitorStore::new(storage)?;
+        let monitor = Monitor::new(indexer, store, settings)?;
 
         Ok(monitor)
     }
-}
 
-#[automock]
-pub trait MonitorApi {
-    /// Checks if the monitor is ready and fully synced with the blockchain.
-    ///
-    /// # Returns
-    /// - `Ok(true)`: If the monitor is fully synced with the blockchain
-    /// - `Ok(false)`: If the monitor is still syncing blocks
-    /// - `Err`: If there was an error checking the sync status
-    fn is_ready(&self) -> Result<bool, MonitorError>;
-
-    /// Processes one tick of the monitor's operation.
-    ///
-    /// This method:
-    /// - Checks for new blocks and updates the monitor's state
-    /// - Updates confirmation counts for tracked transactions
-    /// - Detects new transactions that need to be monitored
-    /// - Triggers the indexer to continue syncing if needed
-    ///
-    /// # Returns
-    /// - `Ok(())`: If the tick completed successfully
-    /// - `Err`: If there was an error during processing
-    fn tick(&self) -> Result<(), MonitorError>;
-
-    /// Gets the current block height that the monitor has processed.
-    ///
-    /// # Returns
-    /// - `Ok(BlockHeight)`: The height of the last processed block
-    /// - `Err`: If there was an error retrieving the height
-    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError>;
-
-    /// Gets the current block of the monitor.
-    ///
-    /// # Returns
-    /// - `Ok(FullBlock)`: The current block of the monitor
-    /// - `Err`: If there was an error retrieving the block
-    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError>;
-
-    /// Starts monitoring transactions based on the provided monitor type.
-    ///
-    /// # Arguments
-    /// * `data` - The type of monitoring to perform, which can be:
-    ///   - Transactions: Monitor multiple transactions
-    ///   - RskPeginTransaction: Monitor RSK pegin transactions
-    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
-    ///   - NewBlock: Monitor new blocks
-    ///
-    /// # Returns
-    /// - `Ok(())`: If monitoring was set up successfully
-    /// - `Err`: If there was an error setting up monitoring
-    fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError>;
-
-    /// Cancels monitoring for a specific type of monitoring.
-    ///
-    /// # Arguments
-    /// * `data` - The type of monitoring to cancel, which can be:
-    ///   - Transactions: Monitor multiple transactions
-    ///   - RskPeginTransaction: Monitor RSK pegin transactions
-    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
-    ///   - NewBlock: Monitor new blocks
-    ///
-    /// # Returns
-    /// - `Ok(())`: If monitoring was canceled successfully
-    /// - `Err`: If there was an error canceling monitoring
-    fn cancel(&self, data: TypesToMonitor) -> Result<(), MonitorError>;
-
-    /// Gets status updates for monitored transactions.
-    ///
-    /// Returns updates for transactions that have had status changes, such as:
-    /// - New confirmations
-    /// - Becoming orphaned
-    /// - Being included in a block
-    ///
-    /// # Returns
-    /// - `Ok(Vec<MonitorNews>)`: List of status updates grouped by monitor type
-    /// - `Err`: If there was an error retrieving updates
-    fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError>;
-
-    /// Acknowledges that a transaction status update has been processed.
-    ///
-    /// After processing a status update from get_news(), this method should be called
-    /// to remove it from the pending updates queue.
-    ///
-    /// # Arguments
-    /// * `data` - The type of monitoring to perform, which can be:
-    ///   - Transactions: Monitor multiple transactions
-    ///   - RskPeginTransaction: Monitor RSK pegin transactions
-    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
-    ///   - NewBlock: Monitor new blocks
-    ///
-    /// # Returns
-    /// - `Ok(())`: If the update was successfully acknowledged
-    /// - `Err`: If there was an error processing the acknowledgment
-    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorError>;
-
-    /// Gets the current status of a specific transaction.
-    ///
-    /// # Arguments
-    /// * `tx_id` - Hash of the transaction to check
-    ///
-    /// # Returns
-    /// - `Ok(TransactionInfo)`: Current information of the transaction
-    /// - `Err`: If there was an error retrieving the status
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
-
-    fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError>;
-}
-
-impl MonitorApi for Monitor<IndexerType, MonitorStore> {
-    fn tick(&self) -> Result<(), MonitorError> {
-        self.tick()
-    }
-
-    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
-        self.get_monitor_height()
-    }
-
-    fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        if data != TypesToMonitor::NewBlock {
-            self.store.set_pending_work(true)?;
-        }
-
-        self.store.add_monitor(data)?;
-
-        Ok(())
-    }
-
-    fn cancel(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        self.store.cancel_monitor(data)?;
-
-        Ok(())
-    }
-
-    fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError> {
-        self.get_news()
-    }
-
-    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorError> {
-        self.ack_news(data)
-    }
-
-    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
-        self.get_tx_status(tx_id)
-    }
-
-    fn is_ready(&self) -> Result<bool, MonitorError> {
-        let is_ready = self.indexer.is_ready()?;
-        Ok(is_ready)
-    }
-
-    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
-        self.get_current_block()
-    }
-
-    fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
-        self.get_estimated_fee_rate()
-    }
-}
-
-impl<I, B> Monitor<I, B>
-where
-    I: IndexerApi,
-    B: MonitorStoreApi,
-{
     pub fn new(
-        indexer: I,
-        bitvmx_store: B,
+        indexer: IndexerType,
+        store: MonitorStore,
         settings: MonitorSettings,
     ) -> Result<Self, MonitorError> {
         Ok(Self {
             indexer,
-            store: bitvmx_store,
+            store,
             settings,
         })
     }
 
-    pub fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+    fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
         if data != TypesToMonitor::NewBlock {
             self.store.set_pending_work(true)?;
         }
@@ -265,17 +97,11 @@ where
         Ok(())
     }
 
-    pub fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
-        self.store
-            .get_monitor_height()
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
-    }
-
     // This method checks if the monitor has pending work to be done.
     // It checks if the block in the monitor is the same as the best block in the indexer.
     // If the block is not the same, it means that the monitor is not synced with the indexer, so it has pending work to be done to sync it.
     // If the block is the same, it means that the monitor is synced with the indexer, so it has no pending work to be done.
-    pub fn is_pending_work(&self) -> Result<bool, MonitorError> {
+    fn is_pending_work(&self) -> Result<bool, MonitorError> {
         let is_pending_work = self.store.has_pending_work()?;
 
         if is_pending_work {
@@ -362,77 +188,6 @@ where
         }
     }
 
-    pub fn tick(&self) -> Result<(), MonitorError> {
-        self.indexer.tick()?;
-
-        if !self.is_pending_work()? {
-            debug!("No pending work, skipping tick");
-            return Ok(());
-        }
-
-        let indexer_best_block = self.indexer.get_best_block()?;
-        let indexer_best_block = indexer_best_block.unwrap();
-        let indexer_best_block_height = indexer_best_block.height;
-        let current_block_hash = indexer_best_block.hash;
-
-        let txs_monitors = self.store.get_monitors()?;
-
-        for tx_type in txs_monitors {
-            match tx_type {
-                TypesToMonitorStore::Transaction(
-                    tx_id,
-                    extra_data,
-                    number_confirmation_trigger,
-                ) => {
-                    self.process_transaction_monitor(
-                        tx_id,
-                        extra_data,
-                        number_confirmation_trigger,
-                        indexer_best_block_height,
-                        current_block_hash,
-                    )?;
-                }
-                TypesToMonitorStore::RskPegin(number_confirmation_trigger) => {
-                    self.process_rsk_pegin_transaction(
-                        number_confirmation_trigger,
-                        &indexer_best_block,
-                        indexer_best_block_height,
-                        current_block_hash,
-                    )?;
-                }
-                TypesToMonitorStore::SpendingUTXOTransaction(
-                    target_tx_id,
-                    target_utxo_index,
-                    extra_data,
-                    number_confirmation_trigger,
-                ) => {
-                    self.process_spending_utxo_transaction(
-                        target_tx_id,
-                        target_utxo_index,
-                        extra_data,
-                        number_confirmation_trigger,
-                        &indexer_best_block,
-                        indexer_best_block_height,
-                        current_block_hash,
-                    )?;
-                }
-                TypesToMonitorStore::NewBlock => {
-                    self.store.update_news(
-                        MonitoredTypes::NewBlock(current_block_hash),
-                        current_block_hash,
-                    )?;
-                }
-            }
-        }
-
-        self.store
-            .update_monitor_height(indexer_best_block_height)?;
-
-        self.store.set_pending_work(false)?;
-
-        Ok(())
-    }
-
     fn detect_rsk_pegin_txs(&self, full_block: FullBlock) -> Result<Vec<Txid>, MonitorError> {
         let mut txs_ids = Vec::new();
 
@@ -468,6 +223,7 @@ where
                 number_confirmation_trigger,
                 indexer_best_block_height,
                 current_block_hash,
+                true,
             )?;
         }
 
@@ -481,11 +237,19 @@ where
         number_confirmation_trigger: Option<u32>,
         indexer_best_block_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
+        should_exist: bool,
     ) -> Result<(), MonitorError> {
         let tx_info = self.indexer.get_transaction(&tx_id)?;
 
-        // TODO: MIRAR ESTO MAS EN DETALLE
         if tx_info.is_not_found() || tx_info.is_in_mempool() {
+            if should_exist {
+                return Err(MonitorError::UnexpectedError(format!(
+                    "Transaction({}) not found or in mempool",
+                    tx_id
+                )));
+            }
+
+            // If the transaction does not exist, nothing to do.
             return Ok(());
         }
 
@@ -622,14 +386,222 @@ where
                     number_confirmation_trigger,
                     indexer_best_block_height,
                     current_block_hash,
+                    true,
                 )?;
             }
         }
 
         Ok(())
     }
+}
 
-    pub fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError> {
+pub trait MonitorApi {
+    /// Checks if the monitor is ready and fully synced with the blockchain.
+    ///
+    /// # Returns
+    /// - `Ok(true)`: If the monitor is fully synced with the blockchain
+    /// - `Ok(false)`: If the monitor is still syncing blocks
+    /// - `Err`: If there was an error checking the sync status
+    fn is_ready(&self) -> Result<bool, MonitorError>;
+
+    /// Processes one tick of the monitor's operation.
+    ///
+    /// This method:
+    /// - Checks for new blocks and updates the monitor's state
+    /// - Updates confirmation counts for tracked transactions
+    /// - Detects new transactions that need to be monitored
+    /// - Triggers the indexer to continue syncing if needed
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the tick completed successfully
+    /// - `Err`: If there was an error during processing
+    fn tick(&self) -> Result<(), MonitorError>;
+
+    /// Gets the current block height that the monitor has processed.
+    ///
+    /// # Returns
+    /// - `Ok(BlockHeight)`: The height of the last processed block
+    /// - `Err`: If there was an error retrieving the height
+    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError>;
+
+    /// Gets the current block of the monitor.
+    ///
+    /// # Returns
+    /// - `Ok(FullBlock)`: The current block of the monitor
+    /// - `Err`: If there was an error retrieving the block
+    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError>;
+
+    /// Starts monitoring transactions based on the provided monitor type.
+    ///
+    /// # Arguments
+    /// * `data` - The type of monitoring to perform, which can be:
+    ///   - Transactions: Monitor multiple transactions
+    ///   - RskPeginTransaction: Monitor RSK pegin transactions
+    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
+    ///
+    /// # Returns
+    /// - `Ok(())`: If monitoring was set up successfully
+    /// - `Err`: If there was an error setting up monitoring
+    fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError>;
+
+    /// Cancels monitoring for a specific type of monitoring.
+    ///
+    /// # Arguments
+    /// * `data` - The type of monitoring to cancel, which can be:
+    ///   - Transactions: Monitor multiple transactions
+    ///   - RskPeginTransaction: Monitor RSK pegin transactions
+    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
+    ///
+    /// # Returns
+    /// - `Ok(())`: If monitoring was canceled successfully
+    /// - `Err`: If there was an error canceling monitoring
+    fn cancel(&self, data: TypesToMonitor) -> Result<(), MonitorError>;
+
+    /// Gets status updates for monitored transactions.
+    ///
+    /// Returns updates for transactions that have had status changes, such as:
+    /// - New confirmations
+    /// - Becoming orphaned
+    /// - Being included in a block
+    ///
+    /// # Returns
+    /// - `Ok(Vec<MonitorNews>)`: List of status updates grouped by monitor type
+    /// - `Err`: If there was an error retrieving updates
+    fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError>;
+
+    /// Acknowledges that a transaction status update has been processed.
+    ///
+    /// After processing a status update from get_news(), this method should be called
+    /// to remove it from the pending updates queue.
+    ///
+    /// # Arguments
+    /// * `data` - The type of monitoring to perform, which can be:
+    ///   - Transactions: Monitor multiple transactions
+    ///   - RskPeginTransaction: Monitor RSK pegin transactions
+    ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
+    ///   - NewBlock: Monitor new blocks
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the update was successfully acknowledged
+    /// - `Err`: If there was an error processing the acknowledgment
+    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorError>;
+
+    /// Gets the current status of a specific transaction.
+    ///
+    /// # Arguments
+    /// * `tx_id` - Hash of the transaction to check
+    ///
+    /// # Returns
+    /// - `Ok(TransactionStatus)`: Current information of the transaction
+    /// - `Err`: If there was an error retrieving the status
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError>;
+
+    fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError>;
+}
+
+impl MonitorApi for Monitor {
+    fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        if data != TypesToMonitor::NewBlock {
+            self.store.set_pending_work(true)?;
+        }
+
+        self.store.add_monitor(data)?;
+
+        Ok(())
+    }
+
+    fn cancel(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        self.store.cancel_monitor(data)?;
+
+        Ok(())
+    }
+
+    fn is_ready(&self) -> Result<bool, MonitorError> {
+        let is_ready = self.indexer.is_ready()?;
+        Ok(is_ready)
+    }
+
+    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
+        self.store
+            .get_monitor_height()
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
+    }
+
+    fn tick(&self) -> Result<(), MonitorError> {
+        self.indexer.tick()?;
+
+        if !self.is_pending_work()? {
+            debug!("No pending work, skipping tick");
+            return Ok(());
+        }
+
+        let indexer_best_block = self.indexer.get_best_block()?;
+        let indexer_best_block = indexer_best_block.unwrap();
+        let indexer_best_block_height = indexer_best_block.height;
+        let current_block_hash = indexer_best_block.hash;
+
+        let txs_monitors = self.store.get_monitors()?;
+
+        for tx_type in txs_monitors {
+            match tx_type {
+                TypesToMonitorStore::Transaction(
+                    tx_id,
+                    extra_data,
+                    number_confirmation_trigger,
+                ) => {
+                    self.process_transaction_monitor(
+                        tx_id,
+                        extra_data,
+                        number_confirmation_trigger,
+                        indexer_best_block_height,
+                        current_block_hash,
+                        false,
+                    )?;
+                }
+                TypesToMonitorStore::RskPegin(number_confirmation_trigger) => {
+                    self.process_rsk_pegin_transaction(
+                        number_confirmation_trigger,
+                        &indexer_best_block,
+                        indexer_best_block_height,
+                        current_block_hash,
+                    )?;
+                }
+                TypesToMonitorStore::SpendingUTXOTransaction(
+                    target_tx_id,
+                    target_utxo_index,
+                    extra_data,
+                    number_confirmation_trigger,
+                ) => {
+                    self.process_spending_utxo_transaction(
+                        target_tx_id,
+                        target_utxo_index,
+                        extra_data,
+                        number_confirmation_trigger,
+                        &indexer_best_block,
+                        indexer_best_block_height,
+                        current_block_hash,
+                    )?;
+                }
+                TypesToMonitorStore::NewBlock => {
+                    self.store.update_news(
+                        MonitoredTypes::NewBlock(current_block_hash),
+                        current_block_hash,
+                    )?;
+                }
+            }
+        }
+
+        self.store
+            .update_monitor_height(indexer_best_block_height)?;
+
+        self.store.set_pending_work(false)?;
+
+        Ok(())
+    }
+
+    fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError> {
         let list_news = self.store.get_news()?;
 
         let mut return_news = Vec::new();
@@ -667,23 +639,23 @@ where
         Ok(return_news)
     }
 
-    pub fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorError> {
+    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorError> {
         self.store.ack_news(data)?;
         Ok(())
     }
 
-    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
+    fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
         Ok(self.indexer.get_transaction(tx_id)?)
     }
 
-    pub fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
+    fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
         let block_height = self.get_monitor_height()?;
         let block = self.indexer.get_block_by_height(block_height)?;
 
         Ok(block)
     }
 
-    pub fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
+    fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
         self.indexer
             .get_estimated_fee_rate()
             .map_err(MonitorError::IndexerError)
