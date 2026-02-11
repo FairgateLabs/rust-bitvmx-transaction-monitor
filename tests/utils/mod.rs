@@ -287,11 +287,16 @@ pub fn sync_monitor(monitor: &Monitor) -> Result<()> {
     Ok(())
 }
 
-pub fn monitor_tx(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()> {
+pub fn monitor_tx(
+    monitor: &Monitor,
+    tx_id: Txid,
+    extra_data: &str,
+    confirmation_trigger: Option<u32>,
+) -> Result<()> {
     monitor.monitor(TypesToMonitor::Transactions(
         vec![tx_id],
         extra_data.to_string(),
-        None,
+        confirmation_trigger,
     ))?;
     Ok(())
 }
@@ -301,18 +306,19 @@ pub fn monitor_spending_utxo(
     tx_id: Txid,
     vout: u32,
     extra_data: &str,
+    confirmation_trigger: Option<u32>,
 ) -> Result<()> {
     monitor.monitor(TypesToMonitor::SpendingUTXOTransaction(
         tx_id,
         vout,
         extra_data.to_string(),
-        None,
+        confirmation_trigger,
     ))?;
     Ok(())
 }
 
-pub fn monitor_rsk_pegin(monitor: &Monitor) -> Result<()> {
-    monitor.monitor(TypesToMonitor::RskPegin(None))?;
+pub fn monitor_rsk_pegin(monitor: &Monitor, confirmation_trigger: Option<u32>) -> Result<()> {
+    monitor.monitor(TypesToMonitor::RskPegin(confirmation_trigger))?;
     Ok(())
 }
 pub fn ack_tx_monitor(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()> {

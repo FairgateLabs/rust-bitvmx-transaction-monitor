@@ -28,7 +28,7 @@ fn test_transaction_monitor_auto_deactivates_at_max_confirmations() -> Result<()
     let (_transaction1, tx_id) = create_and_send_a_new_transaction(&bitcoin_client)?;
 
     let extra_data = "context of the transaction".to_string();
-    monitor_tx(&monitor, tx_id, &extra_data)?;
+    monitor_tx(&monitor, tx_id, &extra_data, None)?;
 
     // Sync the monitor to ensure it's up to date with the blockchain state
     sync_monitor(&monitor)?;
@@ -101,7 +101,7 @@ fn test_spending_utxo_monitor_auto_deactivates_at_max_confirmations() -> Result<
 
     // Step 2: Start monitoring the UTXO before it's spent
     // The monitor will watch for any transaction that spends this specific UTXO
-    monitor_spending_utxo(&monitor, funding_txid, funding_vout, &extra_data)?;
+    monitor_spending_utxo(&monitor, funding_txid, funding_vout, &extra_data, None)?;
 
     // Step 3: Mine a block to confirm the funding transaction
     // This makes the UTXO available to be spent
@@ -210,7 +210,7 @@ fn test_rsk_pegin_monitor_auto_deactivates_at_max_confirmations() -> Result<(), 
 
     // Step 1: Start monitoring for RSK pegin transactions
     // The monitor will automatically detect any RSK pegin transactions in new blocks
-    monitor_rsk_pegin(&monitor)?;
+    monitor_rsk_pegin(&monitor, None)?;
 
     // Step 2: Create and send an RSK pegin transaction
     // This transaction will be automatically detected by the monitor when it's included in a block
