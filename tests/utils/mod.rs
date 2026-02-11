@@ -47,13 +47,13 @@ pub fn create_test_setup(
     bitvmx_transaction_monitor::monitor::Monitor,
     Bitcoind,
 )> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .init();
-
     use bitvmx_transaction_monitor::{
         config::MonitorSettings, monitor::Monitor, store::MonitorStore,
     };
+
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
 
     let config = settings::load_config_file::<MonitorConfig>(Some(
         "config/monitor_config.yaml".to_string(),
