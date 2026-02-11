@@ -12,6 +12,8 @@ use std::rc::Rc;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::info;
 use utils::generate_random_string;
+
+use crate::utils::create_and_send_a_new_transaction;
 mod utils;
 
 /// Integration test for SpendingUTXOTransaction monitoring with confirmation triggers.
@@ -123,14 +125,8 @@ fn test_spending_utxo_confirmation_trigger() -> Result<(), anyhow::Error> {
     );
 
     // 8) Create and send transaction2 that consumes transaction1's output
-    // Use utility function to create and send a spending transaction
-    let spending_amount = Amount::from_sat(900_000); // Most of transaction1's output, leaving room for fees
-    let (_transaction2, transaction2_txid) = utils::create_and_send_spending_transaction(
-        &bitcoin_client,
-        transaction1_txid,
-        transaction1_vout,
-        spending_amount,
-    )?;
+    let (_transaction2, transaction2_txid) = create_and_send_a_new_transaction(&bitcoin_client)?;
+
     info!(
         "Created and sent transaction2 {} that explicitly spends transaction1's UTXO",
         transaction2_txid

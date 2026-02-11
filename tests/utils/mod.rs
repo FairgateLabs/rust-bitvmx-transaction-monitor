@@ -1,3 +1,7 @@
+// This module contains utility functions used across multiple test files.
+// The dead_code warnings are false positives - these functions are used in other test modules.
+#![allow(dead_code)]
+
 use anyhow::Result;
 use bitcoin::{Amount, Transaction, Txid};
 use bitcoin_indexer::{config::IndexerSettings, indexer::Indexer, store::IndexerStore};
@@ -26,10 +30,80 @@ pub fn clear_output() {
     let _ = std::fs::remove_dir_all("test_outputs");
 }
 
+/// Creates a complete test setup with BitcoinClient, Monitor, and Bitcoind.
+/// This function:
+/// 1. Starts a bitcoind instance
+/// 2. Creates a BitcoinClient
+/// 3. Creates an IndexerStore and Indexer
+/// 4. Mines initial blocks
+/// 5. Creates a Monitor
+/// 6. Syncs the Monitor
+///
+/// Returns the BitcoinClient, Monitor, and Bitcoind instance.
+pub fn create_test_setup(
+    max_monitoring_confirmations: u32,
+) -> Result<(
+    BitcoinClient,
+    bitvmx_transaction_monitor::monitor::Monitor,
+    Bitcoind,
+)> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
+    use bitvmx_transaction_monitor::{
+        config::MonitorSettings, monitor::Monitor, store::MonitorStore,
+    };
+
+    let config = settings::load_config_file::<MonitorConfig>(Some(
+        "config/monitor_config.yaml".to_string(),
+    ))?;
+
+    let bitcoind_config = BitcoindConfig::default();
+
+    let bitcoind = Bitcoind::new(bitcoind_config, config.bitcoin.clone(), None);
+
+    bitcoind.start()?;
+
+    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
+
+    mine_blocks(&bitcoin_client, 120)?;
+
+    // Create storage
+    let path = format!("test_outputs/{}", generate_random_string());
+    let storage_config = storage_backend::storage_config::StorageConfig::new(path, None);
+    let storage = Rc::new(Storage::new(&storage_config)?);
+
+    let indexer_settings = IndexerSettings::default();
+
+    let indexer_store = IndexerStore::new(storage.clone(), indexer_settings.confirmation_threshold)
+        .map_err(|e| anyhow::anyhow!("Failed to create IndexerStore: {}", e))?;
+
+    let indexer = Indexer::new(
+        bitcoin_client,
+        Rc::new(indexer_store),
+        Some(indexer_settings.clone()),
+    )?;
+
+    let store = MonitorStore::new(storage)?;
+    let monitor_settings = MonitorSettings {
+        max_monitoring_confirmations,
+        indexer_settings: Some(indexer_settings),
+    };
+
+    let monitor = Monitor::new(indexer, store, monitor_settings)?;
+
+    sync_monitor(&monitor)?;
+
+    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
+
+    Ok((bitcoin_client, monitor, bitcoind))
+}
+
 /// Creates and sends a funding transaction to an address.
 /// Uses hardcoded wallet "test_wallet" and amount 1_000_000 satoshis (0.01 BTC).
 /// Returns the transaction, its txid, and the vout index.
-fn create_and_send_funding_transaction(
+pub fn create_and_send_funding_transaction(
     bitcoin_client: &BitcoinClient,
 ) -> Result<(Transaction, Txid, u32)> {
     use bitcoin::Amount;
@@ -107,74 +181,96 @@ pub fn create_and_send_a_new_transaction(
     Ok((transaction, txid))
 }
 
-/// Creates a complete test setup with BitcoinClient, Monitor, and Bitcoind.
-/// This function:
-/// 1. Starts a bitcoind instance
-/// 2. Creates a BitcoinClient
-/// 3. Creates an IndexerStore and Indexer
-/// 4. Mines initial blocks
-/// 5. Creates a Monitor
-/// 6. Syncs the Monitor
-///
-/// Returns the BitcoinClient, Monitor, and Bitcoind instance.
-pub fn create_test_setup(
-    max_monitoring_confirmations: u32,
-) -> Result<(
-    BitcoinClient,
-    bitvmx_transaction_monitor::monitor::Monitor,
-    Bitcoind,
-)> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .init();
+/// Helper function to create and send a transaction that spends a specific UTXO.
+/// Returns the transaction and its txid.
+pub fn create_and_send_spending_transaction(
+    bitcoin_client: &bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient,
+    target_txid: Txid,
+    target_vout: u32,
+) -> Result<(bitcoin::Transaction, Txid)> {
+    let spending_amount = Amount::from_sat(900_000); // Most of the funding, leaving room for fees
 
-    use bitvmx_transaction_monitor::{
-        config::MonitorSettings, monitor::Monitor, store::MonitorStore,
-    };
+    // Get a new address to send to
+    let recipient_address = bitcoin_client
+        .client
+        .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32))?;
 
-    let config = settings::load_config_file::<MonitorConfig>(Some(
-        "config/monitor_config.yaml".to_string(),
-    ))?;
+    // Create a raw transaction that spends the UTXO
+    let inputs = vec![bitcoincore_rpc::json::CreateRawTransactionInput {
+        txid: target_txid,
+        vout: target_vout,
+        sequence: None,
+    }];
 
-    let bitcoind_config = BitcoindConfig::default();
+    let mut outputs = std::collections::HashMap::new();
+    let address_str = format!("{}", recipient_address.assume_checked());
+    outputs.insert(address_str, spending_amount);
 
-    let bitcoind = Bitcoind::new(bitcoind_config, config.bitcoin.clone(), None);
+    let raw_tx = bitcoin_client
+        .client
+        .create_raw_transaction(&inputs, &outputs, None, None)?;
 
-    bitcoind.start()?;
+    // Sign the transaction with the wallet
+    let signed_tx = bitcoin_client
+        .client
+        .sign_raw_transaction_with_wallet(&raw_tx, None, None)?;
 
-    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
+    if !signed_tx.complete {
+        return Err(anyhow::anyhow!(
+            "Transaction signing incomplete: {:?}",
+            signed_tx.errors
+        ));
+    }
 
-    mine_blocks(&bitcoin_client, 120)?;
+    // Decode the signed transaction
+    let transaction: bitcoin::Transaction =
+        bitcoin::consensus::Decodable::consensus_decode(&mut &signed_tx.hex[..])?;
+    let txid = transaction.compute_txid();
 
-    // Create storage
-    let path = format!("test_outputs/{}", generate_random_string());
-    let storage_config = storage_backend::storage_config::StorageConfig::new(path, None);
-    let storage = Rc::new(Storage::new(&storage_config)?);
+    // Send the transaction to the network
+    bitcoin_client.client.send_raw_transaction(&signed_tx.hex)?;
 
-    let indexer_settings = IndexerSettings::default();
+    Ok((transaction, txid))
+}
 
-    let indexer_store = IndexerStore::new(storage.clone(), indexer_settings.confirmation_threshold)
-        .map_err(|e| anyhow::anyhow!("Failed to create IndexerStore: {}", e))?;
-
-    let indexer = Indexer::new(
-        bitcoin_client,
-        Rc::new(indexer_store),
-        Some(indexer_settings.clone()),
-    )?;
-
-    let store = MonitorStore::new(storage)?;
-    let monitor_settings = MonitorSettings {
-        max_monitoring_confirmations,
-        indexer_settings: Some(indexer_settings),
-    };
-
-    let monitor = Monitor::new(indexer, store, monitor_settings)?;
-
-    sync_monitor(&monitor)?;
-
-    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
-
-    Ok((bitcoin_client, monitor, bitcoind))
+/// Helper function to assert SpendingUTXOTransaction news.
+pub fn assert_spending_utxo_news(
+    news: &MonitorNews,
+    target_txid: Txid,
+    target_vout: u32,
+    spender_txid: Txid,
+    extra_data: &str,
+    spending_txid: Txid,
+    confirmations: u32,
+) -> Result<()> {
+    match news {
+        MonitorNews::SpendingUTXOTransaction(tx_id, vout, tx_status, context) => {
+            assert_eq!(*tx_id, target_txid, "Expected target txid {}", target_txid);
+            assert_eq!(*vout, target_vout, "Expected vout {}", target_vout);
+            assert_eq!(context, extra_data, "Expected extra_data {}", extra_data);
+            assert_eq!(
+                tx_status.confirmations, confirmations,
+                "Expected {} confirmations, got {}",
+                confirmations, tx_status.confirmations
+            );
+            assert_eq!(
+                tx_status.tx.as_ref().unwrap().compute_txid(),
+                spender_txid,
+                "Expected spender txid {}, got {}",
+                spender_txid,
+                tx_status.tx.as_ref().unwrap().compute_txid()
+            );
+            assert_eq!(
+                tx_status.tx.as_ref().unwrap().compute_txid(),
+                spending_txid,
+                "Expected spending txid {}, got {}",
+                spending_txid,
+                tx_status.tx.as_ref().unwrap().compute_txid()
+            );
+        }
+        _ => panic!("Expected SpendingUTXOTransaction news, got {:?}", news),
+    }
+    Ok(())
 }
 
 pub fn sync_monitor(monitor: &Monitor) -> Result<()> {
@@ -200,8 +296,46 @@ pub fn monitor_tx(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()
     Ok(())
 }
 
+pub fn monitor_spending_utxo(
+    monitor: &Monitor,
+    tx_id: Txid,
+    vout: u32,
+    extra_data: &str,
+) -> Result<()> {
+    monitor.monitor(TypesToMonitor::SpendingUTXOTransaction(
+        tx_id,
+        vout,
+        extra_data.to_string(),
+        None,
+    ))?;
+    Ok(())
+}
+
+pub fn monitor_rsk_pegin(monitor: &Monitor) -> Result<()> {
+    monitor.monitor(TypesToMonitor::RskPegin(None))?;
+    Ok(())
+}
 pub fn ack_tx_monitor(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()> {
     monitor.ack_news(AckMonitorNews::Transaction(tx_id, extra_data.to_string()))?;
+    Ok(())
+}
+/// Helper function to acknowledge SpendingUTXOTransaction news.
+pub fn ack_spending_utxo_monitor(
+    monitor: &bitvmx_transaction_monitor::monitor::Monitor,
+    target_txid: Txid,
+    target_vout: u32,
+    extra_data: &str,
+) -> Result<()> {
+    monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
+        target_txid,
+        target_vout,
+        extra_data.to_string(),
+    ))?;
+    Ok(())
+}
+
+fn ack_rsk_pegin_monitor(monitor: &Monitor, tx_id: Txid) -> Result<()> {
+    monitor.ack_news(AckMonitorNews::RskPeginTransaction(tx_id))?;
     Ok(())
 }
 

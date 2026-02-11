@@ -67,36 +67,6 @@ impl Monitor {
         })
     }
 
-    fn save_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
-        if data != TypesToMonitor::NewBlock {
-            self.store.set_pending_work(true)?;
-        }
-
-        // Check if the TypesToMonitor instance has a confirmation trigger (if it's a transaction), and if so,
-        // ensure it does not exceed the configured max_monitoring_confirmations.
-        // Max monitoring confirmations is the number of confirmations that the monitor will wait for before deactivating the monitor.
-        // If it does, return an error.
-        match &data {
-            TypesToMonitor::Transactions(_, _, confirmation_trigger)
-            | TypesToMonitor::RskPegin(confirmation_trigger)
-            | TypesToMonitor::SpendingUTXOTransaction(_, _, _, confirmation_trigger) => {
-                if let Some(confirmation_trigger) = confirmation_trigger {
-                    if *confirmation_trigger >= self.settings.max_monitoring_confirmations {
-                        return Err(MonitorError::InvalidConfirmationTrigger(
-                            *confirmation_trigger,
-                            self.settings.max_monitoring_confirmations,
-                        ));
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        self.store.add_monitor(data)?;
-
-        Ok(())
-    }
-
     // This method checks if the monitor has pending work to be done.
     // It checks if the block in the monitor is the same as the best block in the indexer.
     // If the block is not the same, it means that the monitor is not synced with the indexer, so it has pending work to be done to sync it.
@@ -505,6 +475,26 @@ impl MonitorApi for Monitor {
     fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
         if data != TypesToMonitor::NewBlock {
             self.store.set_pending_work(true)?;
+        }
+
+        // Check if the TypesToMonitor instance has a confirmation trigger (if it's a transaction), and if so,
+        // ensure it does not exceed the configured max_monitoring_confirmations.
+        // Max monitoring confirmations is the number of confirmations that the monitor will wait for before deactivating the monitor.
+        // If it does, return an error.
+        match &data {
+            TypesToMonitor::Transactions(_, _, confirmation_trigger)
+            | TypesToMonitor::RskPegin(confirmation_trigger)
+            | TypesToMonitor::SpendingUTXOTransaction(_, _, _, confirmation_trigger) => {
+                if let Some(confirmation_trigger) = confirmation_trigger {
+                    if *confirmation_trigger >= self.settings.max_monitoring_confirmations {
+                        return Err(MonitorError::InvalidConfirmationTrigger(
+                            *confirmation_trigger,
+                            self.settings.max_monitoring_confirmations,
+                        ));
+                    }
+                }
+            }
+            _ => {}
         }
 
         self.store.add_monitor(data)?;
