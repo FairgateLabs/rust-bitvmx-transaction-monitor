@@ -8,6 +8,7 @@ use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::MonitorConfig,
     monitor::{Monitor, MonitorApi},
+    types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use std::rc::Rc;
 use storage_backend::storage::Storage;
@@ -40,6 +41,7 @@ fn create_and_send_funding_transaction(
 }
 
 pub fn mine_blocks(bitcoin_client: &BitcoinClient, number_blocks: u64) -> Result<()> {
+    info!("Mine {} blocks", number_blocks);
     let wallet = bitcoin_client.init_wallet("test_wallet")?;
     bitcoin_client.mine_blocks_to_address(number_blocks, &wallet)?;
     Ok(())
@@ -100,7 +102,6 @@ pub fn create_and_send_a_new_transaction(
     // Send the transaction to the network
     bitcoin_client.client.send_raw_transaction(&signed_tx.hex)?;
 
-    info!("Mining 1 block");
     mine_blocks(bitcoin_client, 1)?;
 
     Ok((transaction, txid))
@@ -113,11 +114,12 @@ pub fn create_and_send_a_new_transaction(
 /// 3. Creates an IndexerStore and Indexer
 /// 4. Mines initial blocks
 /// 5. Creates a Monitor
-/// 6. Syncs the indexer
+/// 6. Syncs the Monitor
 ///
-/// Returns the BitcoinClient, Monitor (with indexer accessible via monitor.indexer), and Bitcoind instance.
-/// The caller is responsible for stopping bitcoind when done.
-pub fn create_test_setup() -> Result<(
+/// Returns the BitcoinClient, Monitor, and Bitcoind instance.
+pub fn create_test_setup(
+    max_monitoring_confirmations: u32,
+) -> Result<(
     BitcoinClient,
     bitvmx_transaction_monitor::monitor::Monitor,
     Bitcoind,
@@ -129,9 +131,6 @@ pub fn create_test_setup() -> Result<(
     use bitvmx_transaction_monitor::{
         config::MonitorSettings, monitor::Monitor, store::MonitorStore,
     };
-    use tracing::info;
-
-    const TEST_CONFIRMATION_THRESHOLD: u32 = 6;
 
     let config = settings::load_config_file::<MonitorConfig>(Some(
         "config/monitor_config.yaml".to_string(),
@@ -144,23 +143,18 @@ pub fn create_test_setup() -> Result<(
     bitcoind.start()?;
 
     let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
-    let wallet = bitcoin_client.init_wallet("test_wallet")?;
 
-    info!("Mining 120 blocks to provide spendable UTXOs...");
-    bitcoin_client.mine_blocks_to_address(120 as u64, &wallet)?;
+    mine_blocks(&bitcoin_client, 120)?;
 
     // Create storage
     let path = format!("test_outputs/{}", generate_random_string());
     let storage_config = storage_backend::storage_config::StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let indexer_store = IndexerStore::new(storage.clone(), TEST_CONFIRMATION_THRESHOLD)
-        .map_err(|e| anyhow::anyhow!("Failed to create IndexerStore: {}", e))?;
+    let indexer_settings = IndexerSettings::default();
 
-    let indexer_settings = IndexerSettings {
-        confirmation_threshold: 6,
-        ..Default::default()
-    };
+    let indexer_store = IndexerStore::new(storage.clone(), indexer_settings.confirmation_threshold)
+        .map_err(|e| anyhow::anyhow!("Failed to create IndexerStore: {}", e))?;
 
     let indexer = Indexer::new(
         bitcoin_client,
@@ -170,7 +164,7 @@ pub fn create_test_setup() -> Result<(
 
     let store = MonitorStore::new(storage)?;
     let monitor_settings = MonitorSettings {
-        max_monitoring_confirmations: 2,
+        max_monitoring_confirmations,
         indexer_settings: Some(indexer_settings),
     };
 
@@ -178,11 +172,9 @@ pub fn create_test_setup() -> Result<(
 
     sync_monitor(&monitor)?;
 
-    // Create a new BitcoinClient for the caller since the indexer took ownership
-    let bitcoin_client_for_caller = BitcoinClient::new_from_config(&config.bitcoin)?;
+    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
 
-    // Return monitor with indexer accessible via monitor.indexer
-    Ok((bitcoin_client_for_caller, monitor, bitcoind))
+    Ok((bitcoin_client, monitor, bitcoind))
 }
 
 pub fn sync_monitor(monitor: &Monitor) -> Result<()> {
@@ -195,6 +187,37 @@ pub fn sync_monitor(monitor: &Monitor) -> Result<()> {
         if monitor.is_ready()? {
             break;
         }
+    }
+    Ok(())
+}
+
+pub fn monitor_tx(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()> {
+    monitor.monitor(TypesToMonitor::Transactions(
+        vec![tx_id],
+        extra_data.to_string(),
+        None,
+    ))?;
+    Ok(())
+}
+
+pub fn ack_tx_monitor(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()> {
+    monitor.ack_news(AckMonitorNews::Transaction(tx_id, extra_data.to_string()))?;
+    Ok(())
+}
+
+pub fn assert_tx_news(
+    news: &MonitorNews,
+    tx_id: Txid,
+    extra_data: &str,
+    confirmations: u32,
+) -> Result<()> {
+    match news {
+        MonitorNews::Transaction(id, _tx_status, context) => {
+            assert_eq!(*id, tx_id);
+            assert_eq!(context, &extra_data);
+            assert_eq!(_tx_status.confirmations, confirmations);
+        }
+        _ => panic!("Expected Transaction news"),
     }
     Ok(())
 }

@@ -15,12 +15,16 @@ use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
-use tracing::info;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
+use tracing::info;
 use utils::{clear_output, generate_random_string};
+use uuid::timestamp::context;
 
-use crate::utils::{create_and_send_a_new_transaction, create_test_setup, sync_monitor};
+use crate::utils::{
+    ack_tx_monitor, assert_tx_news, create_and_send_a_new_transaction, create_test_setup,
+    mine_blocks, monitor_tx, sync_monitor,
+};
 mod utils;
 
 fn tx_info_confirmed(
@@ -105,52 +109,60 @@ fn create_pegin_tx() -> Transaction {
     }
 }
 
+/// Test that verifies the monitor can detect and track multiple transactions simultaneously.
+///
+/// This test ensures that:
+/// 1. Multiple transactions can be monitored at the same time
+/// 2. Each transaction reports its correct confirmation count based on when it was mined
+/// 3. News is generated for all monitored transactions
+/// 4. After acknowledging news, no duplicate news is generated
+///
+/// The test creates two transactions at different times:
+/// - First transaction (tx_id): Created earlier, so it has accumulated more confirmations (4)
+/// - Second transaction (tx_id_2): Created later, so it has fewer confirmations (1)
 #[test]
 fn monitor_txs_detected() -> Result<(), anyhow::Error> {
-    let (bitcoin_client, monitor, bitcoind) = create_test_setup()?;
+    let (bitcoin_client, monitor, bitcoind) = create_test_setup(10)?;
+
     let (_transaction1, tx_id) = create_and_send_a_new_transaction(&bitcoin_client)?;
     let (_transaction2, tx_id_2) = create_and_send_a_new_transaction(&bitcoin_client)?;
 
-    // Add monitors for both spending transactions
-    monitor.monitor(TypesToMonitor::Transactions(
-        vec![tx_id],
-        "test".to_string(),
-        None,
-    ))?;
-    monitor.monitor(TypesToMonitor::Transactions(
-        vec![tx_id_2],
-        "test 2".to_string(),
-        None,
-    ))?;
+    let extra_data_1 = "test".to_string();
+    let extra_data_2 = "test 2".to_string();
+
+    // Start monitoring both transactions
+    monitor_tx(&monitor, tx_id, &extra_data_1)?;
+    monitor_tx(&monitor, tx_id_2, &extra_data_2)?;
 
     sync_monitor(&monitor)?;
 
+    // Verify that news was generated for both transactions
     let news = monitor.get_news()?;
-    assert_eq!(news.len(), 2);
-
-    info!("News: {:?}", news);
-
-    match &news[0] {
-        MonitorNews::Transaction(id, _, _) => assert_eq!(*id, tx_id),
-        _ => panic!("Expected Transaction news"),
-    }
-    match &news[1] {
-        MonitorNews::Transaction(id, _, _) => assert_eq!(*id, tx_id_2),
-        _ => panic!("Expected Transaction news"),
-    }
-
-    // Acknowledge the news
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id, "test".to_string()))?;
-    monitor.ack_news(AckMonitorNews::Transaction(tx_id_2, "test 2".to_string()))?;
-
-    // Verify news are gone after acknowledgment
-    let news_after_ack = monitor.get_news()?;
-
     assert_eq!(
-        news_after_ack.len(),
-        0,
-        "Expected no news after acknowledgment"
+        news.len(),
+        2,
+        "Expected 2 news items, one for each monitored transaction"
     );
+
+    // The first transaction has 4 confirmations because:
+    // - It was mined in an earlier block
+    // - Additional blocks were mined when creating the second transaction
+    // - The sync processed all these blocks, updating the confirmation count
+    assert_tx_news(&news[0], tx_id, &extra_data_1, 4)?;
+
+    // The second transaction has 1 confirmation because:
+    // - It was just mined in the most recent block
+    // - No additional blocks have been mined since then
+    assert_tx_news(&news[1], tx_id_2, &extra_data_2, 1)?;
+
+    // Acknowledge the news for both transactions
+    ack_tx_monitor(&monitor, tx_id, &extra_data_1)?;
+    ack_tx_monitor(&monitor, tx_id_2, &extra_data_2)?;
+
+    // Verify that no new news is generated after acknowledgment
+    // (news is only generated once per confirmation level until acknowledged)
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 0, "Expected no news after acknowledgment");
 
     bitcoind.stop()?;
     clear_output();
@@ -158,112 +170,63 @@ fn monitor_txs_detected() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-// #[test]
-// fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Error> {
-//     let mut mock_indexer = MockIndexerApi::new();
-//     let path = format!("test_outputs/{}", generate_random_string());
-//     let config = StorageConfig::new(path, None);
-//     let storage = Rc::new(Storage::new(&config)?);
-//     let store = MonitorStore::new(storage)?;
+/// Test that verifies the monitor automatically deactivates after reaching the maximum
+/// number of confirmations (max_monitoring_confirmations).
+///
+/// This test ensures that:
+/// 1. The monitor generates news for each confirmation up to max_monitoring_confirmations
+/// 2. After reaching max_monitoring_confirmations, the monitor automatically deactivates
+/// 3. No further news is generated even when additional blocks are mined
+///
+/// Note: The test uses 10 confirmations (instead of the default 100) for faster test execution.
+#[test]
+fn test_monitor_deactivation_after_100_confirmations() -> Result<(), anyhow::Error> {
+    let max_monitoring_confirmations = 10;
+    let (bitcoin_client, monitor, bitcoind) = create_test_setup(max_monitoring_confirmations)?;
+    let (_transaction1, tx_id) = create_and_send_a_new_transaction(&bitcoin_client)?;
 
-//     let tx = Transaction {
-//         version: bitcoin::transaction::Version::TWO,
-//         lock_time: LockTime::from_time(1653195600).unwrap(),
-//         input: vec![],
-//         output: vec![],
-//     };
+    let extra_data = "context of the transaction".to_string();
+    monitor_tx(&monitor, tx_id, &extra_data)?;
 
-//     let tx_id = tx.compute_txid();
+    // Sync the monitor to ensure it's up to date with the blockchain state
+    sync_monitor(&monitor)?;
 
-//     let block_info = FullBlock {
-//         height: 100,
-//         hash: BlockHash::from_str(
-//             "0000000000000000000000000000000000000000000000000000000000000001",
-//         )?,
-//         prev_hash: BlockHash::from_str(
-//             "0000000000000000000000000000000000000000000000000000000000000002",
-//         )?,
-//         txs: vec![],
-//         orphan: false,
-//         estimated_fee_rate: 0,
-//     };
+    // Iterate through each confirmation from 1 to max_monitoring_confirmations.
+    // For each confirmation:
+    // - The monitor should generate news about the transaction's confirmation status
+    // - We acknowledge the news to clear it
+    // - We mine a new block to advance the chain
+    // - We tick the monitor to process the new block
+    for i in 1..=max_monitoring_confirmations {
+        let news = monitor.get_news()?;
+        assert_eq!(news.len(), 1, "Expected 1 news item for confirmation {}", i);
+        assert_tx_news(&news[0], tx_id, &extra_data, i)?;
+        ack_tx_monitor(&monitor, tx_id, &extra_data)?;
+        mine_blocks(&bitcoin_client, 1)?;
+        monitor.tick()?;
+    }
 
-//     let block_0 = FullBlock {
-//         height: 0,
-//         hash: BlockHash::from_str(
-//             "0000000000000000000000000000000000000000000000000000000000000003",
-//         )?,
-//         prev_hash: BlockHash::from_str(
-//             "0000000000000000000000000000000000000000000000000000000000000004",
-//         )?,
-//         txs: vec![],
-//         orphan: false,
-//         estimated_fee_rate: 0,
-//     };
+    // After reaching max_monitoring_confirmations, mine one more block and tick the monitor.
+    // At this point, the monitor should have automatically deactivated the transaction monitor
+    // (this happens during the last tick when confirmations == max_monitoring_confirmations),
+    // so no news should be generated even though a new block was mined.
+    mine_blocks(&bitcoin_client, 1)?;
+    monitor.tick()?;
 
-//     let block_200 = FullBlock {
-//         height: 200,
-//         hash: BlockHash::from_str(
-//             "0000000000000000000000000000000000000000000000000000000000000005",
-//         )
-//         .unwrap(),
-//         prev_hash: BlockHash::from_str(
-//             "0000000000000000000000000000000000000000000000000000000000000006",
-//         )
-//         .unwrap(),
-//         txs: vec![],
-//         orphan: false,
-//         estimated_fee_rate: 0,
-//     };
+    // Verify that no news is generated after deactivation
+    let news = monitor.get_news()?;
+    assert_eq!(
+        news.len(),
+        0,
+        "Expected no news after monitor deactivation at {} confirmations",
+        max_monitoring_confirmations
+    );
 
-//     let tx_info = tx_info_confirmed(&tx, &block_info, 101); // More than 100 confirmations
+    bitcoind.stop()?;
+    clear_output();
 
-//     mock_indexer
-//         .expect_get_transaction()
-//         .withf(move |id| *id == tx_id)
-//         .times(1)
-//         .returning(move |_| Ok(tx_info.clone()));
-
-//     let block_200_clone = block_200.clone();
-//     let block_200_clone_1 = block_200.clone();
-
-//     mock_indexer
-//         .expect_get_best_block()
-//         .returning(move || Ok(Some(block_200_clone.clone())));
-
-//     mock_indexer
-//         .expect_get_block_by_height()
-//         .with(eq(0))
-//         .returning(move |_| Ok(Some(block_0.clone())));
-
-//     mock_indexer
-//         .expect_get_block_by_height()
-//         .returning(move |_| Ok(Some(block_200_clone_1.clone())));
-
-//     mock_indexer.expect_tick().returning(move || Ok(()));
-
-//     let monitor = Monitor::new(
-//         mock_indexer,
-//         store,
-//         MonitorSettings::from(MonitorSettingsConfig::default()),
-//     )?;
-
-//     monitor.save_monitor(TypesToMonitor::Transactions(
-//         vec![tx_id],
-//         "test".to_string(),
-//         None,
-//     ))?;
-
-//     monitor.tick()?;
-
-//     // Verify monitor was deactivated
-//     let monitors = monitor.store.get_monitors()?;
-//     assert_eq!(monitors.len(), 0);
-
-//     clear_output();
-
-//     Ok(())
-// }
+    Ok(())
+}
 
 // #[test]
 // fn test_inactive_monitors_are_skipped() -> Result<(), anyhow::Error> {
