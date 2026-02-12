@@ -321,6 +321,7 @@ pub fn monitor_rsk_pegin(monitor: &Monitor, confirmation_trigger: Option<u32>) -
     monitor.monitor(TypesToMonitor::RskPegin(confirmation_trigger))?;
     Ok(())
 }
+
 pub fn ack_tx_monitor(monitor: &Monitor, tx_id: Txid, extra_data: &str) -> Result<()> {
     monitor.ack_news(AckMonitorNews::Transaction(tx_id, extra_data.to_string()))?;
     Ok(())
