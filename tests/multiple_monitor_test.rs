@@ -1,9 +1,6 @@
 use anyhow::Result;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
-use bitvmx_transaction_monitor::{
-    monitor::MonitorApi,
-    types::{MonitorNews, TypesToMonitor},
-};
+use bitvmx_transaction_monitor::types::{MonitorNews, TypesToMonitor};
 use tracing::info;
 
 use crate::utils::{
@@ -14,7 +11,7 @@ use crate::utils::{
 
 mod utils;
 
-/// Comprehensive test that verifies monitoring of multiple transaction types simultaneously.
+/// Test that verifies monitoring of multiple transaction types simultaneously.
 ///
 /// This test creates monitors for different transaction types:
 /// - Transactions: 4 monitors (2 with trigger, 2 without trigger)

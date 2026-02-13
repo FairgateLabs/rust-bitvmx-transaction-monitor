@@ -1,5 +1,4 @@
 use anyhow::Result;
-use bitvmx_transaction_monitor::monitor::MonitorApi;
 
 use crate::utils::{
     ack_rsk_pegin_monitor, ack_spending_utxo_monitor, ack_tx_monitor, assert_rsk_pegin_news,

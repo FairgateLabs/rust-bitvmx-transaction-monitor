@@ -11,7 +11,7 @@ use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
 use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::MonitorConfig,
-    monitor::{Monitor, MonitorApi},
+    monitor::Monitor,
     types::{AckMonitorNews, MonitorNews, TypesToMonitor},
 };
 use std::rc::Rc;
@@ -91,7 +91,11 @@ pub fn create_test_setup(
         indexer_settings: Some(indexer_settings),
     };
 
-    let monitor = Monitor::new(indexer, store, monitor_settings)?;
+    let monitor = Monitor {
+        indexer,
+        store,
+        settings: monitor_settings,
+    };
 
     sync_monitor(&monitor)?;
 
