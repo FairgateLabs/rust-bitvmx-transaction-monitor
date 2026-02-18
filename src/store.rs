@@ -1,3 +1,23 @@
+//! # Store Module
+//!
+//! This module provides the storage layer for the transaction monitor.
+//! It manages persistent storage of monitors, news items, and monitor state.
+//!
+//! ## Key Components
+//!
+//! - **MonitorStore**: The main storage implementation
+//! - **MonitorStoreApi**: Trait defining the storage operations
+//!
+//! ## Storage Structure
+//!
+//! The store maintains separate lists for:
+//! - Active and inactive transaction monitors
+//! - Active and inactive spending UTXO monitors
+//! - RSK pegin monitor state
+//! - New block monitor state
+//! - News items for each monitor type
+//! - Monitor height and pending work flags
+
 use crate::{
     errors::MonitorStoreError,
     types::{

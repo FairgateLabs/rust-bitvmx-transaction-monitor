@@ -1,11 +1,8 @@
 use bitcoin::{BlockHash, Transaction, Txid};
-use bitcoin_indexer::{types::TransactionStatus, IndexerType};
+use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::{monitor::Monitor, store::MonitorStore};
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionStore {
     pub tx_id: Txid,
@@ -64,20 +61,20 @@ pub enum TypesToMonitor {
 pub enum MonitorNews {
     // Transaction news
     // - Txid: The transaction ID
-    // - TransactionInfo: The information of the transaction indexed
+    // - TransactionStatus: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
     Transaction(Txid, TransactionStatus, String),
 
     // Spending UTXO transaction news
     // - Txid: The transaction ID
     // - u32: The vout index of the UTXO
-    // - TransactionInfo: The information of the transaction indexed
+    // - TransactionStatus: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
 
     // Rsk pegin transaction news
     // - Txid: The transaction ID
-    // - TransactionInfo: The information of the transaction indexed
+    // - TransactionStatus: The information of the transaction indexed
     RskPeginTransaction(Txid, TransactionStatus),
 
     // New block news
@@ -108,8 +105,6 @@ pub enum AckMonitorNews {
 }
 
 pub type Id = Uuid;
-
-pub type MonitorType = Monitor<IndexerType, MonitorStore>;
 
 pub type FullBlock = bitcoin_indexer::types::FullBlock;
 
