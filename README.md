@@ -27,9 +27,7 @@ The monitor is built on three primary components:
 
 ## Configuration
 
-Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory.
-
-At minimum, your config should include `settings.indexer_settings.confirmation_threshold` (required by the indexer settings schema). Example:
+Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory. Example:
 
 ```yaml
 bitcoin:
@@ -43,7 +41,6 @@ settings:
   max_monitoring_confirmations: 100
   indexer_settings:
     checkpoint_height: 10
-    confirmation_threshold: 6
 
 storage:
   path: data

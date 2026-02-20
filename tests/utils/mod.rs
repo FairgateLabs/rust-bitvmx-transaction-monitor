@@ -76,7 +76,7 @@ pub fn create_test_setup(
 
     let indexer_settings = IndexerSettings::default();
 
-    let indexer_store = IndexerStore::new(storage.clone(), indexer_settings.confirmation_threshold)
+    let indexer_store = IndexerStore::new(storage.clone())
         .map_err(|e| anyhow::anyhow!("Failed to create IndexerStore: {}", e))?;
 
     let indexer = Indexer::new(

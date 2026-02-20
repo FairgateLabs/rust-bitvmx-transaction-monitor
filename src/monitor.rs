@@ -4,7 +4,6 @@ use crate::helper::{is_a_pegin_tx, is_spending_output};
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
 use crate::types::{AckMonitorNews, MonitorNews, TypesToMonitor};
 use bitcoin::Txid;
-use bitcoin_indexer::config::IndexerSettings;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
@@ -51,15 +50,8 @@ impl Monitor {
     ) -> Result<Self, MonitorError> {
         let settings = MonitorSettings::from(settings.unwrap_or_default());
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let indexer_store = IndexerStore::new(
-            storage.clone(),
-            settings
-                .indexer_settings
-                .as_ref()
-                .unwrap_or(&IndexerSettings::default())
-                .confirmation_threshold,
-        )
-        .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let indexer_store = IndexerStore::new(storage.clone())
+            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
         let indexer = Indexer::new(
             bitcoin_client,
             Rc::new(indexer_store),
