@@ -157,11 +157,12 @@ pub struct TransactionMonitorEntry {
     pub extra_data: String,
     pub confirmation_trigger: Option<u32>,
     pub trigger_sent: bool,
+    pub search_in_mempool: bool,
 }
 
 /// Transaction monitor stored in active/inactive lists
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TransactionMonitor {
+pub struct SetTransactionMonitorEntry {
     pub tx_id: Txid,
     pub entries: Vec<TransactionMonitorEntry>,
 }
@@ -172,6 +173,7 @@ pub struct SpendingUTXOMonitorEntry {
     pub extra_data: String,
     pub spender_tx_id: Option<Txid>,
     pub confirmation_trigger: Option<u32>,
+    pub search_in_mempool: bool,
 }
 
 /// SpendingUTXO monitor stored in active/inactive lists
@@ -182,9 +184,10 @@ pub struct SpendingUTXOMonitor {
     pub entries: Vec<SpendingUTXOMonitorEntry>,
 }
 
-/// RskPegin monitor state (active, confirmation_trigger)
+/// RskPegin monitor entry (active, confirmation_trigger, search_in_mempool)
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RskPeginMonitorState {
+pub struct RskPeginMonitorEntry {
     pub active: bool,
     pub confirmation_trigger: Option<u32>,
+    pub search_in_mempool: bool,
 }

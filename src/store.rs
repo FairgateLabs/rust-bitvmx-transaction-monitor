@@ -21,9 +21,9 @@
 use crate::{
     errors::MonitorStoreError,
     types::{
-        AckMonitorNews, NewsAck, RskPeginMonitorState, RskPeginNewsEntry, SpendingUTXOMonitor,
-        SpendingUTXOMonitorEntry, SpendingUTXONewsEntry, TransactionMonitor,
-        TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
+        AckMonitorNews, NewsAck, RskPeginMonitorEntry, RskPeginNewsEntry,
+        SetTransactionMonitorEntry, SpendingUTXOMonitor, SpendingUTXOMonitorEntry,
+        SpendingUTXONewsEntry, TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
     },
 };
 use bitcoin::{BlockHash, Txid};
@@ -62,15 +62,47 @@ pub enum MonitoredTypes {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TypesToMonitorStore {
-    Transaction(Txid, String, Option<u32>),
-    SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
+    Transaction(Txid, String, Option<u32>, bool),
+    SpendingUTXOTransaction(Txid, u32, String, Option<u32>, bool),
     NewBlock,
-    RskPegin(Option<u32>),
+    RskPegin(Option<u32>, bool),
 }
 
+fn to_store_data(data: TypesToMonitor, search_in_mempool: bool) -> Vec<TypesToMonitorStore> {
+    match data {
+        TypesToMonitor::Transactions(tx_ids, extra_data, trigger) => tx_ids
+            .into_iter()
+            .map(|tx_id| {
+                TypesToMonitorStore::Transaction(
+                    tx_id,
+                    extra_data.clone(),
+                    trigger,
+                    search_in_mempool,
+                )
+            })
+            .collect(),
+        TypesToMonitor::SpendingUTXOTransaction(tx_id, vout, extra_data, trigger) => {
+            vec![TypesToMonitorStore::SpendingUTXOTransaction(
+                tx_id,
+                vout,
+                extra_data,
+                trigger,
+                search_in_mempool,
+            )]
+        }
+        TypesToMonitor::RskPegin(trigger) => {
+            vec![TypesToMonitorStore::RskPegin(trigger, search_in_mempool)]
+        }
+        TypesToMonitor::NewBlock => vec![TypesToMonitorStore::NewBlock],
+    }
+}
 pub trait MonitorStoreApi {
     fn get_monitors(&self) -> Result<Vec<TypesToMonitorStore>, MonitorStoreError>;
-    fn add_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
+    fn add_monitor(
+        &self,
+        data: TypesToMonitor,
+        search_in_mempool: bool,
+    ) -> Result<(), MonitorStoreError>;
     fn update_spending_utxo_monitor(
         &self,
         data: (Txid, u32, Option<Txid>),
@@ -422,7 +454,7 @@ impl MonitorStoreApi for MonitorStore {
 
         // Get active transactions
         let txs_key = self.get_key(MonitorKey::Transactions(true));
-        let txs: Vec<TransactionMonitor> = self.store.get(&txs_key)?.unwrap_or_default();
+        let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&txs_key)?.unwrap_or_default();
 
         for monitor in txs {
             for entry in monitor.entries {
@@ -430,17 +462,21 @@ impl MonitorStoreApi for MonitorStore {
                     monitor.tx_id,
                     entry.extra_data,
                     entry.confirmation_trigger,
+                    entry.search_in_mempool,
                 ));
             }
         }
 
         // Get RSK pegin monitor (if active)
         let rsk_pegin_key = self.get_key(MonitorKey::RskPegin);
-        let rsk_pegin_active: Option<RskPeginMonitorState> = self.store.get(&rsk_pegin_key)?;
+        let rsk_pegin_active: Option<RskPeginMonitorEntry> = self.store.get(&rsk_pegin_key)?;
 
         if let Some(state) = rsk_pegin_active {
             if state.active {
-                monitors.push(TypesToMonitorStore::RskPegin(state.confirmation_trigger));
+                monitors.push(TypesToMonitorStore::RskPegin(
+                    state.confirmation_trigger,
+                    state.search_in_mempool,
+                ));
             }
         }
 
@@ -456,6 +492,7 @@ impl MonitorStoreApi for MonitorStore {
                     monitor.vout,
                     entry.extra_data,
                     entry.confirmation_trigger,
+                    entry.search_in_mempool,
                 ));
             }
         }
@@ -474,15 +511,20 @@ impl MonitorStoreApi for MonitorStore {
         Ok(monitors)
     }
 
-    fn add_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
-        match data {
-            TypesToMonitor::Transactions(tx_ids, extra_data, from) => {
-                let key = self.get_key(MonitorKey::Transactions(true));
-                let mut txs: Vec<TransactionMonitor> = self.store.get(&key)?.unwrap_or_default();
+    fn add_monitor(
+        &self,
+        data: TypesToMonitor,
+        search_in_mempool: bool,
+    ) -> Result<(), MonitorStoreError> {
+        let store_data: Vec<TypesToMonitorStore> = to_store_data(data, search_in_mempool);
+        for item in store_data {
+            match item {
+                TypesToMonitorStore::Transaction(tx_id, extra_data, from, search_in_mempool) => {
+                    let key = self.get_key(MonitorKey::Transactions(true));
+                    let mut txs: Vec<SetTransactionMonitorEntry> =
+                        self.store.get(&key)?.unwrap_or_default();
 
-                for txid in &tx_ids {
-                    if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == *txid) {
-                        // If tx exists and extra_data is the same, override Option<u32> and move trigger sent in false
+                    if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
                         if let Some(pos) = monitor
                             .entries
                             .iter()
@@ -492,6 +534,7 @@ impl MonitorStoreApi for MonitorStore {
                                 extra_data: extra_data.clone(),
                                 confirmation_trigger: from,
                                 trigger_sent: false,
+                                search_in_mempool,
                             };
                         } else {
                             // If extra_data is different, add it as a new tx_id-to-monitor entry
@@ -499,77 +542,91 @@ impl MonitorStoreApi for MonitorStore {
                                 extra_data: extra_data.clone(),
                                 confirmation_trigger: from,
                                 trigger_sent: false,
+                                search_in_mempool,
                             });
                         }
                     } else {
                         // New txid, store it with its first (extra_data, trigger) entry
-                        txs.push(TransactionMonitor {
-                            tx_id: *txid,
+                        txs.push(SetTransactionMonitorEntry {
+                            tx_id,
                             entries: vec![TransactionMonitorEntry {
                                 extra_data: extra_data.clone(),
                                 confirmation_trigger: from,
                                 trigger_sent: false,
+                                search_in_mempool,
                             }],
                         });
                     }
+                    self.store.set(&key, &txs, None)?;
                 }
+                TypesToMonitorStore::RskPegin(from, search_in_mempool) => {
+                    let key = self.get_key(MonitorKey::RskPegin);
+                    self.store.set(
+                        &key,
+                        RskPeginMonitorEntry {
+                            active: true,
+                            confirmation_trigger: from,
+                            search_in_mempool,
+                        },
+                        None,
+                    )?;
+                }
+                TypesToMonitorStore::SpendingUTXOTransaction(
+                    txid,
+                    vout,
+                    extra_data,
+                    from,
+                    search_in_mempool,
+                ) => {
+                    let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
+                    let mut txs: Vec<SpendingUTXOMonitor> =
+                        self.store.get(&key)?.unwrap_or_default();
 
-                self.store.set(&key, &txs, None)?;
-            }
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(
-                    &key,
-                    RskPeginMonitorState {
-                        active: true,
-                        confirmation_trigger: from,
-                    },
-                    None,
-                )?;
-            }
-            TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, from) => {
-                let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-                let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key)?.unwrap_or_default();
-
-                if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == txid && m.vout == vout) {
-                    // If extra_data is the same, override confirmation trigger and keep spender_tx_id
-                    if let Some(pos) = monitor
-                        .entries
-                        .iter()
-                        .position(|e| e.extra_data == extra_data)
+                    if let Some(monitor) =
+                        txs.iter_mut().find(|m| m.tx_id == txid && m.vout == vout)
                     {
-                        let existing_spender_tx_id = monitor.entries[pos].spender_tx_id;
-                        monitor.entries[pos] = SpendingUTXOMonitorEntry {
-                            extra_data: extra_data.clone(),
-                            spender_tx_id: existing_spender_tx_id,
-                            confirmation_trigger: from,
-                        };
+                        // If extra_data is the same, override confirmation trigger and keep spender_tx_id
+                        if let Some(pos) = monitor
+                            .entries
+                            .iter()
+                            .position(|e| e.extra_data == extra_data)
+                        {
+                            let existing_spender_tx_id = monitor.entries[pos].spender_tx_id;
+                            monitor.entries[pos] = SpendingUTXOMonitorEntry {
+                                extra_data: extra_data.clone(),
+                                spender_tx_id: existing_spender_tx_id,
+                                confirmation_trigger: from,
+                                search_in_mempool,
+                            };
+                        } else {
+                            // If extra_data is different, add it as a new entry
+                            monitor.entries.push(SpendingUTXOMonitorEntry {
+                                extra_data: extra_data.clone(),
+                                spender_tx_id: None,
+                                confirmation_trigger: from,
+                                search_in_mempool,
+                            });
+                        }
                     } else {
-                        // If extra_data is different, add it as a new entry
-                        monitor.entries.push(SpendingUTXOMonitorEntry {
-                            extra_data: extra_data.clone(),
-                            spender_tx_id: None,
-                            confirmation_trigger: from,
+                        // New (txid,vout)
+                        txs.push(SpendingUTXOMonitor {
+                            tx_id: txid,
+                            vout,
+                            entries: vec![SpendingUTXOMonitorEntry {
+                                extra_data: extra_data.clone(),
+                                spender_tx_id: None,
+                                confirmation_trigger: from,
+                                search_in_mempool,
+                            }],
                         });
                     }
-                } else {
-                    // New (txid,vout)
-                    txs.push(SpendingUTXOMonitor {
-                        tx_id: txid,
-                        vout,
-                        entries: vec![SpendingUTXOMonitorEntry {
-                            extra_data: extra_data.clone(),
-                            spender_tx_id: None,
-                            confirmation_trigger: from,
-                        }],
-                    });
-                }
 
-                self.store.set(&key, &txs, None)?;
-            }
-            TypesToMonitor::NewBlock => {
-                let key = self.get_key(MonitorKey::NewBlock);
-                self.store.set(&key, true, None)?;
+                    self.store.set(&key, &txs, None)?;
+                }
+                TypesToMonitorStore::NewBlock => {
+                    let key = self.get_key(MonitorKey::NewBlock);
+                    self.store.set(&key, true, None)?;
+                }
             }
         }
 
@@ -582,10 +639,10 @@ impl MonitorStoreApi for MonitorStore {
                 let active_key = self.get_key(MonitorKey::Transactions(true));
                 let inactive_key = self.get_key(MonitorKey::Transactions(false));
 
-                let mut active_txs: Vec<TransactionMonitor> =
+                let mut active_txs: Vec<SetTransactionMonitorEntry> =
                     self.store.get(&active_key)?.unwrap_or_default();
 
-                let mut inactive_txs: Vec<TransactionMonitor> =
+                let mut inactive_txs: Vec<SetTransactionMonitorEntry> =
                     self.store.get(&inactive_key)?.unwrap_or_default();
 
                 // Move matching transactions from active to inactive
@@ -628,7 +685,7 @@ impl MonitorStoreApi for MonitorStore {
                         }
                     } else {
                         // Create new inactive txid entry
-                        inactive_txs.push(TransactionMonitor {
+                        inactive_txs.push(SetTransactionMonitorEntry {
                             tx_id: txid,
                             entries: vec![entry],
                         });
@@ -641,7 +698,15 @@ impl MonitorStoreApi for MonitorStore {
 
             TypesToMonitor::RskPegin(from) => {
                 let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(&key, (false, from), None)?;
+                let mut state: RskPeginMonitorEntry =
+                    self.store.get(&key)?.unwrap_or(RskPeginMonitorEntry {
+                        active: false,
+                        confirmation_trigger: from,
+                        search_in_mempool: false,
+                    });
+                state.active = false;
+                state.confirmation_trigger = from;
+                self.store.set(&key, state, None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
@@ -718,10 +783,10 @@ impl MonitorStoreApi for MonitorStore {
                 let active_key = self.get_key(MonitorKey::Transactions(true));
                 let inactive_key = self.get_key(MonitorKey::Transactions(false));
 
-                let mut active_txs: Vec<TransactionMonitor> =
+                let mut active_txs: Vec<SetTransactionMonitorEntry> =
                     self.store.get(&active_key)?.unwrap_or_default();
 
-                let mut inactive_txs: Vec<TransactionMonitor> =
+                let mut inactive_txs: Vec<SetTransactionMonitorEntry> =
                     self.store.get(&inactive_key)?.unwrap_or_default();
 
                 // Remove only the entry with matching extra_data for each txid
@@ -750,14 +815,15 @@ impl MonitorStoreApi for MonitorStore {
             }
             TypesToMonitor::RskPegin(from) => {
                 let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(
-                    &key,
-                    RskPeginMonitorState {
+                let mut state: RskPeginMonitorEntry =
+                    self.store.get(&key)?.unwrap_or(RskPeginMonitorEntry {
                         active: false,
                         confirmation_trigger: from,
-                    },
-                    None,
-                )?;
+                        search_in_mempool: true,
+                    });
+                state.active = false;
+                state.confirmation_trigger = from;
+                self.store.set(&key, state, None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
@@ -832,7 +898,7 @@ impl MonitorStoreApi for MonitorStore {
         extra_data: &str,
     ) -> Result<bool, MonitorStoreError> {
         let key = self.get_key(MonitorKey::Transactions(true));
-        let txs: Vec<TransactionMonitor> = self.store.get(&key)?.unwrap_or_default();
+        let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor.entries.iter().find(|e| e.extra_data == extra_data) {
@@ -858,7 +924,7 @@ impl MonitorStoreApi for MonitorStore {
         trigger_sent: bool,
     ) -> Result<(), MonitorStoreError> {
         let key = self.get_key(MonitorKey::Transactions(true));
-        let mut txs: Vec<TransactionMonitor> = self.store.get(&key)?.unwrap_or_default();
+        let mut txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor

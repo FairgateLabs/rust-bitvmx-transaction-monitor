@@ -118,6 +118,7 @@ impl Monitor {
                     tx_id,
                     extra_data,
                     number_confirmation_trigger,
+                    search_in_mempool,
                 ) => {
                     self.process_transaction(
                         tx_id,
@@ -126,14 +127,16 @@ impl Monitor {
                         indexer_best_block_height,
                         current_block_hash,
                         false,
+                        search_in_mempool,
                     )?;
                 }
-                TypesToMonitorStore::RskPegin(number_confirmation_trigger) => {
+                TypesToMonitorStore::RskPegin(number_confirmation_trigger, search_in_mempool) => {
                     self.process_rsk_pegin_transaction(
                         number_confirmation_trigger,
                         &indexer_best_block,
                         indexer_best_block_height,
                         current_block_hash,
+                        search_in_mempool,
                     )?;
                 }
                 TypesToMonitorStore::SpendingUTXOTransaction(
@@ -141,6 +144,7 @@ impl Monitor {
                     target_utxo_index,
                     extra_data,
                     number_confirmation_trigger,
+                    search_in_mempool,
                 ) => {
                     self.process_spending_utxo_transaction(
                         target_tx_id,
@@ -150,6 +154,7 @@ impl Monitor {
                         &indexer_best_block,
                         indexer_best_block_height,
                         current_block_hash,
+                        search_in_mempool,
                     )?;
                 }
                 TypesToMonitorStore::NewBlock => {
@@ -204,7 +209,11 @@ impl Monitor {
     /// # Returns
     /// - `Ok(())`: If monitoring was set up successfully
     /// - `Err`: If there was an error setting up monitoring
-    pub fn monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+    pub fn monitor(
+        &self,
+        data: TypesToMonitor,
+        search_in_mempool: bool,
+    ) -> Result<(), MonitorError> {
         if data != TypesToMonitor::NewBlock {
             self.store.set_pending_work(true)?;
         }
@@ -229,7 +238,7 @@ impl Monitor {
             _ => {}
         }
 
-        self.store.add_monitor(data)?;
+        self.store.add_monitor(data, search_in_mempool)?;
 
         Ok(())
     }
@@ -270,11 +279,11 @@ impl Monitor {
         for news in list_news {
             match news {
                 MonitoredTypes::Transaction(tx_id, extra_data) => {
-                    let status = self.get_tx_status(&tx_id)?;
+                    let status = self.get_tx_status(&tx_id, true)?;
                     return_news.push(MonitorNews::Transaction(tx_id, status, extra_data));
                 }
                 MonitoredTypes::RskPeginTransaction(tx_id) => {
-                    let status = self.get_tx_status(&tx_id)?;
+                    let status = self.get_tx_status(&tx_id, true)?;
                     return_news.push(MonitorNews::RskPeginTransaction(tx_id, status));
                 }
                 MonitoredTypes::SpendingUTXOTransaction(
@@ -283,7 +292,7 @@ impl Monitor {
                     extra_data,
                     spender_tx_id,
                 ) => {
-                    let status = self.get_tx_status(&spender_tx_id)?;
+                    let status = self.get_tx_status(&spender_tx_id, true)?;
                     return_news.push(MonitorNews::SpendingUTXOTransaction(
                         tx_id, utxo_index, status, extra_data,
                     ));
@@ -324,12 +333,19 @@ impl Monitor {
     ///
     /// # Arguments
     /// * `tx_id` - Hash of the transaction to check
+    /// * `search_in_mempool` - If true, also consult the node mempool when the
+    ///   transaction is not found or is orphan. If false, only indexed chain
+    ///   data is used.
     ///
     /// # Returns
     /// - `Ok(TransactionStatus)`: Current information of the transaction
     /// - `Err`: If there was an error retrieving the status
-    pub fn get_tx_status(&self, tx_id: &Txid) -> Result<TransactionStatus, MonitorError> {
-        Ok(self.indexer.get_transaction(tx_id)?)
+    pub fn get_tx_status(
+        &self,
+        tx_id: &Txid,
+        search_in_mempool: bool,
+    ) -> Result<TransactionStatus, MonitorError> {
+        Ok(self.indexer.get_transaction(tx_id, search_in_mempool)?)
     }
 
     /// Gets the estimated fee rate from the indexer.
@@ -470,16 +486,20 @@ impl Monitor {
         indexer_best_block: &FullBlock,
         indexer_best_block_height: u32,
         current_block_hash: bitcoin::BlockHash,
+        search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
         let new_txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
 
         // Add new transactions to monitoring using add_monitor with INTERNAL_RSK_PEGIN context
         for tx_id in &new_txs_ids {
-            self.store.add_monitor(TypesToMonitor::Transactions(
-                vec![*tx_id],
-                INTERNAL_RSK_PEGIN.to_string(),
-                number_confirmation_trigger,
-            ))?;
+            self.store.add_monitor(
+                TypesToMonitor::Transactions(
+                    vec![*tx_id],
+                    INTERNAL_RSK_PEGIN.to_string(),
+                    number_confirmation_trigger,
+                ),
+                search_in_mempool,
+            )?;
 
             self.process_transaction(
                 *tx_id,
@@ -488,6 +508,7 @@ impl Monitor {
                 indexer_best_block_height,
                 current_block_hash,
                 true,
+                search_in_mempool,
             )?;
         }
 
@@ -502,8 +523,9 @@ impl Monitor {
         indexer_best_block_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
         should_exist: bool,
+        search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
-        let tx_info = self.indexer.get_transaction(&tx_id)?;
+        let tx_info = self.indexer.get_transaction(&tx_id, search_in_mempool)?;
 
         if tx_info.is_not_found() || tx_info.is_in_mempool() {
             if should_exist {
@@ -629,6 +651,7 @@ impl Monitor {
         indexer_best_block: &FullBlock,
         indexer_best_block_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
+        search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
         // Check each transaction in the new block for a spending transaction of the target UTXO
         for tx in indexer_best_block.txs.iter() {
@@ -641,11 +664,14 @@ impl Monitor {
                 let spending_context =
                     Self::build_spending_utxo_context(target_tx_id, target_utxo_index, &extra_data);
 
-                self.store.add_monitor(TypesToMonitor::Transactions(
-                    vec![spending_tx_id],
-                    spending_context.clone(),
-                    number_confirmation_trigger,
-                ))?;
+                self.store.add_monitor(
+                    TypesToMonitor::Transactions(
+                        vec![spending_tx_id],
+                        spending_context.clone(),
+                        number_confirmation_trigger,
+                    ),
+                    search_in_mempool,
+                )?;
 
                 // Process the spending transaction monitor
                 self.process_transaction(
@@ -655,6 +681,7 @@ impl Monitor {
                     indexer_best_block_height,
                     current_block_hash,
                     true,
+                    search_in_mempool,
                 )?;
             }
         }

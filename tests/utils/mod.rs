@@ -297,11 +297,10 @@ pub fn monitor_tx(
     extra_data: &str,
     confirmation_trigger: Option<u32>,
 ) -> Result<()> {
-    monitor.monitor(TypesToMonitor::Transactions(
-        vec![tx_id],
-        extra_data.to_string(),
-        confirmation_trigger,
-    ))?;
+    monitor.monitor(
+        TypesToMonitor::Transactions(vec![tx_id], extra_data.to_string(), confirmation_trigger),
+        true,
+    )?;
     Ok(())
 }
 
@@ -312,17 +311,20 @@ pub fn monitor_spending_utxo(
     extra_data: &str,
     confirmation_trigger: Option<u32>,
 ) -> Result<()> {
-    monitor.monitor(TypesToMonitor::SpendingUTXOTransaction(
-        tx_id,
-        vout,
-        extra_data.to_string(),
-        confirmation_trigger,
-    ))?;
+    monitor.monitor(
+        TypesToMonitor::SpendingUTXOTransaction(
+            tx_id,
+            vout,
+            extra_data.to_string(),
+            confirmation_trigger,
+        ),
+        true,
+    )?;
     Ok(())
 }
 
 pub fn monitor_rsk_pegin(monitor: &Monitor, confirmation_trigger: Option<u32>) -> Result<()> {
-    monitor.monitor(TypesToMonitor::RskPegin(confirmation_trigger))?;
+    monitor.monitor(TypesToMonitor::RskPegin(confirmation_trigger), true)?;
     Ok(())
 }
 

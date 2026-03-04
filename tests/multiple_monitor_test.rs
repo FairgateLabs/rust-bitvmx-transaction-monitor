@@ -109,7 +109,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     monitor_rsk_pegin(&monitor, Some(small_confirmation_trigger))?;
 
     // Monitor NewBlock: single monitor that detects all new blocks
-    monitor.monitor(TypesToMonitor::NewBlock)?;
+    monitor.monitor(TypesToMonitor::NewBlock, false)?;
 
     // ============================================================================
     // PART 3: Mine blocks and sync to confirm transactions
