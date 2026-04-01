@@ -4,13 +4,11 @@ bitcoin:
   username: foo
   password: rpcpassword
   wallet: test_wallet
-  
+
 settings:
-  confirmation_threshold: 6
   max_monitoring_confirmations: 100
   indexer_settings:
     checkpoint_height: 10
 
 storage:
   path: data
-

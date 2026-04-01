@@ -27,11 +27,28 @@ The monitor is built on three primary components:
 
 ## Configuration
 
-Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory.
+Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory. Example:
+
+```yaml
+bitcoin:
+  network: regtest
+  url: http://127.0.0.1:18443
+  username: foo
+  password: rpcpassword
+  wallet: test_wallet
+
+settings:
+  max_monitoring_confirmations: 100
+  indexer_settings:
+    checkpoint_height: 10
+
+storage:
+  path: data
+```
 
 ## Methods
 
-The `Monitor` struct implements the `MonitorApi` trait, offering the following methods:
+The `Monitor` struct provides the following public methods:
 
 ### Core Operations
 
@@ -48,14 +65,15 @@ The `Monitor` struct implements the `MonitorApi` trait, offering the following m
 
 ### Monitors Management
 
-- **`monitor(data: TypesToMonitor)`**: Initiates the monitoring process for a new transaction or entity.  Capable of handling multiple monitor types, such as Bitcoin Transactions, RSK Pegin Transactions, UTXO Spending, New Block notifications.
+- **`monitor(data: TypesToMonitor)`**: Initiates the monitoring process for a new transaction or entity. Capable of handling multiple monitor types:
+  - **Transactions**: Monitor specific transactions by their transaction IDs. Supports optional confirmation triggers.
+  - **RskPegin**: Monitor all RSK pegin transactions automatically. A single monitor detects all RSK pegin transactions in new blocks.
+  - **SpendingUTXOTransaction**: Monitor when a specific UTXO (transaction output) is spent. Automatically detects the spending transaction.
+  - **NewBlock**: Monitor new blocks being added to the chain. Provides notifications for each new block.
  
 - **`cancel(data: TypesToMonitor)`**: Completely stops monitoring a specific transaction or entity. Existing transaction news is retained, but no further updates will be generated.
 
 ### Blockchain Information
-
-- **`get_confirmation_threshold()`**: Retrieves the configured confirmation threshold for transactions.
-  - Indicates the number of confirmations required for a transaction to be considered final.
 
 - **`get_monitor_height()`**: Provides the current block height processed by the monitor.
   - Useful for evaluating synchronization status.
@@ -67,8 +85,30 @@ The `Monitor` struct implements the `MonitorApi` trait, offering the following m
 Here's how you can use the `Monitor` struct and its methods in your application:
 
 ```rust
-  // Initialize the monitor with necessary components
-  let monitor = Monitor::new(indexer, bitvmx_store, settings)?;
+  use bitvmx_transaction_monitor::{
+      config::MonitorConfig,
+      monitor::Monitor,
+  };
+  use bitvmx_settings::settings;
+  use std::rc::Rc;
+  use storage_backend::storage::Storage;
+  use storage_backend::storage_config::StorageConfig;
+
+  // Load configuration from YAML file
+  let config = settings::load_config_file::<MonitorConfig>(Some(
+      "config/monitor_config.yaml".to_string(),
+  ))?;
+
+  // Create storage from configuration
+  let storage = Rc::new(Storage::new(&config.storage)?);
+
+  // Initialize the monitor using new_with_paths
+  // This method creates the indexer and store internally
+  let monitor = Monitor::new_with_paths(
+      &config.bitcoin,
+      storage,
+      config.settings,
+  )?;
 
   // Check if the monitor is fully synchronized with the blockchain
   match monitor.is_ready() {
@@ -77,27 +117,66 @@ Here's how you can use the `Monitor` struct and its methods in your application:
       Err(e) => eprintln!("Error checking monitor readiness: {:?}", e),
   }
 
+  // Start monitoring different types of transactions
+  use bitvmx_transaction_monitor::types::TypesToMonitor;
+  
+  // Monitor a specific transaction
+  let tx_id = /* your transaction ID */;
+  monitor.monitor(TypesToMonitor::Transactions(
+      vec![tx_id],
+      "my_context".to_string(),
+      Some(6), // Optional: only send news when 6+ confirmations
+  ))?;
+  
+  // Monitor when a specific UTXO is spent
+  let funding_tx_id = /* funding transaction ID */;
+  let vout_index = 0; // output index
+  monitor.monitor(TypesToMonitor::SpendingUTXOTransaction(
+      funding_tx_id,
+      vout_index,
+      "utxo_context".to_string(),
+      None, // No confirmation trigger
+  ))?;
+  
+  // Monitor all RSK pegin transactions
+  monitor.monitor(TypesToMonitor::RskPegin(Some(1)))?;
+  
+  // Monitor new blocks
+  monitor.monitor(TypesToMonitor::NewBlock)?;
+
   // Regularly tick the monitor to process new blocks and update statuses
-  monitor.tick();
+  // This should be called in a loop or scheduled task
+  monitor.tick()?;
 
   // Retrieve all pending news items related to monitored transactions
-  let news = monitor.get_news()
+  let news = monitor.get_news()?;
+  for news_item in news {
+      match news_item {
+          MonitorNews::Transaction(tx_id, status, context) => {
+              println!("Transaction {} has {} confirmations", tx_id, status.confirmations);
+          }
+          MonitorNews::SpendingUTXOTransaction(tx_id, vout, status, context) => {
+              println!("UTXO {}:{} was spent in transaction {}", tx_id, vout, status.tx_id);
+          }
+          MonitorNews::RskPeginTransaction(tx_id, status) => {
+              println!("RSK pegin transaction {} detected", tx_id);
+          }
+          MonitorNews::NewBlock(height, hash) => {
+              println!("New block at height {}: {}", height, hash);
+          }
+      }
+  }
 
   // Acknowledge specific news items to prevent duplicate notifications
-  let ack_data = /* create your AckMonitorNews instance */;
-  monitor.ack_news(ack_data) 
-
-  // Start monitoring a new transaction or entity
-  let monitor_data = /* create your TypesToMonitor instance */;
-  monitor.monitor(monitor_data)
+  use bitvmx_transaction_monitor::types::AckMonitorNews;
+  monitor.ack_news(AckMonitorNews::Transaction(tx_id, "my_context".to_string()))?;
 
   // Stop monitoring a specific transaction or entity
-  let cancel_data = /* create your TypesToMonitor instance */;
-  monitor.cancel(cancel_data) 
-
-  // Retrieve the confirmation count needed for a transaction to achieve finality
-  let threshold = monitor.get_confirmation_threshold();
-  println!("Confirmation threshold: {}", threshold);
+  monitor.cancel(TypesToMonitor::Transactions(
+      vec![tx_id],
+      "my_context".to_string(),
+      None,
+  ))?;
 
   // Get the current block height processed by the monitor
   match monitor.get_monitor_height() {
@@ -106,12 +185,25 @@ Here's how you can use the `Monitor` struct and its methods in your application:
   }
 
   // Retrieve the current status of a monitored transaction
-  let tx_id = /* your transaction ID */;
   match monitor.get_tx_status(&tx_id) {
       Ok(status) => println!("Transaction status: {:?}", status),
       Err(e) => eprintln!("Error retrieving transaction status: {:?}", e),
   }
   ```
+
+## Confirmation Triggers
+
+The monitor supports optional confirmation triggers for transaction monitoring:
+
+- **With trigger**: When a confirmation trigger is set (e.g., `Some(6)`), news is sent **once** when the transaction reaches or exceeds that number of confirmations. This is useful for critical transactions that require a specific confirmation depth.
+
+- **Without trigger**: When no trigger is set (`None`), news is sent for **every block** until the transaction reaches `max_monitoring_confirmations`. This provides continuous updates on confirmation progress.
+
+**Important**: The confirmation trigger must be less than `max_monitoring_confirmations`, otherwise an error will be returned.
+
+## Auto-Deactivation
+
+Monitors are automatically deactivated when transactions reach `max_monitoring_confirmations`. This prevents unnecessary processing and storage overhead. Once deactivated, no further news updates will be generated for that transaction.
 
 ## Development Setup
 

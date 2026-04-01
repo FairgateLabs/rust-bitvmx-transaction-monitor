@@ -1,78 +1,12 @@
 use bitcoin::{BlockHash, Transaction, Txid};
-use bitcoin_indexer::IndexerType;
+use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::{monitor::Monitor, store::MonitorStore};
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionStore {
     pub tx_id: Txid,
     pub tx: Option<Transaction>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct TransactionStatus {
-    pub tx_id: Txid,
-    pub tx: Transaction,
-    pub block_info: Option<FullBlock>,
-    pub confirmations: u32,
-    pub status: TransactionBlockchainStatus,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum TransactionBlockchainStatus {
-    // Represents a transaction that has been successfully confirmed by the network but a reorganization moved it out of the chain.
-    Orphan,
-    // Represents a transaction that has been successfully confirmed by the network
-    Confirmed,
-    // Represents when the transaction was confirmed by a certain number of blocks
-    Finalized,
-}
-
-impl TransactionStatus {
-    pub fn new(
-        tx: Transaction,
-        block_info: FullBlock,
-        status: TransactionBlockchainStatus,
-        confirmations: u32,
-    ) -> Self {
-        Self {
-            tx_id: tx.compute_txid(),
-            tx,
-            block_info: Some(block_info),
-            confirmations,
-            status,
-        }
-    }
-
-    pub fn is_finalized(&self, confirmation_threshold: u32) -> bool {
-        // A transaction is considered finalized if:
-        // - The status is Finalized
-        // - The number of confirmations meets or exceeds the confirmation threshold
-        self.confirmations >= confirmation_threshold
-            && self.status == TransactionBlockchainStatus::Finalized
-    }
-
-    pub fn is_confirmed(&self) -> bool {
-        // A transaction is considered confirmed if it has been included in a block
-        // and has at least one confirmation (confirmations > 0), regardless of the exact number of confirmations.
-        // This means the transaction is in the main chain and not orphaned.
-        self.confirmations > 0
-    }
-
-    pub fn is_orphan(&self) -> bool {
-        // An orphan transaction should have:
-        //  block_info because it was mined at some point before.
-        //  confirmations == 0, this is just a validation - orphan transactions should be moved to confirmation 0.
-        //  is_orphan = true
-        //  status = Orphan
-        self.confirmations == 0
-            && self.block_info.is_some()
-            && self.block_info.as_ref().unwrap().orphan
-            && self.status == TransactionBlockchainStatus::Orphan
-    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -127,20 +61,20 @@ pub enum TypesToMonitor {
 pub enum MonitorNews {
     // Transaction news
     // - Txid: The transaction ID
-    // - TransactionStatus: The status of the transaction
+    // - TransactionStatus: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
     Transaction(Txid, TransactionStatus, String),
 
     // Spending UTXO transaction news
     // - Txid: The transaction ID
     // - u32: The vout index of the UTXO
-    // - TransactionStatus: The status of the transaction
+    // - TransactionStatus: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
 
     // Rsk pegin transaction news
     // - Txid: The transaction ID
-    // - TransactionStatus: The status of the transaction
+    // - TransactionStatus: The information of the transaction indexed
     RskPeginTransaction(Txid, TransactionStatus),
 
     // New block news
@@ -171,8 +105,6 @@ pub enum AckMonitorNews {
 }
 
 pub type Id = Uuid;
-
-pub type MonitorType = Monitor<IndexerType, MonitorStore>;
 
 pub type FullBlock = bitcoin_indexer::types::FullBlock;
 
@@ -225,11 +157,12 @@ pub struct TransactionMonitorEntry {
     pub extra_data: String,
     pub confirmation_trigger: Option<u32>,
     pub trigger_sent: bool,
+    pub search_in_mempool: bool,
 }
 
 /// Transaction monitor stored in active/inactive lists
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TransactionMonitor {
+pub struct SetTransactionMonitorEntry {
     pub tx_id: Txid,
     pub entries: Vec<TransactionMonitorEntry>,
 }
@@ -240,6 +173,7 @@ pub struct SpendingUTXOMonitorEntry {
     pub extra_data: String,
     pub spender_tx_id: Option<Txid>,
     pub confirmation_trigger: Option<u32>,
+    pub search_in_mempool: bool,
 }
 
 /// SpendingUTXO monitor stored in active/inactive lists
@@ -250,9 +184,10 @@ pub struct SpendingUTXOMonitor {
     pub entries: Vec<SpendingUTXOMonitorEntry>,
 }
 
-/// RskPegin monitor state (active, confirmation_trigger)
+/// RskPegin monitor entry (active, confirmation_trigger, search_in_mempool)
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RskPeginMonitorState {
+pub struct RskPeginMonitorEntry {
     pub active: bool,
     pub confirmation_trigger: Option<u32>,
+    pub search_in_mempool: bool,
 }
