@@ -4,6 +4,8 @@ use bitcoin::secp256k1::ffi::{
 };
 use bitcoin::{Address, Network, OutPoint, Script, Transaction, Txid};
 
+use crate::types::OutputPatternFilter;
+
 /// Validates the OP_RETURN data to ensure it contains 4 fields and starts with "RSK_PEGIN".
 pub fn is_valid_op_return_rsk_data(data: Vec<Vec<u8>>) -> bool {
     if data.len() != 1 {
@@ -116,6 +118,29 @@ pub fn extract_output_data(script: &Script) -> Vec<Vec<u8>> {
     }
 
     result
+}
+
+/// Returns `true` if `tx` matches the given output pattern filter:
+/// - If `filter.max_outputs` is set, the transaction must not exceed that many outputs.
+/// - The output at `filter.output_index` must be an OP_RETURN whose pushed data starts
+///   with `filter.tag`.
+pub fn matches_output_pattern(tx: &Transaction, filter: &OutputPatternFilter) -> bool {
+    if let Some(max) = filter.max_outputs {
+        if tx.output.len() > max {
+            return false;
+        }
+    }
+
+    if let Some(output) = tx.output.get(filter.output_index) {
+        if output.script_pubkey.is_op_return() {
+            let data = extract_output_data(&output.script_pubkey);
+            if let Some(first) = data.first() {
+                return first.starts_with(filter.tag.as_slice());
+            }
+        }
+    }
+
+    false
 }
 
 pub fn is_spending_output(tx: &Transaction, target_txid: Txid, target_vout: u32) -> bool {

@@ -1,7 +1,8 @@
 use crate::{
     errors::MonitorStoreError,
     types::{
-        AckMonitorNews, NewsAck, RskPeginMonitorState, RskPeginNewsEntry, SpendingUTXOMonitor,
+        AckMonitorNews, NewsAck, OutputPatternFilter, OutputPatternNewsEntry,
+        OutputPatternSubscription, RskPeginMonitorState, RskPeginNewsEntry, SpendingUTXOMonitor,
         SpendingUTXOMonitorEntry, SpendingUTXONewsEntry, TransactionMonitor,
         TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
     },
@@ -26,6 +27,8 @@ enum MonitorKey {
     RskPeginTransactionsNews,
     SpendingUTXOTransactionsNews,
     NewBlockNews,
+    OutputPatternSubscriptions,
+    OutputPatternTransactionsNews,
 }
 
 enum BlockchainKey {
@@ -38,6 +41,7 @@ pub enum MonitoredTypes {
     RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32, String, Txid),
     NewBlock(BlockHash),
+    OutputPatternTransaction(Txid, Vec<u8>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -46,6 +50,7 @@ pub enum TypesToMonitorStore {
     SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
     NewBlock,
     RskPegin(Option<u32>),
+    OutputPattern(OutputPatternFilter, Option<u32>),
 }
 
 pub trait MonitorStoreApi {
@@ -110,6 +115,12 @@ impl MonitorStore {
                 format!("{prefix}/spending/utxo/tx/news")
             }
             MonitorKey::NewBlockNews => format!("{prefix}/new/block/news"),
+            MonitorKey::OutputPatternSubscriptions => {
+                format!("{prefix}/output_pattern/subscriptions")
+            }
+            MonitorKey::OutputPatternTransactionsNews => {
+                format!("{prefix}/output_pattern/tx/news")
+            }
         }
     }
 
@@ -185,6 +196,19 @@ impl MonitorStoreApi for MonitorStore {
                     entry.utxo_index,
                     entry.extra_data,
                     entry.spender_tx_id,
+                ));
+            }
+        }
+
+        let op_news_key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+        let op_news: Vec<OutputPatternNewsEntry> =
+            self.store.get(&op_news_key, None)?.unwrap_or_default();
+
+        for entry in op_news {
+            if !entry.ack.acknowledged {
+                news.push(MonitoredTypes::OutputPatternTransaction(
+                    entry.tx_id,
+                    entry.tag,
                 ));
             }
         }
@@ -311,6 +335,36 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
+            MonitoredTypes::OutputPatternTransaction(tx_id, tag) => {
+                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+                let mut op_news: Vec<OutputPatternNewsEntry> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+
+                let existing = op_news
+                    .iter()
+                    .position(|e| e.tx_id == tx_id && e.tag == tag);
+
+                match existing {
+                    None => {
+                        op_news.push(OutputPatternNewsEntry {
+                            tx_id,
+                            tag,
+                            ack: NewsAck::new(current_block_hash, false),
+                        });
+                    }
+                    Some(pos) => {
+                        if op_news[pos].ack.block_hash != current_block_hash {
+                            op_news[pos] = OutputPatternNewsEntry {
+                                tx_id,
+                                tag,
+                                ack: NewsAck::new(current_block_hash, false),
+                            };
+                        }
+                    }
+                }
+
+                self.store.set(&key, &op_news, None)?;
+            }
             MonitoredTypes::NewBlock(hash) => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
 
@@ -381,6 +435,19 @@ impl MonitorStoreApi for MonitorStore {
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
+            AckMonitorNews::OutputPatternTransaction(tx_id, tag) => {
+                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+                let mut op_news: Vec<OutputPatternNewsEntry> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+
+                if let Some(entry) = op_news
+                    .iter_mut()
+                    .find(|e| e.tx_id == tx_id && e.tag == tag)
+                {
+                    entry.ack.acknowledged = true;
+                    self.store.set(&key, &op_news, None)?;
+                }
+            }
             AckMonitorNews::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
                 let mut new_block_news: Option<NewsAck> = self.store.get(&key, None)?;
@@ -436,6 +503,18 @@ impl MonitorStoreApi for MonitorStore {
                     entry.confirmation_trigger,
                 ));
             }
+        }
+
+        // Get output pattern subscriptions
+        let op_key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+        let op_subscriptions: Vec<OutputPatternSubscription> =
+            self.store.get(&op_key, None)?.unwrap_or_default();
+
+        for sub in op_subscriptions {
+            monitors.push(TypesToMonitorStore::OutputPattern(
+                sub.filter,
+                sub.confirmation_trigger,
+            ));
         }
 
         // Get new block monitor
@@ -544,6 +623,23 @@ impl MonitorStoreApi for MonitorStore {
                 }
 
                 self.store.set(&key, &txs, None)?;
+            }
+            TypesToMonitor::OutputPattern(filter, confirmation_trigger) => {
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let mut subs: Vec<OutputPatternSubscription> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+
+                // Add or update subscription by filter identity
+                if let Some(existing) = subs.iter_mut().find(|s| s.filter == filter) {
+                    existing.confirmation_trigger = confirmation_trigger;
+                } else {
+                    subs.push(OutputPatternSubscription {
+                        filter,
+                        confirmation_trigger,
+                    });
+                }
+
+                self.store.set(&key, &subs, None)?;
             }
             TypesToMonitor::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlock);
@@ -681,6 +777,13 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
+            TypesToMonitor::OutputPattern(filter, _) => {
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let mut subs: Vec<OutputPatternSubscription> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+                subs.retain(|s| s.filter != filter);
+                self.store.set(&key, &subs, None)?;
+            }
             TypesToMonitor::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlock);
                 self.store.set(&key, false, None)?;
@@ -773,6 +876,13 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
+            }
+            TypesToMonitor::OutputPattern(filter, _) => {
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let mut subs: Vec<OutputPatternSubscription> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+                subs.retain(|s| s.filter != filter);
+                self.store.set(&key, &subs, None)?;
             }
             TypesToMonitor::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlock);

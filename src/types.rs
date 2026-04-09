@@ -6,6 +6,21 @@ use uuid::Uuid;
 
 use crate::{monitor::Monitor, store::MonitorStore};
 
+/// Generic filter for detecting transactions that match a specific output pattern.
+///
+/// Matches transactions where a specific output is an OP_RETURN whose pushed data starts
+/// with the given `tag` bytes. Optionally enforces an upper bound on the total number of
+/// outputs in the transaction.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct OutputPatternFilter {
+    /// Index of the output to inspect (0-based).
+    pub output_index: usize,
+    /// Byte prefix that the OP_RETURN pushed data must start with.
+    pub tag: Vec<u8>,
+    /// If `Some(n)`, the transaction must have at most `n` outputs.
+    pub max_outputs: Option<usize>,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionStore {
     pub tx_id: Txid,
@@ -118,6 +133,11 @@ pub enum TypesToMonitor {
     // - Option<u32>: The number of confirmations to wait for receive news about the transaction
     RskPegin(Option<u32>),
 
+    // Generic output pattern transaction to monitor
+    // - OutputPatternFilter: The filter describing which output/tag to match
+    // - Option<u32>: The number of confirmations to wait for before emitting news
+    OutputPattern(OutputPatternFilter, Option<u32>),
+
     // New block to monitor
     // - BlockHeight: The block height to monitor
     NewBlock,
@@ -143,6 +163,12 @@ pub enum MonitorNews {
     // - TransactionStatus: The status of the transaction
     RskPeginTransaction(Txid, TransactionStatus),
 
+    // Generic output pattern transaction news
+    // - Txid: The transaction ID
+    // - TransactionStatus: The status of the transaction
+    // - Vec<u8>: The tag that was matched (identifies which pattern triggered)
+    OutputPatternTransaction(Txid, TransactionStatus, Vec<u8>),
+
     // New block news
     // - BlockHeight: The block height
     // - BlockHash: The block hash
@@ -159,6 +185,11 @@ pub enum AckMonitorNews {
     // Rsk pegin transaction news
     // - Txid: The transaction ID
     RskPeginTransaction(Txid),
+
+    // Generic output pattern transaction news
+    // - Txid: The transaction ID
+    // - Vec<u8>: The tag that was matched
+    OutputPatternTransaction(Txid, Vec<u8>),
 
     // Spending UTXO transaction news
     // - Txid: The transaction ID
@@ -255,4 +286,20 @@ pub struct SpendingUTXOMonitor {
 pub struct RskPeginMonitorState {
     pub active: bool,
     pub confirmation_trigger: Option<u32>,
+}
+
+/// A single active output-pattern subscription
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct OutputPatternSubscription {
+    pub filter: OutputPatternFilter,
+    pub confirmation_trigger: Option<u32>,
+}
+
+/// Output-pattern transaction news entry stored in storage
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct OutputPatternNewsEntry {
+    pub tx_id: Txid,
+    /// The tag bytes of the filter that matched this transaction
+    pub tag: Vec<u8>,
+    pub ack: NewsAck,
 }
