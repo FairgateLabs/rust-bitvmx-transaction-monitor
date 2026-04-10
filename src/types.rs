@@ -129,10 +129,6 @@ pub enum TypesToMonitor {
     // - Option<u32>: The number of confirmations to wait for receive news about the transaction
     SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
 
-    // Rsk pegin transaction to monitor
-    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
-    RskPegin(Option<u32>),
-
     // Generic output pattern transaction to monitor
     // - OutputPatternFilter: The filter describing which output/tag to match
     // - Option<u32>: The number of confirmations to wait for before emitting news
@@ -158,11 +154,6 @@ pub enum MonitorNews {
     // - String: The context of the transaction previously sent to the monitor
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
 
-    // Rsk pegin transaction news
-    // - Txid: The transaction ID
-    // - TransactionStatus: The status of the transaction
-    RskPeginTransaction(Txid, TransactionStatus),
-
     // Generic output pattern transaction news
     // - Txid: The transaction ID
     // - TransactionStatus: The status of the transaction
@@ -181,10 +172,6 @@ pub enum AckMonitorNews {
     // - Txid: The transaction ID
     // - String: The context of the transaction
     Transaction(Txid, String),
-
-    // Rsk pegin transaction news
-    // - Txid: The transaction ID
-    RskPeginTransaction(Txid),
 
     // Generic output pattern transaction news
     // - Txid: The transaction ID
@@ -233,13 +220,6 @@ pub struct TransactionNewsEntry {
     pub ack: NewsAck,
 }
 
-/// RskPegin transaction news entry stored in storage
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RskPeginNewsEntry {
-    pub tx_id: Txid,
-    pub ack: NewsAck,
-}
-
 /// SpendingUTXO transaction news entry stored in storage
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SpendingUTXONewsEntry {
@@ -279,13 +259,6 @@ pub struct SpendingUTXOMonitor {
     pub tx_id: Txid,
     pub vout: u32,
     pub entries: Vec<SpendingUTXOMonitorEntry>,
-}
-
-/// RskPegin monitor state (active, confirmation_trigger)
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RskPeginMonitorState {
-    pub active: bool,
-    pub confirmation_trigger: Option<u32>,
 }
 
 /// A single active output-pattern subscription

@@ -2,7 +2,7 @@ use crate::{
     errors::MonitorStoreError,
     types::{
         AckMonitorNews, NewsAck, OutputPatternFilter, OutputPatternNewsEntry,
-        OutputPatternSubscription, RskPeginMonitorState, RskPeginNewsEntry, SpendingUTXOMonitor,
+        OutputPatternSubscription, SpendingUTXOMonitor,
         SpendingUTXOMonitorEntry, SpendingUTXONewsEntry, TransactionMonitor,
         TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
     },
@@ -21,10 +21,8 @@ enum MonitorKey {
     Transactions(bool),
     SpendingUTXOTransactions(bool),
     PendingWork,
-    RskPegin,
     NewBlock,
     TransactionsNews,
-    RskPeginTransactionsNews,
     SpendingUTXOTransactionsNews,
     NewBlockNews,
     OutputPatternSubscriptions,
@@ -38,7 +36,6 @@ enum BlockchainKey {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MonitoredTypes {
     Transaction(Txid, String),
-    RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32, String, Txid),
     NewBlock(BlockHash),
     OutputPatternTransaction(Txid, Vec<u8>),
@@ -49,7 +46,6 @@ pub enum TypesToMonitorStore {
     Transaction(Txid, String, Option<u32>),
     SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
     NewBlock,
-    RskPegin(Option<u32>),
     OutputPattern(OutputPatternFilter, Option<u32>),
 }
 
@@ -107,10 +103,8 @@ impl MonitorStore {
                 status = if is_active { "active" } else { "inactive" }
             ),
             MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
-            MonitorKey::RskPegin => format!("{prefix}/rsk/pegin"),
             MonitorKey::NewBlock => format!("{prefix}/new/block"),
             MonitorKey::TransactionsNews => format!("{prefix}/tx/news"),
-            MonitorKey::RskPeginTransactionsNews => format!("{prefix}/rsk/tx/news"),
             MonitorKey::SpendingUTXOTransactionsNews => {
                 format!("{prefix}/spending/utxo/tx/news")
             }
@@ -173,15 +167,6 @@ impl MonitorStoreApi for MonitorStore {
         for entry in txs_news {
             if !entry.ack.acknowledged {
                 news.push(MonitoredTypes::Transaction(entry.tx_id, entry.extra_data));
-            }
-        }
-
-        let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-        let rsk_news: Vec<RskPeginNewsEntry> = self.store.get(&rsk_news_key, None)?.unwrap_or_default();
-
-        for entry in rsk_news {
-            if !entry.ack.acknowledged {
-                news.push(MonitoredTypes::RskPeginTransaction(entry.tx_id));
             }
         }
 
@@ -267,33 +252,6 @@ impl MonitorStoreApi for MonitorStore {
                 }
 
                 self.store.set(&key, &txs_news, None)?;
-            }
-            MonitoredTypes::RskPeginTransaction(tx_id) => {
-                let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut rsk_news: Vec<RskPeginNewsEntry> =
-                    self.store.get(&rsk_news_key, None)?.unwrap_or_default();
-
-                // Check if news already exists for this tx_id
-                // RskPeginTransaction doesn't have extra_data, so we only check by tx_id
-                let is_new_news = rsk_news.iter().position(|e| e.tx_id == tx_id);
-
-                match is_new_news {
-                    None => rsk_news.push(RskPeginNewsEntry {
-                        tx_id,
-                        ack: NewsAck::new(current_block_hash, false),
-                    }),
-                    Some(pos) => {
-                        if rsk_news[pos].ack.block_hash != current_block_hash {
-                            // Replace the notification with the new block hash
-                            rsk_news[pos] = RskPeginNewsEntry {
-                                tx_id,
-                                ack: NewsAck::new(current_block_hash, false),
-                            };
-                        }
-                    }
-                }
-
-                self.store.set(&rsk_news_key, &rsk_news, None)?;
             }
             MonitoredTypes::SpendingUTXOTransaction(
                 tx_id,
@@ -402,26 +360,6 @@ impl MonitorStoreApi for MonitorStore {
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
-            AckMonitorNews::RskPeginTransaction(tx_id) => {
-                let key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut txs_news: Vec<RskPeginNewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
-
-                //TODO: THIS SHOULD change, we need to start sending context to ack a news.
-                // Acknowledge all news entries for this tx_id
-                // RskPeginTransaction doesn't have extra_data, but we acknowledge all entries for consistency
-                let mut found_any = false;
-                for entry in txs_news.iter_mut() {
-                    if entry.tx_id == tx_id {
-                        entry.ack.acknowledged = true;
-                        found_any = true;
-                    }
-                }
-
-                if found_any {
-                    self.store.set(&key, &txs_news, None)?;
-                }
-            }
             AckMonitorNews::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut txs_news: Vec<SpendingUTXONewsEntry> =
@@ -476,16 +414,6 @@ impl MonitorStoreApi for MonitorStore {
                     entry.extra_data,
                     entry.confirmation_trigger,
                 ));
-            }
-        }
-
-        // Get RSK pegin monitor (if active)
-        let rsk_pegin_key = self.get_key(MonitorKey::RskPegin);
-        let rsk_pegin_active: Option<RskPeginMonitorState> = self.store.get(&rsk_pegin_key, None)?;
-
-        if let Some(state) = rsk_pegin_active {
-            if state.active {
-                monitors.push(TypesToMonitorStore::RskPegin(state.confirmation_trigger));
             }
         }
 
@@ -572,17 +500,6 @@ impl MonitorStoreApi for MonitorStore {
                 }
 
                 self.store.set(&key, &txs, None)?;
-            }
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(
-                    &key,
-                    RskPeginMonitorState {
-                        active: true,
-                        confirmation_trigger: from,
-                    },
-                    None,
-                )?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, from) => {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
@@ -713,10 +630,6 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
 
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(&key, (false, from), None)?;
-            }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                 let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
@@ -828,17 +741,6 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
-            }
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(
-                    &key,
-                    RskPeginMonitorState {
-                        active: false,
-                        confirmation_trigger: from,
-                    },
-                    None,
-                )?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));

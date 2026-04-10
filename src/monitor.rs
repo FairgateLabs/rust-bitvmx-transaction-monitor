@@ -1,6 +1,6 @@
 use crate::config::{MonitorSettings, MonitorSettingsConfig};
 use crate::errors::MonitorError;
-use crate::helper::{is_a_pegin_tx, is_spending_output, matches_output_pattern};
+use crate::helper::{is_spending_output, matches_output_pattern};
 use crate::types::OutputPatternFilter;
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
 use crate::types::{
@@ -20,7 +20,6 @@ use std::rc::Rc;
 use storage_backend::storage::Storage;
 use tracing::{debug, info};
 
-const INTERNAL_RSK_PEGIN: &str = "INTERNAL_RSK_PEGIN";
 const INTERNAL_SPENDING_UTXO: &str = "INTERNAL_SPENDING_UTXO";
 const INTERNAL_OUTPUT_PATTERN: &str = "INTERNAL_OUTPUT_PATTERN_";
 
@@ -108,7 +107,6 @@ pub trait MonitorApi {
     /// # Arguments
     /// * `data` - The type of monitoring to perform, which can be:
     ///   - Transactions: Monitor multiple transactions
-    ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
     ///   - NewBlock: Monitor new blocks
     ///   - OutputPattern: Monitor transactions matching a specific output pattern
@@ -123,7 +121,6 @@ pub trait MonitorApi {
     /// # Arguments
     /// * `data` - The type of monitoring to cancel, which can be:
     ///   - Transactions: Monitor multiple transactions
-    ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
     ///   - NewBlock: Monitor new blocks
     ///   - OutputPattern: Monitor transactions matching a specific output pattern
@@ -153,7 +150,6 @@ pub trait MonitorApi {
     /// # Arguments
     /// * `data` - The type of monitoring to perform, which can be:
     ///   - Transactions: Monitor multiple transactions
-    ///   - RskPeginTransaction: Monitor RSK pegin transactions
     ///   - SpendingUTXOTransaction: Monitor transactions spending a specific UTXO
     ///   - NewBlock: Monitor new blocks
     ///   - OutputPattern: Monitor transactions matching a specific output pattern
@@ -260,7 +256,6 @@ where
         // If it does, return an error.
         match &data {
             TypesToMonitor::Transactions(_, _, confirmation_trigger)
-            | TypesToMonitor::RskPegin(confirmation_trigger)
             | TypesToMonitor::SpendingUTXOTransaction(_, _, _, confirmation_trigger)
             | TypesToMonitor::OutputPattern(_, confirmation_trigger) => {
                 if let Some(confirmation_trigger) = confirmation_trigger {
@@ -407,14 +402,6 @@ where
                         current_block_hash,
                     )?;
                 }
-                TypesToMonitorStore::RskPegin(number_confirmation_trigger) => {
-                    self.process_rsk_pegin_transaction(
-                        number_confirmation_trigger,
-                        &indexer_best_block,
-                        indexer_best_block_height,
-                        current_block_hash,
-                    )?;
-                }
                 TypesToMonitorStore::SpendingUTXOTransaction(
                     target_tx_id,
                     target_utxo_index,
@@ -453,47 +440,6 @@ where
             .update_monitor_height(indexer_best_block_height)?;
 
         self.store.set_pending_work(false)?;
-
-        Ok(())
-    }
-
-    fn detect_rsk_pegin_txs(&self, full_block: FullBlock) -> Result<Vec<Txid>, MonitorError> {
-        let mut txs_ids = Vec::new();
-
-        for tx in full_block.txs.iter() {
-            if is_a_pegin_tx(tx) {
-                txs_ids.push(tx.compute_txid());
-            }
-        }
-
-        Ok(txs_ids)
-    }
-
-    fn process_rsk_pegin_transaction(
-        &self,
-        number_confirmation_trigger: Option<u32>,
-        indexer_best_block: &FullBlock,
-        indexer_best_block_height: u32,
-        current_block_hash: bitcoin::BlockHash,
-    ) -> Result<(), MonitorError> {
-        let new_txs_ids = self.detect_rsk_pegin_txs(indexer_best_block.clone())?;
-
-        // Add new transactions to monitoring using add_monitor with INTERNAL_RSK_PEGIN context
-        for tx_id in &new_txs_ids {
-            self.store.add_monitor(TypesToMonitor::Transactions(
-                vec![*tx_id],
-                INTERNAL_RSK_PEGIN.to_string(),
-                number_confirmation_trigger,
-            ))?;
-
-            self.process_transaction_monitor(
-                *tx_id,
-                INTERNAL_RSK_PEGIN.to_string(),
-                number_confirmation_trigger,
-                indexer_best_block_height,
-                current_block_hash,
-            )?;
-        }
 
         Ok(())
     }
@@ -576,12 +522,6 @@ where
             if should_send_news {
                 //  news update dispatch based on extra_data pattern
                 match extra_data.as_str() {
-                    ed if ed == INTERNAL_RSK_PEGIN => {
-                        self.store.update_news(
-                            MonitoredTypes::RskPeginTransaction(tx_id),
-                            current_block_hash,
-                        )?;
-                    }
                     ed if ed.starts_with(INTERNAL_OUTPUT_PATTERN) => {
                         let tag_hex = &ed[INTERNAL_OUTPUT_PATTERN.len()..];
                         let tag = hex::decode(tag_hex)
@@ -717,10 +657,6 @@ where
                 MonitoredTypes::Transaction(tx_id, extra_data) => {
                     let status = self.get_tx_status(&tx_id)?;
                     return_news.push(MonitorNews::Transaction(tx_id, status, extra_data));
-                }
-                MonitoredTypes::RskPeginTransaction(tx_id) => {
-                    let status = self.get_tx_status(&tx_id)?;
-                    return_news.push(MonitorNews::RskPeginTransaction(tx_id, status));
                 }
                 MonitoredTypes::SpendingUTXOTransaction(
                     tx_id,
