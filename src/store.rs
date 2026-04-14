@@ -1,7 +1,8 @@
 use crate::{
     errors::MonitorStoreError,
     types::{
-        AckMonitorNews, NewsAck, RskPeginMonitorState, RskPeginNewsEntry, SpendingUTXOMonitor,
+        AckMonitorNews, NewsAck, OutputPatternFilter, OutputPatternNewsEntry,
+        OutputPatternSubscription, SpendingUTXOMonitor,
         SpendingUTXOMonitorEntry, SpendingUTXONewsEntry, TransactionMonitor,
         TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
     },
@@ -20,12 +21,12 @@ enum MonitorKey {
     Transactions(bool),
     SpendingUTXOTransactions(bool),
     PendingWork,
-    RskPegin,
     NewBlock,
     TransactionsNews,
-    RskPeginTransactionsNews,
     SpendingUTXOTransactionsNews,
     NewBlockNews,
+    OutputPatternSubscriptions,
+    OutputPatternTransactionsNews,
 }
 
 enum BlockchainKey {
@@ -35,9 +36,9 @@ enum BlockchainKey {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MonitoredTypes {
     Transaction(Txid, String),
-    RskPeginTransaction(Txid),
     SpendingUTXOTransaction(Txid, u32, String, Txid),
     NewBlock(BlockHash),
+    OutputPatternTransaction(Txid, Vec<u8>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -45,7 +46,7 @@ pub enum TypesToMonitorStore {
     Transaction(Txid, String, Option<u32>),
     SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
     NewBlock,
-    RskPegin(Option<u32>),
+    OutputPattern(OutputPatternFilter, Option<u32>),
 }
 
 pub trait MonitorStoreApi {
@@ -102,14 +103,18 @@ impl MonitorStore {
                 status = if is_active { "active" } else { "inactive" }
             ),
             MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
-            MonitorKey::RskPegin => format!("{prefix}/rsk/pegin"),
             MonitorKey::NewBlock => format!("{prefix}/new/block"),
             MonitorKey::TransactionsNews => format!("{prefix}/tx/news"),
-            MonitorKey::RskPeginTransactionsNews => format!("{prefix}/rsk/tx/news"),
             MonitorKey::SpendingUTXOTransactionsNews => {
                 format!("{prefix}/spending/utxo/tx/news")
             }
             MonitorKey::NewBlockNews => format!("{prefix}/new/block/news"),
+            MonitorKey::OutputPatternSubscriptions => {
+                format!("{prefix}/output_pattern/subscriptions")
+            }
+            MonitorKey::OutputPatternTransactionsNews => {
+                format!("{prefix}/output_pattern/tx/news")
+            }
         }
     }
 
@@ -165,15 +170,6 @@ impl MonitorStoreApi for MonitorStore {
             }
         }
 
-        let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-        let rsk_news: Vec<RskPeginNewsEntry> = self.store.get(&rsk_news_key, None)?.unwrap_or_default();
-
-        for entry in rsk_news {
-            if !entry.ack.acknowledged {
-                news.push(MonitoredTypes::RskPeginTransaction(entry.tx_id));
-            }
-        }
-
         let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
         let spending_news: Vec<SpendingUTXONewsEntry> =
             self.store.get(&spending_news_key, None)?.unwrap_or_default();
@@ -185,6 +181,19 @@ impl MonitorStoreApi for MonitorStore {
                     entry.utxo_index,
                     entry.extra_data,
                     entry.spender_tx_id,
+                ));
+            }
+        }
+
+        let op_news_key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+        let op_news: Vec<OutputPatternNewsEntry> =
+            self.store.get(&op_news_key, None)?.unwrap_or_default();
+
+        for entry in op_news {
+            if !entry.ack.acknowledged {
+                news.push(MonitoredTypes::OutputPatternTransaction(
+                    entry.tx_id,
+                    entry.tag,
                 ));
             }
         }
@@ -244,33 +253,6 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&key, &txs_news, None)?;
             }
-            MonitoredTypes::RskPeginTransaction(tx_id) => {
-                let rsk_news_key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut rsk_news: Vec<RskPeginNewsEntry> =
-                    self.store.get(&rsk_news_key, None)?.unwrap_or_default();
-
-                // Check if news already exists for this tx_id
-                // RskPeginTransaction doesn't have extra_data, so we only check by tx_id
-                let is_new_news = rsk_news.iter().position(|e| e.tx_id == tx_id);
-
-                match is_new_news {
-                    None => rsk_news.push(RskPeginNewsEntry {
-                        tx_id,
-                        ack: NewsAck::new(current_block_hash, false),
-                    }),
-                    Some(pos) => {
-                        if rsk_news[pos].ack.block_hash != current_block_hash {
-                            // Replace the notification with the new block hash
-                            rsk_news[pos] = RskPeginNewsEntry {
-                                tx_id,
-                                ack: NewsAck::new(current_block_hash, false),
-                            };
-                        }
-                    }
-                }
-
-                self.store.set(&rsk_news_key, &rsk_news, None)?;
-            }
             MonitoredTypes::SpendingUTXOTransaction(
                 tx_id,
                 utxo_index,
@@ -311,6 +293,36 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
+            MonitoredTypes::OutputPatternTransaction(tx_id, tag) => {
+                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+                let mut op_news: Vec<OutputPatternNewsEntry> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+
+                let existing = op_news
+                    .iter()
+                    .position(|e| e.tx_id == tx_id && e.tag == tag);
+
+                match existing {
+                    None => {
+                        op_news.push(OutputPatternNewsEntry {
+                            tx_id,
+                            tag,
+                            ack: NewsAck::new(current_block_hash, false),
+                        });
+                    }
+                    Some(pos) => {
+                        if op_news[pos].ack.block_hash != current_block_hash {
+                            op_news[pos] = OutputPatternNewsEntry {
+                                tx_id,
+                                tag,
+                                ack: NewsAck::new(current_block_hash, false),
+                            };
+                        }
+                    }
+                }
+
+                self.store.set(&key, &op_news, None)?;
+            }
             MonitoredTypes::NewBlock(hash) => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
 
@@ -348,26 +360,6 @@ impl MonitorStoreApi for MonitorStore {
                     self.store.set(&key, &txs_news, None)?;
                 }
             }
-            AckMonitorNews::RskPeginTransaction(tx_id) => {
-                let key = self.get_key(MonitorKey::RskPeginTransactionsNews);
-                let mut txs_news: Vec<RskPeginNewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
-
-                //TODO: THIS SHOULD change, we need to start sending context to ack a news.
-                // Acknowledge all news entries for this tx_id
-                // RskPeginTransaction doesn't have extra_data, but we acknowledge all entries for consistency
-                let mut found_any = false;
-                for entry in txs_news.iter_mut() {
-                    if entry.tx_id == tx_id {
-                        entry.ack.acknowledged = true;
-                        found_any = true;
-                    }
-                }
-
-                if found_any {
-                    self.store.set(&key, &txs_news, None)?;
-                }
-            }
             AckMonitorNews::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
                 let mut txs_news: Vec<SpendingUTXONewsEntry> =
@@ -379,6 +371,19 @@ impl MonitorStoreApi for MonitorStore {
                 }) {
                     entry.ack.acknowledged = true;
                     self.store.set(&key, &txs_news, None)?;
+                }
+            }
+            AckMonitorNews::OutputPatternTransaction(tx_id, tag) => {
+                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+                let mut op_news: Vec<OutputPatternNewsEntry> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+
+                if let Some(entry) = op_news
+                    .iter_mut()
+                    .find(|e| e.tx_id == tx_id && e.tag == tag)
+                {
+                    entry.ack.acknowledged = true;
+                    self.store.set(&key, &op_news, None)?;
                 }
             }
             AckMonitorNews::NewBlock => {
@@ -412,16 +417,6 @@ impl MonitorStoreApi for MonitorStore {
             }
         }
 
-        // Get RSK pegin monitor (if active)
-        let rsk_pegin_key = self.get_key(MonitorKey::RskPegin);
-        let rsk_pegin_active: Option<RskPeginMonitorState> = self.store.get(&rsk_pegin_key, None)?;
-
-        if let Some(state) = rsk_pegin_active {
-            if state.active {
-                monitors.push(TypesToMonitorStore::RskPegin(state.confirmation_trigger));
-            }
-        }
-
         // Get active spending UTXO transactions from list
         let spending_utxo_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
         let spending_utxos: Vec<SpendingUTXOMonitor> =
@@ -436,6 +431,18 @@ impl MonitorStoreApi for MonitorStore {
                     entry.confirmation_trigger,
                 ));
             }
+        }
+
+        // Get output pattern subscriptions
+        let op_key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+        let op_subscriptions: Vec<OutputPatternSubscription> =
+            self.store.get(&op_key, None)?.unwrap_or_default();
+
+        for sub in op_subscriptions {
+            monitors.push(TypesToMonitorStore::OutputPattern(
+                sub.filter,
+                sub.confirmation_trigger,
+            ));
         }
 
         // Get new block monitor
@@ -494,17 +501,6 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&key, &txs, None)?;
             }
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(
-                    &key,
-                    RskPeginMonitorState {
-                        active: true,
-                        confirmation_trigger: from,
-                    },
-                    None,
-                )?;
-            }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, from) => {
                 let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                 let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key, None)?.unwrap_or_default();
@@ -544,6 +540,23 @@ impl MonitorStoreApi for MonitorStore {
                 }
 
                 self.store.set(&key, &txs, None)?;
+            }
+            TypesToMonitor::OutputPattern(filter, confirmation_trigger) => {
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let mut subs: Vec<OutputPatternSubscription> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+
+                // Add or update subscription by filter identity
+                if let Some(existing) = subs.iter_mut().find(|s| s.filter == filter) {
+                    existing.confirmation_trigger = confirmation_trigger;
+                } else {
+                    subs.push(OutputPatternSubscription {
+                        filter,
+                        confirmation_trigger,
+                    });
+                }
+
+                self.store.set(&key, &subs, None)?;
             }
             TypesToMonitor::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlock);
@@ -617,10 +630,6 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
 
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(&key, (false, from), None)?;
-            }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                 let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
@@ -681,6 +690,13 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
+            TypesToMonitor::OutputPattern(filter, _) => {
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let mut subs: Vec<OutputPatternSubscription> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+                subs.retain(|s| s.filter != filter);
+                self.store.set(&key, &subs, None)?;
+            }
             TypesToMonitor::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlock);
                 self.store.set(&key, false, None)?;
@@ -726,17 +742,6 @@ impl MonitorStoreApi for MonitorStore {
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
             }
-            TypesToMonitor::RskPegin(from) => {
-                let key = self.get_key(MonitorKey::RskPegin);
-                self.store.set(
-                    &key,
-                    RskPeginMonitorState {
-                        active: false,
-                        confirmation_trigger: from,
-                    },
-                    None,
-                )?;
-            }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                 let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
@@ -773,6 +778,13 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&active_key, &active_txs, None)?;
                 self.store.set(&inactive_key, &inactive_txs, None)?;
+            }
+            TypesToMonitor::OutputPattern(filter, _) => {
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let mut subs: Vec<OutputPatternSubscription> =
+                    self.store.get(&key, None)?.unwrap_or_default();
+                subs.retain(|s| s.filter != filter);
+                self.store.set(&key, &subs, None)?;
             }
             TypesToMonitor::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlock);
