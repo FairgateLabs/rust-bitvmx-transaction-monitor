@@ -1,11 +1,13 @@
 use anyhow::Result;
+use bitvmx_transaction_monitor::types::OutputPatternFilter;
 
 use crate::utils::{
-    ack_rsk_pegin_monitor, ack_spending_utxo_monitor, ack_tx_monitor, assert_rsk_pegin_news,
-    assert_spending_utxo_news, assert_tx_news, clear_output, create_and_send_a_new_transaction,
-    create_and_send_funding_transaction, create_and_send_rsk_pegin_transaction,
-    create_and_send_spending_transaction, create_test_setup, mine_blocks, monitor_rsk_pegin,
-    monitor_spending_utxo, monitor_tx, sync_monitor,
+    ack_output_pattern_monitor, ack_spending_utxo_monitor, ack_tx_monitor,
+    assert_output_pattern_news, assert_spending_utxo_news, assert_tx_news, clear_output,
+    create_and_send_a_new_transaction, create_and_send_funding_transaction,
+    create_and_send_output_pattern_transaction, create_and_send_spending_transaction,
+    create_test_setup, mine_blocks, monitor_output_pattern, monitor_spending_utxo, monitor_tx,
+    sync_monitor,
 };
 
 mod utils;
@@ -184,45 +186,52 @@ fn test_spending_utxo_monitor_auto_deactivates_at_max_confirmations() -> Result<
     Ok(())
 }
 
-/// Test that verifies the RskPeginTransaction monitor automatically deactivates after
+/// Test that verifies the OutputPattern monitor automatically deactivates after
 /// reaching the maximum number of confirmations (max_monitoring_confirmations).
 ///
 /// This test ensures that:
-/// 1. RSK pegin transactions can be monitored
-/// 2. When an RSK pegin transaction is detected, the monitor generates news for each confirmation up to max_monitoring_confirmations
+/// 1. Output pattern transactions can be monitored
+/// 2. When an output pattern transaction is detected, the monitor generates news for each confirmation up to max_monitoring_confirmations
 /// 3. After reaching max_monitoring_confirmations, the monitor automatically deactivates
 /// 4. No further news is generated even when additional blocks are mined
 ///
 /// Test flow:
-/// - Starts monitoring for RSK pegin transactions
-/// - Creates and broadcasts an RSK pegin transaction
+/// - Starts monitoring for output pattern transactions
+/// - Creates and broadcasts an output pattern transaction
 /// - Verifies news is generated for each confirmation level
 /// - Verifies automatic deactivation occurs at max_monitoring_confirmations
 ///
 /// Note: The test uses 10 confirmations (instead of the default 100) for faster test execution.
 #[test]
-fn test_rsk_pegin_monitor_auto_deactivates_at_max_confirmations() -> Result<(), anyhow::Error> {
+fn test_output_pattern_monitor_auto_deactivates_at_max_confirmations() -> Result<(), anyhow::Error> {
     let max_monitoring_confirmations = 10;
 
     let max_confirmations = max_monitoring_confirmations - 1;
     let (bitcoin_client, monitor, bitcoind) = create_test_setup(max_monitoring_confirmations)?;
 
-    // Step 1: Start monitoring for RSK pegin transactions
-    // The monitor will automatically detect any RSK pegin transactions in new blocks
-    monitor_rsk_pegin(&monitor, None)?;
+    let filter = OutputPatternFilter {
+        output_index: 0,
+        tag: vec![0xde, 0xad],
+        max_outputs: None,
+    };
 
-    // Step 2: Create and send an RSK pegin transaction
+    // Step 1: Start monitoring for output pattern transactions
+    // The monitor will automatically detect any matching transactions in new blocks
+    monitor_output_pattern(&monitor, filter.clone(), None)?;
+
+    // Step 2: Create and send an output pattern transaction
     // This transaction will be automatically detected by the monitor when it's included in a block
-    let (_pegin_transaction, pegin_txid) = create_and_send_rsk_pegin_transaction(&bitcoin_client)?;
+    let (_op_transaction, op_txid) =
+        create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
 
-    // Step 3: Mine a block to confirm the RSK pegin transaction
+    // Step 3: Mine a block to confirm the output pattern transaction
     // This gives the transaction its first confirmation and triggers detection
     sync_monitor(&monitor)?;
 
     // Step 4: Iterate through each confirmation from 1 to max_confirmations (9)
     // For each confirmation level:
-    // - The monitor should generate news about the RSK pegin transaction's confirmation status
-    // - We verify the news contains the correct information (txid, confirmations)
+    // - The monitor should generate news about the output pattern transaction's confirmation status
+    // - We verify the news contains the correct information (txid, tag, confirmations)
     // - We acknowledge the news to clear it from the queue
     // - We mine a new block to advance the chain and increase confirmations
     // - We tick the monitor to process the new block and update confirmation counts
@@ -235,14 +244,15 @@ fn test_rsk_pegin_monitor_auto_deactivates_at_max_confirmations() -> Result<(), 
             i
         );
 
-        // Verify the news contains correct information about the RSK pegin transaction
-        assert_rsk_pegin_news(
-            &news[0], pegin_txid, // The RSK pegin transaction ID
-            i,          // Current confirmation count
+        // Verify the news contains correct information about the output pattern transaction
+        assert_output_pattern_news(
+            &news[0], op_txid,       // The output pattern transaction ID
+            &filter.tag, // The expected tag
+            i,           // Current confirmation count
         )?;
 
         // Acknowledge the news to remove it from the queue
-        ack_rsk_pegin_monitor(&monitor, pegin_txid)?;
+        ack_output_pattern_monitor(&monitor, op_txid, filter.tag.clone())?;
 
         // Mine a new block to increase the confirmation count
         mine_blocks(&bitcoin_client, 1)?;

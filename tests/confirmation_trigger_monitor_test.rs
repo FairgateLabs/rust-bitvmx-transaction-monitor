@@ -1,11 +1,14 @@
 use anyhow::Result;
 
+use bitvmx_transaction_monitor::types::OutputPatternFilter;
+
 use crate::utils::{
-    ack_rsk_pegin_monitor, ack_spending_utxo_monitor, ack_tx_monitor, assert_rsk_pegin_news,
-    assert_spending_utxo_news, assert_tx_news, clear_output, create_and_send_a_new_transaction,
-    create_and_send_funding_transaction, create_and_send_rsk_pegin_transaction,
-    create_and_send_spending_transaction, create_test_setup, mine_blocks, monitor_rsk_pegin,
-    monitor_spending_utxo, monitor_tx, sync_monitor,
+    ack_output_pattern_monitor, ack_spending_utxo_monitor, ack_tx_monitor,
+    assert_output_pattern_news, assert_spending_utxo_news, assert_tx_news, clear_output,
+    create_and_send_a_new_transaction, create_and_send_funding_transaction,
+    create_and_send_output_pattern_transaction, create_and_send_spending_transaction,
+    create_test_setup, mine_blocks, monitor_output_pattern, monitor_spending_utxo, monitor_tx,
+    sync_monitor,
 };
 
 mod utils;
@@ -226,7 +229,7 @@ fn test_spending_utxo_monitor_confirmation_trigger() -> Result<(), anyhow::Error
     Ok(())
 }
 
-/// Test that verifies the RskPeginTransaction monitor sends news only once when using confirmation_trigger.
+/// Test that verifies the OutputPattern monitor sends news only once when using confirmation_trigger.
 ///
 /// This test ensures that:
 /// 1. When monitoring with confirmation_trigger Some(3), news is sent only when confirmations reach 3
@@ -234,27 +237,34 @@ fn test_spending_utxo_monitor_confirmation_trigger() -> Result<(), anyhow::Error
 /// 3. The monitor remains active (does not deactivate) after the trigger is sent
 ///
 /// Test flow:
-/// - Starts monitoring for RSK pegin transactions with confirmation_trigger Some(3)
-/// - Creates and broadcasts an RSK pegin transaction
+/// - Starts monitoring for output pattern transactions with confirmation_trigger Some(3)
+/// - Creates and broadcasts an output pattern transaction
 /// - Mines blocks to reach 3 confirmations
 /// - Verifies news is sent at confirmation 3
 /// - Mines additional blocks and verifies no additional news is sent
 #[test]
-fn test_rsk_pegin_monitor_confirmation_trigger() -> Result<(), anyhow::Error> {
+fn test_output_pattern_monitor_confirmation_trigger() -> Result<(), anyhow::Error> {
     let confirmation_trigger = 3;
     let max_monitoring_confirmations = 10; // Higher than trigger to ensure monitor doesn't deactivate
     let (bitcoin_client, monitor, bitcoind) = create_test_setup(max_monitoring_confirmations)?;
 
-    // Step 1: Start monitoring for RSK pegin transactions with confirmation_trigger Some(3)
-    // News will only be sent when an RSK pegin transaction reaches 3 confirmations
-    monitor_rsk_pegin(&monitor, Some(confirmation_trigger))?;
+    let filter = OutputPatternFilter {
+        output_index: 0,
+        tag: vec![0xde, 0xad],
+        max_outputs: None,
+    };
 
-    // Step 2: Create and send an RSK pegin transaction
-    // Note: create_and_send_rsk_pegin_transaction mines 1 block, so the transaction starts with 1 confirmation
-    let (_pegin_transaction, pegin_txid) = create_and_send_rsk_pegin_transaction(&bitcoin_client)?;
+    // Step 1: Start monitoring for output pattern transactions with confirmation_trigger Some(3)
+    // News will only be sent when an output pattern transaction reaches 3 confirmations
+    monitor_output_pattern(&monitor, filter.clone(), Some(confirmation_trigger))?;
+
+    // Step 2: Create and send an output pattern transaction
+    // Note: create_and_send_output_pattern_transaction mines 1 block, so the transaction starts with 1 confirmation
+    let (_op_transaction, op_txid) =
+        create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
 
     // Step 3: Sync the monitor to detect the transaction
-    // At this point, the transaction has 1 confirmation (from the block mined in create_and_send_rsk_pegin_transaction)
+    // At this point, the transaction has 1 confirmation (from the block mined in create_and_send_output_pattern_transaction)
     sync_monitor(&monitor)?;
 
     // Step 4: Verify no news before reaching confirmation_trigger
@@ -291,10 +301,10 @@ fn test_rsk_pegin_monitor_confirmation_trigger() -> Result<(), anyhow::Error> {
         "Expected exactly 1 news item at confirmation {}",
         confirmation_trigger
     );
-    assert_rsk_pegin_news(&news[0], pegin_txid, confirmation_trigger)?;
+    assert_output_pattern_news(&news[0], op_txid, &filter.tag, confirmation_trigger)?;
 
     // Step 8: Acknowledge the news
-    ack_rsk_pegin_monitor(&monitor, pegin_txid)?;
+    ack_output_pattern_monitor(&monitor, op_txid, filter.tag.clone())?;
 
     // Step 9: Mine additional blocks (4, 5, 6 confirmations)
     // After the trigger is sent, no more news should be generated

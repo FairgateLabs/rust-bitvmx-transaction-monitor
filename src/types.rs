@@ -3,6 +3,22 @@ use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// Generic filter for detecting transactions that match a specific output pattern.
+///
+/// Matches transactions where a specific output is an OP_RETURN whose pushed data starts
+/// with the given `tag` bytes. Optionally enforces an upper bound on the total number of
+/// outputs in the transaction.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct OutputPatternFilter {
+    /// Index of the output to inspect (0-based).
+    pub output_index: usize,
+    /// Byte prefix that the OP_RETURN pushed data must start with.
+    pub tag: Vec<u8>,
+    /// If `Some(n)`, the transaction must have at most `n` outputs.
+    pub max_outputs: Option<usize>,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransactionStore {
     pub tx_id: Txid,
@@ -48,9 +64,10 @@ pub enum TypesToMonitor {
     // - Option<u32>: The number of confirmations to wait for receive news about the transaction
     SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
 
-    // Rsk pegin transaction to monitor
-    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
-    RskPegin(Option<u32>),
+    // Generic output pattern transaction to monitor
+    // - OutputPatternFilter: The filter describing which output/tag to match
+    // - Option<u32>: The number of confirmations to wait for before emitting news
+    OutputPattern(OutputPatternFilter, Option<u32>),
 
     // New block to monitor
     // - BlockHeight: The block height to monitor
@@ -72,10 +89,11 @@ pub enum MonitorNews {
     // - String: The context of the transaction previously sent to the monitor
     SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
 
-    // Rsk pegin transaction news
+    // Generic output pattern transaction news
     // - Txid: The transaction ID
     // - TransactionStatus: The information of the transaction indexed
-    RskPeginTransaction(Txid, TransactionStatus),
+    // - Vec<u8>: The tag that was matched (identifies which pattern triggered)
+    OutputPatternTransaction(Txid, TransactionStatus, Vec<u8>),
 
     // New block news
     // - BlockHeight: The block height
@@ -90,9 +108,10 @@ pub enum AckMonitorNews {
     // - String: The context of the transaction
     Transaction(Txid, String),
 
-    // Rsk pegin transaction news
+    // Generic output pattern transaction news
     // - Txid: The transaction ID
-    RskPeginTransaction(Txid),
+    // - Vec<u8>: The tag that was matched
+    OutputPatternTransaction(Txid, Vec<u8>),
 
     // Spending UTXO transaction news
     // - Txid: The transaction ID
@@ -131,13 +150,6 @@ impl NewsAck {
 pub struct TransactionNewsEntry {
     pub tx_id: Txid,
     pub extra_data: String,
-    pub ack: NewsAck,
-}
-
-/// RskPegin transaction news entry stored in storage
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RskPeginNewsEntry {
-    pub tx_id: Txid,
     pub ack: NewsAck,
 }
 
@@ -184,10 +196,19 @@ pub struct SpendingUTXOMonitor {
     pub entries: Vec<SpendingUTXOMonitorEntry>,
 }
 
-/// RskPegin monitor entry (active, confirmation_trigger, search_in_mempool)
+/// A single active output-pattern subscription
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RskPeginMonitorEntry {
-    pub active: bool,
+pub struct OutputPatternSubscription {
+    pub filter: OutputPatternFilter,
     pub confirmation_trigger: Option<u32>,
     pub search_in_mempool: bool,
+}
+
+/// Output-pattern transaction news entry stored in storage
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct OutputPatternNewsEntry {
+    pub tx_id: Txid,
+    /// The tag bytes of the filter that matched this transaction
+    pub tag: Vec<u8>,
+    pub ack: NewsAck,
 }

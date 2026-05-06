@@ -3,6 +3,7 @@ use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, MonitoredTypes},
     types::AckMonitorNews,
 };
+
 use std::{rc::Rc, str::FromStr};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
@@ -15,8 +16,8 @@ mod utils;
 /// 2. Transactions News
 ///    - Can add transactions to news
 ///    - Can acknowledge and remove it
-/// 3. RSK Pegin Transaction News
-///    - Can add an RSK pegin transaction
+/// 3. Output Pattern Transaction News
+///    - Can add an output pattern transaction
 ///    - Can acknowledge and remove it
 /// 4. Spending UTXO Transaction News
 ///    - Can add a spending UTXO transaction
@@ -84,16 +85,17 @@ fn news_test() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
-    // // Test RSK pegin transaction news
-    // let rsk_tx_news = MonitoredTypes::RskPeginTransaction(tx.compute_txid());
-    // store.update_news(rsk_tx_news.clone(), block_hash)?;
-    // let news = store.get_news()?;
-    // assert_eq!(news.len(), 1);
-    // assert_eq!(news[0], rsk_tx_news);
+    // Test output pattern transaction news
+    let op_tag = vec![0xde, 0xad];
+    let op_tx_news = MonitoredTypes::OutputPatternTransaction(tx.compute_txid(), op_tag.clone());
+    store.update_news(op_tx_news.clone(), block_hash)?;
+    let news = store.get_news()?;
+    assert_eq!(news.len(), 1);
+    assert_eq!(news[0], op_tx_news);
 
-    // store.ack_news(AckMonitorNews::RskPeginTransaction(tx.compute_txid()))?;
-    // let news = store.get_news()?;
-    // assert_eq!(news.len(), 0);
+    store.ack_news(AckMonitorNews::OutputPatternTransaction(tx.compute_txid(), op_tag))?;
+    let news = store.get_news()?;
+    assert_eq!(news.len(), 0);
 
     // // Test spending UTXO transaction news
     // let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(
@@ -174,14 +176,19 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
         context_data.to_string(),
     ))?;
 
-    // Test duplicate RSK pegin transaction news
-    let rsk_tx_news = MonitoredTypes::RskPeginTransaction(tx.compute_txid());
-    store.update_news(rsk_tx_news.clone(), block_hash)?;
-    store.update_news(rsk_tx_news.clone(), block_hash)?; // Try adding same RSK tx again
+    // Test duplicate output pattern transaction news
+    let op_tag = vec![0xde, 0xad];
+    let op_tx_news =
+        MonitoredTypes::OutputPatternTransaction(tx.compute_txid(), op_tag.clone());
+    store.update_news(op_tx_news.clone(), block_hash)?;
+    store.update_news(op_tx_news.clone(), block_hash)?; // Try adding same output pattern tx again
     let news = store.get_news()?;
-    assert_eq!(news.len(), 1); // Should have only RSK tx
-    assert!(news.contains(&rsk_tx_news));
-    store.ack_news(AckMonitorNews::RskPeginTransaction(tx.compute_txid()))?;
+    assert_eq!(news.len(), 1); // Should have only output pattern tx
+    assert!(news.contains(&op_tx_news));
+    store.ack_news(AckMonitorNews::OutputPatternTransaction(
+        tx.compute_txid(),
+        op_tag,
+    ))?;
 
     // Test duplicate spending UTXO transaction news
     let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(
@@ -317,24 +324,34 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
-    // Test multiple RSK pegin transactions
-    let rsk_tx1 = MonitoredTypes::RskPeginTransaction(tx1.compute_txid());
-    let rsk_tx2 = MonitoredTypes::RskPeginTransaction(tx2.compute_txid());
-    let rsk_tx3 = MonitoredTypes::RskPeginTransaction(tx3.compute_txid());
+    // Test multiple output pattern transactions
+    let op_tag = vec![0xde, 0xad];
+    let op_tx1 = MonitoredTypes::OutputPatternTransaction(tx1.compute_txid(), op_tag.clone());
+    let op_tx2 = MonitoredTypes::OutputPatternTransaction(tx2.compute_txid(), op_tag.clone());
+    let op_tx3 = MonitoredTypes::OutputPatternTransaction(tx3.compute_txid(), op_tag.clone());
 
-    store.update_news(rsk_tx1.clone(), block_hash)?;
-    store.update_news(rsk_tx2.clone(), block_hash)?;
-    store.update_news(rsk_tx3.clone(), block_hash)?;
+    store.update_news(op_tx1.clone(), block_hash)?;
+    store.update_news(op_tx2.clone(), block_hash)?;
+    store.update_news(op_tx3.clone(), block_hash)?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 3);
-    assert!(news.contains(&rsk_tx1));
-    assert!(news.contains(&rsk_tx2));
-    assert!(news.contains(&rsk_tx3));
+    assert!(news.contains(&op_tx1));
+    assert!(news.contains(&op_tx2));
+    assert!(news.contains(&op_tx3));
 
-    store.ack_news(AckMonitorNews::RskPeginTransaction(tx1.compute_txid()))?;
-    store.ack_news(AckMonitorNews::RskPeginTransaction(tx2.compute_txid()))?;
-    store.ack_news(AckMonitorNews::RskPeginTransaction(tx3.compute_txid()))?;
+    store.ack_news(AckMonitorNews::OutputPatternTransaction(
+        tx1.compute_txid(),
+        op_tag.clone(),
+    ))?;
+    store.ack_news(AckMonitorNews::OutputPatternTransaction(
+        tx2.compute_txid(),
+        op_tag.clone(),
+    ))?;
+    store.ack_news(AckMonitorNews::OutputPatternTransaction(
+        tx3.compute_txid(),
+        op_tag,
+    ))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);

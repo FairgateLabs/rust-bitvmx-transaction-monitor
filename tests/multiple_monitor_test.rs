@@ -1,12 +1,13 @@
 use anyhow::Result;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClientApi;
-use bitvmx_transaction_monitor::types::{MonitorNews, TypesToMonitor};
+use bitvmx_transaction_monitor::types::{MonitorNews, OutputPatternFilter, TypesToMonitor};
 use tracing::info;
 
 use crate::utils::{
     clear_output, create_and_send_a_new_transaction, create_and_send_funding_transaction,
-    create_and_send_rsk_pegin_transaction, create_and_send_spending_transaction, create_test_setup,
-    mine_blocks, monitor_rsk_pegin, monitor_spending_utxo, monitor_tx, sync_monitor,
+    create_and_send_output_pattern_transaction, create_and_send_spending_transaction,
+    create_test_setup, mine_blocks, monitor_output_pattern, monitor_spending_utxo, monitor_tx,
+    sync_monitor,
 };
 
 mod utils;
@@ -16,11 +17,11 @@ mod utils;
 /// This test creates monitors for different transaction types:
 /// - Transactions: 4 monitors (2 with trigger, 2 without trigger)
 /// - SpendingUTXOTransaction: 4 monitors (2 with trigger, 2 without trigger)
-/// - RskPegin: 1 monitor (monitors all RSK pegin transactions, with trigger)
+/// - OutputPattern: 1 monitor (monitors all output pattern transactions, with trigger)
 /// - NewBlock: 1 monitor (monitors all new blocks)
 ///
 /// The test then:
-/// 1. Creates all the necessary transactions (4 regular tx, 4 funding tx, 4 RSK pegin tx)
+/// 1. Creates all the necessary transactions (4 regular tx, 4 funding tx, 4 output pattern tx)
 /// 2. Sets up all monitors
 /// 3. Creates spending transactions for the funding transactions
 /// 4. Mines blocks to confirm transactions and trigger news
@@ -32,6 +33,12 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     let small_confirmation_trigger = 1;
     let max_monitoring_confirmations = 40;
     let (bitcoin_client, monitor, bitcoind) = create_test_setup(max_monitoring_confirmations)?;
+
+    let filter = OutputPatternFilter {
+        output_index: 0,
+        tag: vec![0xde, 0xad],
+        max_outputs: None,
+    };
 
     // ============================================================================
     // PART 1: Create all transactions
@@ -49,11 +56,11 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     let (_, funding_txid_3, funding_vout_3) = create_and_send_funding_transaction(&bitcoin_client)?;
     let (_, funding_txid_4, funding_vout_4) = create_and_send_funding_transaction(&bitcoin_client)?;
 
-    // Create 4 RSK pegin transactions
-    let (_, rsk_pegin_txid_1) = create_and_send_rsk_pegin_transaction(&bitcoin_client)?;
-    let (_, rsk_pegin_txid_2) = create_and_send_rsk_pegin_transaction(&bitcoin_client)?;
-    let (_, rsk_pegin_txid_3) = create_and_send_rsk_pegin_transaction(&bitcoin_client)?;
-    let (_, rsk_pegin_txid_4) = create_and_send_rsk_pegin_transaction(&bitcoin_client)?;
+    // Create 4 output pattern transactions
+    let (_, op_txid_1) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
+    let (_, op_txid_2) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
+    let (_, op_txid_3) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
+    let (_, op_txid_4) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
 
     // ============================================================================
     // PART 2: Set up all monitors
@@ -105,8 +112,8 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
         None,
     )?;
 
-    // Monitor RskPegin: single monitor that detects all RSK pegin transactions (with trigger)
-    monitor_rsk_pegin(&monitor, Some(small_confirmation_trigger))?;
+    // Monitor OutputPattern: single monitor that detects all matching transactions (with trigger)
+    monitor_output_pattern(&monitor, filter.clone(), Some(small_confirmation_trigger))?;
 
     // Monitor NewBlock: single monitor that detects all new blocks
     monitor.monitor(TypesToMonitor::NewBlock, false)?;
@@ -136,7 +143,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     // Count news items by type
     let mut tx_news_count = Vec::new();
     let mut spending_utxo_news_count = Vec::new();
-    let mut rsk_pegin_news_count = Vec::new();
+    let mut output_pattern_news_count = Vec::new();
     let mut new_block_news_count = 0;
 
     for news_item in &news {
@@ -147,8 +154,8 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
             MonitorNews::SpendingUTXOTransaction(_, _, _, _) => {
                 spending_utxo_news_count.push(news_item);
             }
-            MonitorNews::RskPeginTransaction(_, _) => {
-                rsk_pegin_news_count.push(news_item);
+            MonitorNews::OutputPatternTransaction(_, _, _) => {
+                output_pattern_news_count.push(news_item);
             }
             MonitorNews::NewBlock(_, _) => {
                 new_block_news_count += 1;
@@ -159,7 +166,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     // After 1 confirmation, we expect:
     // - 2 Transaction news (only the 2 without trigger appear immediately)
     // - 2 SpendingUTXO news (only the 2 without trigger appear immediately)
-    // - 4 RskPegin news (all 4 RSK pegin transactions are detected by the single monitor)
+    // - 4 OutputPattern news (all 4 output pattern transactions are detected by the single monitor)
     // - 1 NewBlock news (1 block was mined after the initial setup)
     assert_eq!(
         tx_news_count.len(),
@@ -172,9 +179,9 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
         "There should be 2 SpendingUTXO news items (only those without trigger)"
     );
     assert_eq!(
-        rsk_pegin_news_count.len(),
+        output_pattern_news_count.len(),
         4,
-        "There should be 4 RskPegin news items (all RSK pegin transactions)"
+        "There should be 4 OutputPattern news items (all output pattern transactions)"
     );
     assert_eq!(
         new_block_news_count, 1,
@@ -190,13 +197,8 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
         (spender_txid_3, "spending_utxo_context_3_no_trigger"),
         (spender_txid_4, "spending_utxo_context_4_no_trigger"),
     ];
-    // All RSK pegin transactions should be detected by the single RskPegin monitor
-    let rsk_pegin_news_should_be = vec![
-        (rsk_pegin_txid_1, "rsk_pegin_context_1_with_trigger"),
-        (rsk_pegin_txid_2, "rsk_pegin_context_2_with_trigger"),
-        (rsk_pegin_txid_3, "rsk_pegin_context_3_with_trigger"),
-        (rsk_pegin_txid_4, "rsk_pegin_context_4_with_trigger"),
-    ];
+    // All output pattern transactions should be detected by the single OutputPattern monitor
+    let op_news_should_be = vec![op_txid_1, op_txid_2, op_txid_3, op_txid_4];
 
     // Verify that all expected news items are present by matching txids and contexts.
     // For each news item found, remove the matching entry from the "should be" arrays.
@@ -238,19 +240,19 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
         spending_utxo_news_should_be
     );
 
-    let mut rsk_pegin_news_should_be = rsk_pegin_news_should_be.clone();
+    let mut op_news_should_be = op_news_should_be.clone();
 
-    for news in &rsk_pegin_news_count {
-        if let MonitorNews::RskPeginTransaction(txid, _) = news {
-            if let Some(pos) = rsk_pegin_news_should_be.iter().position(|x| x.0 == *txid) {
-                rsk_pegin_news_should_be.remove(pos);
+    for news in &output_pattern_news_count {
+        if let MonitorNews::OutputPatternTransaction(txid, _, _) = news {
+            if let Some(pos) = op_news_should_be.iter().position(|x| x == txid) {
+                op_news_should_be.remove(pos);
             }
         }
     }
     assert!(
-        rsk_pegin_news_should_be.is_empty(),
-        "Not all expected RskPegin news items were received, remaining: {:?}",
-        rsk_pegin_news_should_be
+        op_news_should_be.is_empty(),
+        "Not all expected OutputPattern news items were received, remaining: {:?}",
+        op_news_should_be
     );
 
     // Verify that the NewBlock news matches the current best block height

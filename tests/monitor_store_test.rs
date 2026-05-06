@@ -1,7 +1,7 @@
 use bitcoin::{absolute::LockTime, Transaction, Txid};
 use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
-    types::TypesToMonitor,
+    types::{OutputPatternFilter, TypesToMonitor},
 };
 use std::{rc::Rc, str::FromStr};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -11,7 +11,7 @@ mod utils;
 /// This test verifies the functionality of the MonitorStore implementation.
 /// It tests the following operations:
 /// 1. Saving different types of transaction monitors (Transactions,
-///    RskPeginTransaction, SpendingUTXOTransaction, NewBlock)
+///    OutputPattern, SpendingUTXOTransaction, NewBlock)
 /// 2. Removing monitors
 #[test]
 fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
@@ -57,15 +57,20 @@ fn test_monitor_store_save_get_remove() -> Result<(), anyhow::Error> {
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 0);
 
-    // 3. Test RskPeginTransaction
-    let rsk_monitor = TypesToMonitor::RskPegin(None);
-    store.add_monitor(rsk_monitor.clone(), false)?;
+    // 3. Test OutputPattern
+    let filter = OutputPatternFilter {
+        output_index: 0,
+        tag: vec![0xde, 0xad],
+        max_outputs: None,
+    };
+    let op_monitor = TypesToMonitor::OutputPattern(filter.clone(), None);
+    store.add_monitor(op_monitor.clone(), false)?;
     let monitors = store.get_monitors()?;
     assert!(matches!(
         monitors[0].clone(),
-        TypesToMonitorStore::RskPegin(_, _)
+        TypesToMonitorStore::OutputPattern(f, _, _) if f == filter
     ));
-    store.deactivate_monitor(rsk_monitor.clone())?;
+    store.deactivate_monitor(op_monitor.clone())?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 0);
 
@@ -325,7 +330,7 @@ fn test_active_inactive_monitor_separation() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// This test verifies active/inactive separation for RskPeginTransaction and NewBlock monitors
+/// This test verifies active/inactive separation for OutputPattern and NewBlock monitors
 #[test]
 fn test_active_inactive_boolean_monitors() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
@@ -333,32 +338,38 @@ fn test_active_inactive_boolean_monitors() -> Result<(), anyhow::Error> {
     let storage = Rc::new(Storage::new(&config)?);
     let store = MonitorStore::new(storage)?;
 
-    // Test RskPeginTransaction
-    store.add_monitor(TypesToMonitor::RskPegin(None), false)?;
+    let filter = OutputPatternFilter {
+        output_index: 0,
+        tag: vec![0xde, 0xad],
+        max_outputs: None,
+    };
+
+    // Test OutputPattern
+    store.add_monitor(TypesToMonitor::OutputPattern(filter.clone(), None), false)?;
     let monitors = store.get_monitors()?;
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_, _))));
+        .any(|m| matches!(m, TypesToMonitorStore::OutputPattern(_, _, _))));
 
-    store.deactivate_monitor(TypesToMonitor::RskPegin(None))?;
+    store.deactivate_monitor(TypesToMonitor::OutputPattern(filter.clone(), None))?;
     let monitors = store.get_monitors()?;
     assert!(!monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_, _))));
+        .any(|m| matches!(m, TypesToMonitorStore::OutputPattern(_, _, _))));
 
     // Reactivate
-    store.add_monitor(TypesToMonitor::RskPegin(None), false)?;
+    store.add_monitor(TypesToMonitor::OutputPattern(filter.clone(), None), false)?;
     let monitors = store.get_monitors()?;
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_, _))));
+        .any(|m| matches!(m, TypesToMonitorStore::OutputPattern(_, _, _))));
 
     // Cancel
-    store.cancel_monitor(TypesToMonitor::RskPegin(None))?;
+    store.cancel_monitor(TypesToMonitor::OutputPattern(filter.clone(), None))?;
     let monitors = store.get_monitors()?;
     assert!(!monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_, _))));
+        .any(|m| matches!(m, TypesToMonitorStore::OutputPattern(_, _, _))));
 
     // Test NewBlock
     store.add_monitor(TypesToMonitor::NewBlock, false)?;
@@ -550,25 +561,30 @@ fn test_reactivate_monitor() -> Result<(), anyhow::Error> {
         .iter()
         .any(|m| matches!(m, TypesToMonitorStore::Transaction(id, _, _, _) if *id == tx_id1)));
 
-    // Test reactivating RskPeginTransaction monitor
-    store.add_monitor(TypesToMonitor::RskPegin(None), false)?;
+    // Test reactivating OutputPattern monitor
+    let filter = OutputPatternFilter {
+        output_index: 0,
+        tag: vec![0xde, 0xad],
+        max_outputs: None,
+    };
+    store.add_monitor(TypesToMonitor::OutputPattern(filter.clone(), None), false)?;
     let monitors = store.get_monitors()?;
-    assert_eq!(monitors.len(), 2); // tx_id1 + RskPeginTransaction
+    assert_eq!(monitors.len(), 2); // tx_id1 + OutputPattern
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_, _))));
+        .any(|m| matches!(m, TypesToMonitorStore::OutputPattern(_, _, _))));
 
-    store.deactivate_monitor(TypesToMonitor::RskPegin(None))?;
+    store.deactivate_monitor(TypesToMonitor::OutputPattern(filter.clone(), None))?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 1); // Only tx_id1
 
     // Reactivate
-    store.add_monitor(TypesToMonitor::RskPegin(None), false)?;
+    store.add_monitor(TypesToMonitor::OutputPattern(filter.clone(), None), false)?;
     let monitors = store.get_monitors()?;
     assert_eq!(monitors.len(), 2);
     assert!(monitors
         .iter()
-        .any(|m| matches!(m, TypesToMonitorStore::RskPegin(_, _))));
+        .any(|m| matches!(m, TypesToMonitorStore::OutputPattern(_, _, _))));
 
     // Test reactivating SpendingUTXOTransaction monitor
     let utxo_monitor =

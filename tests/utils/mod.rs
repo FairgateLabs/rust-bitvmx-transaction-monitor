@@ -12,7 +12,7 @@ use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::MonitorConfig,
     monitor::Monitor,
-    types::{AckMonitorNews, MonitorNews, TypesToMonitor},
+    types::{AckMonitorNews, MonitorNews, OutputPatternFilter, TypesToMonitor},
 };
 use std::rc::Rc;
 use storage_backend::storage::Storage;
@@ -192,14 +192,18 @@ pub fn create_and_send_spending_transaction(
     target_txid: Txid,
     target_vout: u32,
 ) -> Result<(bitcoin::Transaction, Txid)> {
-    let spending_amount = Amount::from_sat(900_000); // Most of the funding, leaving room for fees
+    let spending_amount = Amount::from_sat(800_000);
+    let change_amount = Amount::from_sat(100_000); // second output keeps tx above minimum relay size
 
-    // Get a new address to send to
+    // Get a recipient address and a change address
     let recipient_address = bitcoin_client
         .client
         .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32))?;
+    let change_address = bitcoin_client
+        .client
+        .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32))?;
 
-    // Create a raw transaction that spends the UTXO
+    // Create a raw transaction that spends the UTXO with two outputs
     let inputs = vec![bitcoincore_rpc::json::CreateRawTransactionInput {
         txid: target_txid,
         vout: target_vout,
@@ -208,7 +212,9 @@ pub fn create_and_send_spending_transaction(
 
     let mut outputs = std::collections::HashMap::new();
     let address_str = format!("{}", recipient_address.assume_checked());
+    let change_str = format!("{}", change_address.assume_checked());
     outputs.insert(address_str, spending_amount);
+    outputs.insert(change_str, change_amount);
 
     let raw_tx = bitcoin_client
         .client
@@ -323,8 +329,15 @@ pub fn monitor_spending_utxo(
     Ok(())
 }
 
-pub fn monitor_rsk_pegin(monitor: &Monitor, confirmation_trigger: Option<u32>) -> Result<()> {
-    monitor.monitor(TypesToMonitor::RskPegin(confirmation_trigger), true)?;
+pub fn monitor_output_pattern(
+    monitor: &Monitor,
+    filter: OutputPatternFilter,
+    confirmation_trigger: Option<u32>,
+) -> Result<()> {
+    monitor.monitor(
+        TypesToMonitor::OutputPattern(filter, confirmation_trigger),
+        true,
+    )?;
     Ok(())
 }
 
@@ -347,23 +360,31 @@ pub fn ack_spending_utxo_monitor(
     Ok(())
 }
 
-pub fn ack_rsk_pegin_monitor(monitor: &Monitor, tx_id: Txid) -> Result<()> {
-    monitor.ack_news(AckMonitorNews::RskPeginTransaction(tx_id))?;
+pub fn ack_output_pattern_monitor(monitor: &Monitor, tx_id: Txid, tag: Vec<u8>) -> Result<()> {
+    monitor.ack_news(AckMonitorNews::OutputPatternTransaction(tx_id, tag))?;
     Ok(())
 }
 
-/// Helper function to assert RskPeginTransaction news.
-pub fn assert_rsk_pegin_news(
+/// Helper function to assert OutputPatternTransaction news.
+pub fn assert_output_pattern_news(
     news: &MonitorNews,
     expected_txid: Txid,
+    expected_tag: &[u8],
     confirmations: u32,
 ) -> Result<()> {
     match news {
-        MonitorNews::RskPeginTransaction(tx_id, tx_status) => {
+        MonitorNews::OutputPatternTransaction(tx_id, tx_status, tag) => {
             assert_eq!(
                 *tx_id, expected_txid,
-                "Expected RSK pegin txid {}",
+                "Expected output pattern txid {}",
                 expected_txid
+            );
+            assert_eq!(
+                tag.as_slice(),
+                expected_tag,
+                "Expected tag {:?}, got {:?}",
+                expected_tag,
+                tag
             );
             assert_eq!(
                 tx_status.confirmations, confirmations,
@@ -371,77 +392,59 @@ pub fn assert_rsk_pegin_news(
                 confirmations, tx_status.confirmations
             );
         }
-        _ => panic!("Expected RskPeginTransaction news, got {:?}", news),
+        _ => panic!("Expected OutputPatternTransaction news, got {:?}", news),
     }
     Ok(())
 }
 
-pub fn create_and_send_rsk_pegin_transaction(
+/// Creates and sends a transaction matching a given output pattern filter.
+/// The transaction has an OP_RETURN at `filter.output_index` whose data starts with `filter.tag`,
+/// plus a change output to keep the transaction above the minimum relay size.
+pub fn create_and_send_output_pattern_transaction(
     bitcoin_client: &BitcoinClient,
+    filter: &OutputPatternFilter,
 ) -> Result<(Transaction, Txid)> {
     use bitcoin::{
-        hex::FromHex,
-        key::{rand::thread_rng, Secp256k1},
+        absolute::LockTime,
+        consensus::Encodable,
         opcodes::all::OP_RETURN,
-        script::Builder,
-        secp256k1::PublicKey,
-        Address, Network, TxOut,
+        script::{Builder, PushBytesBuf},
+        OutPoint, ScriptBuf, Sequence, TxIn, TxOut, Witness,
     };
-
-    use bitcoin::{
-        absolute::LockTime, consensus::Encodable, OutPoint, ScriptBuf, Sequence, TxIn, Witness,
-    };
-
-    let secp = Secp256k1::new();
-
-    // Generate committee N address (taproot internal key)
-    let sk = bitcoin::secp256k1::SecretKey::new(&mut thread_rng());
-    let pubk = PublicKey::from_secret_key(&secp, &sk);
-    let committee_n = Address::p2tr(&secp, pubk.x_only_public_key().0, None, Network::Bitcoin);
-
-    // Generate reimbursement address (R)
-    let sk_reimburse = bitcoin::secp256k1::SecretKey::new(&mut thread_rng());
-    let pk_reimburse = PublicKey::from_secret_key(&secp, &sk_reimburse);
-    let reimbursement_xpk = pk_reimburse.x_only_public_key().0;
-
-    // Create the taproot output
-    let taproot_output = TxOut {
-        value: Amount::from_sat(100_000), // 0.001 BTC
-        script_pubkey: committee_n.script_pubkey(),
-    };
-
-    let packet_number: u64 = 0;
-    let mut rootstock_address = [0u8; 20];
-    rootstock_address.copy_from_slice(
-        Vec::from_hex("7ac5496aee77c1ba1f0854206a26dda82a81d6d8")
-            .unwrap()
-            .as_slice(),
-    );
-
-    let mut data = [0u8; 69];
-    data.copy_from_slice(
-        [
-            b"RSK_PEGIN".as_slice(),
-            &packet_number.to_be_bytes(),
-            &rootstock_address,
-            &reimbursement_xpk.serialize(),
-        ]
-        .concat()
-        .as_slice(),
-    );
 
     let (_, funding_txid, funding_vout) = create_and_send_funding_transaction(bitcoin_client)?;
 
-    // Create the OP_RETURN output
+    let wallet_address = bitcoin_client.init_wallet("test_wallet")?;
+
+    // Build an OP_RETURN output whose data starts with the filter tag
+    let push_data =
+        PushBytesBuf::try_from(filter.tag.clone()).expect("filter tag too large for script push");
     let op_return_output = TxOut {
         value: Amount::ZERO,
         script_pubkey: Builder::new()
             .push_opcode(OP_RETURN)
-            .push_slice(&data)
+            .push_slice(&push_data)
             .into_script(),
     };
 
-    // Build the transaction manually
+    // Change output ensures the transaction is above the minimum relay size
+    let change_output = TxOut {
+        value: Amount::from_sat(900_000),
+        script_pubkey: wallet_address.script_pubkey(),
+    };
+
+    // Build outputs: place OP_RETURN at the required output_index,
+    // fill preceding slots with dust, then append the change output.
+    let mut outputs: Vec<TxOut> = Vec::new();
+    for _ in 0..filter.output_index {
+        outputs.push(TxOut {
+            value: Amount::from_sat(1000),
+            script_pubkey: wallet_address.script_pubkey(),
+        });
+    }
+    outputs.push(op_return_output);
+    outputs.push(change_output);
+
     let transaction = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::ZERO,
@@ -454,19 +457,15 @@ pub fn create_and_send_rsk_pegin_transaction(
             sequence: Sequence::MAX,
             witness: Witness::new(),
         }],
-        output: vec![taproot_output, op_return_output],
+        output: outputs,
     };
 
-    // Encode the transaction
     let mut encoded = Vec::new();
     transaction.consensus_encode(&mut encoded)?;
-    let raw_tx_bytes = encoded;
 
-    // Sign the transaction
-    let signed_tx =
-        bitcoin_client
-            .client
-            .sign_raw_transaction_with_wallet(&raw_tx_bytes, None, None)?;
+    let signed_tx = bitcoin_client
+        .client
+        .sign_raw_transaction_with_wallet(&encoded, None, None)?;
 
     if !signed_tx.complete {
         return Err(anyhow::anyhow!(
@@ -475,14 +474,12 @@ pub fn create_and_send_rsk_pegin_transaction(
         ));
     }
 
-    // Decode the signed transaction
     let transaction: Transaction =
         bitcoin::consensus::Decodable::consensus_decode(&mut &signed_tx.hex[..])?;
 
     let txid = transaction.compute_txid();
 
-    info!("Sending RSK PegIn Transaction({})", txid);
-    // Send the transaction to the network
+    info!("Sending OutputPattern Transaction({})", txid);
     bitcoin_client.client.send_raw_transaction(&signed_tx.hex)?;
 
     mine_blocks(bitcoin_client, 1)?;
