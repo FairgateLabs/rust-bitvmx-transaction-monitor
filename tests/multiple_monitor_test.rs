@@ -50,17 +50,17 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     let (_tx3, tx_id_3) = create_and_send_a_new_transaction(&bitcoin_client)?;
     let (_tx4, tx_id_4) = create_and_send_a_new_transaction(&bitcoin_client)?;
 
-    // Create 4 funding transactions for SpendingUTXO monitoring
-    let (_, funding_txid_1, funding_vout_1) = create_and_send_funding_transaction(&bitcoin_client)?;
-    let (_, funding_txid_2, funding_vout_2) = create_and_send_funding_transaction(&bitcoin_client)?;
-    let (_, funding_txid_3, funding_vout_3) = create_and_send_funding_transaction(&bitcoin_client)?;
-    let (_, funding_txid_4, funding_vout_4) = create_and_send_funding_transaction(&bitcoin_client)?;
-
-    // Create 4 output pattern transactions
+    // Create 4 output pattern transactions BEFORE the funding UTXOs
     let (_, op_txid_1) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
     let (_, op_txid_2) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
     let (_, op_txid_3) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
     let (_, op_txid_4) = create_and_send_output_pattern_transaction(&bitcoin_client, &filter)?;
+
+    // Create 4 funding transactions for SpendingUTXO monitoring.
+    let (_, funding_txid_1, funding_vout_1) = create_and_send_funding_transaction(&bitcoin_client)?;
+    let (_, funding_txid_2, funding_vout_2) = create_and_send_funding_transaction(&bitcoin_client)?;
+    let (_, funding_txid_3, funding_vout_3) = create_and_send_funding_transaction(&bitcoin_client)?;
+    let (_, funding_txid_4, funding_vout_4) = create_and_send_funding_transaction(&bitcoin_client)?;
 
     // ============================================================================
     // PART 2: Set up all monitors

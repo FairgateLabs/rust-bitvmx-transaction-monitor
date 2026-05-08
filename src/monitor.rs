@@ -236,6 +236,18 @@ impl Monitor {
             _ => {}
         }
 
+        // When search_in_mempool=true, register txids in the indexer's watch
+        // list so that tick() polls their mempool status each cycle.
+        if search_in_mempool {
+            if let TypesToMonitor::Transactions(txids, _, _) = &data {
+                for txid in txids {
+                    self.indexer
+                        .add_mempool_watch(*txid)
+                        .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+                }
+            }
+        }
+
         self.store.add_monitor(data, search_in_mempool)?;
 
         Ok(())
@@ -254,6 +266,12 @@ impl Monitor {
     /// - `Ok(())`: If monitoring was canceled successfully
     /// - `Err`: If there was an error canceling monitoring
     pub fn cancel(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
+        // Remove txids from the indexer watch list on cancellation.
+        if let TypesToMonitor::Transactions(txids, _, _) = &data {
+            for txid in txids {
+                let _ = self.indexer.remove_mempool_watch(txid);
+            }
+        }
         self.store.cancel_monitor(data)?;
 
         Ok(())
@@ -620,6 +638,9 @@ impl Monitor {
                 extra_data.clone(),
                 number_confirmation_trigger,
             ))?;
+            // Also remove from the indexer mempool watch list since we are done
+            // monitoring this transaction.
+            let _ = self.indexer.remove_mempool_watch(&tx_id);
 
             info!(
                 "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
