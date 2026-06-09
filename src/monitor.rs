@@ -127,7 +127,11 @@ impl Monitor {
                         search_in_mempool,
                     )?;
                 }
-                TypesToMonitorStore::OutputPattern(filter, number_confirmation_trigger, search_in_mempool) => {
+                TypesToMonitorStore::OutputPattern(
+                    filter,
+                    number_confirmation_trigger,
+                    search_in_mempool,
+                ) => {
                     self.process_output_pattern_transaction(
                         filter,
                         number_confirmation_trigger,
@@ -364,6 +368,12 @@ impl Monitor {
         Ok(self.indexer.get_transaction(tx_id, search_in_mempool)?)
     }
 
+    /// Real-time RPC check for UTXO spendability via `gettxout`. Bypasses indexer cache.
+    /// Returns true iff the (txid, vout) UTXO is currently unspent in the chain or mempool.
+    pub fn is_utxo_unspent_rpc(&self, txid: &Txid, vout: u32) -> Result<bool, MonitorError> {
+        Ok(self.indexer.is_utxo_unspent_rpc(txid, vout)?)
+    }
+
     /// Gets the estimated fee rate from the indexer.
     ///
     /// # Returns
@@ -509,8 +519,7 @@ impl Monitor {
         current_block_hash: bitcoin::BlockHash,
         search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
-        let new_txs_ids =
-            self.detect_output_pattern_txs(indexer_best_block.clone(), &filter)?;
+        let new_txs_ids = self.detect_output_pattern_txs(indexer_best_block.clone(), &filter)?;
 
         let tag_hex = hex::encode(&filter.tag);
         let context = format!("{}{}", INTERNAL_OUTPUT_PATTERN, tag_hex);
