@@ -369,9 +369,23 @@ impl Monitor {
     }
 
     /// Real-time RPC check for UTXO spendability via `gettxout`. Bypasses indexer cache.
-    /// Returns true iff the (txid, vout) UTXO is currently unspent in the chain or mempool.
-    pub fn is_utxo_unspent_rpc(&self, txid: &Txid, vout: u32) -> Result<bool, MonitorError> {
-        Ok(self.indexer.is_utxo_unspent_rpc(txid, vout)?)
+    /// Returns true iff the `(txid, vout)` UTXO is currently unspent: in chain OR mempool
+    ///  when `include_mempool` is true, chain-only when false.
+    pub fn is_utxo_unspent_rpc(
+        &self,
+        txid: &Txid,
+        vout: u32,
+        include_mempool: bool,
+    ) -> Result<bool, MonitorError> {
+        Ok(self
+            .indexer
+            .is_utxo_unspent_rpc(txid, vout, include_mempool)?)
+    }
+
+    /// Live `getrawtransaction` confirmation probe (requires `-txindex`). Returns `None` if the node
+    /// does not know the tx, `Some(0)` if in the mempool, `Some(n>=1)` if confirmed with `n` confs.
+    pub fn get_tx_confirmations(&self, txid: &Txid) -> Result<Option<u32>, MonitorError> {
+        Ok(self.indexer.get_tx_confirmations(txid)?)
     }
 
     /// Gets the estimated fee rate from the indexer.
