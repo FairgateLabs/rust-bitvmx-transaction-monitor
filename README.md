@@ -201,6 +201,10 @@ The monitor supports optional confirmation triggers for transaction monitoring:
 
 **Important**: The confirmation trigger must be less than `max_monitoring_confirmations`, otherwise an error will be returned.
 
+> **Note:** If you configure a confirmation trigger below the blockchain's finality threshold, a blockchain
+> reorganization may cause the same confirmation notification to be emitted again. To avoid repeated 
+> notifications, it is recommended to use confirmation triggers at or above the expected finality depth.
+
 ## Auto-Deactivation
 
 Monitors are automatically deactivated when transactions reach `max_monitoring_confirmations`. This prevents unnecessary processing and storage overhead. Once deactivated, no further news updates will be generated for that transaction.
