@@ -50,7 +50,7 @@ fn news_test() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000001")?;
 
     // Test one transaction news
-    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string());
+    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string(), false);
     store.update_news(tx_news.clone(), block_hash)?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 1);
@@ -63,7 +63,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 0);
 
     // Update the existing news with same block hash
-    let txs_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string());
+    let txs_news = MonitoredTypes::Transaction(tx.compute_txid(), "Context_1".to_string(), false);
     store.update_news(txs_news.clone(), block_hash)?;
 
     // Verify we have a No news because for this block hash we already have an ack
@@ -152,7 +152,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000001")?;
 
     // Test duplicate transaction news
-    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), String::new());
+    let tx_news = MonitoredTypes::Transaction(tx.compute_txid(), String::new(), false);
     store.update_news(tx_news.clone(), block_hash)?;
     store.update_news(tx_news.clone(), block_hash)?; // Try adding same tx again
     let news = store.get_news()?;
@@ -165,7 +165,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 
     // Test duplicate group transaction news
     let context_data = Uuid::new_v4();
-    let monitored_tx = MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string());
+    let monitored_tx = MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string(), false);
     store.update_news(monitored_tx.clone(), block_hash_1)?;
     store.update_news(monitored_tx.clone(), block_hash_1)?; // Try adding same group tx again
     let news = store.get_news()?;
@@ -253,9 +253,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     };
 
     // Test multiple transactions
-    let monitor_tx1 = MonitoredTypes::Transaction(tx1.compute_txid(), String::new());
-    let monitor_tx2 = MonitoredTypes::Transaction(tx2.compute_txid(), String::new());
-    let monitor_tx3 = MonitoredTypes::Transaction(tx3.compute_txid(), String::new());
+    let monitor_tx1 = MonitoredTypes::Transaction(tx1.compute_txid(), String::new(), false);
+    let monitor_tx2 = MonitoredTypes::Transaction(tx2.compute_txid(), String::new(), false);
+    let monitor_tx3 = MonitoredTypes::Transaction(tx3.compute_txid(), String::new(), false);
 
     let block_hash =
         BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
@@ -294,9 +294,12 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     let context_data2 = Uuid::new_v4();
     let context_data3 = Uuid::new_v4();
 
-    let monitored_tx1 = MonitoredTypes::Transaction(tx1.compute_txid(), context_data1.to_string());
-    let monitored_tx2 = MonitoredTypes::Transaction(tx2.compute_txid(), context_data2.to_string());
-    let monitored_tx3 = MonitoredTypes::Transaction(tx3.compute_txid(), context_data3.to_string());
+    let monitored_tx1 =
+        MonitoredTypes::Transaction(tx1.compute_txid(), context_data1.to_string(), false);
+    let monitored_tx2 =
+        MonitoredTypes::Transaction(tx2.compute_txid(), context_data2.to_string(), false);
+    let monitored_tx3 =
+        MonitoredTypes::Transaction(tx3.compute_txid(), context_data3.to_string(), false);
 
     store.update_news(monitored_tx1.clone(), block_hash_1)?;
     store.update_news(monitored_tx2.clone(), block_hash_1)?;

@@ -4,11 +4,11 @@ use bitvmx_transaction_monitor::types::OutputPatternFilter;
 
 use crate::utils::{
     ack_output_pattern_monitor, ack_spending_utxo_monitor, ack_tx_monitor,
-    assert_output_pattern_news, assert_spending_utxo_news, assert_tx_news, clear_output,
-    create_and_send_a_new_transaction, create_and_send_funding_transaction,
-    create_and_send_output_pattern_transaction, create_and_send_spending_transaction,
-    create_test_setup, mine_blocks, monitor_output_pattern, monitor_spending_utxo, monitor_tx,
-    sync_monitor,
+    assert_output_pattern_news, assert_spending_utxo_news, assert_tx_news, assert_tx_news_reorg,
+    best_height, block_hash_at, clear_output, create_and_send_a_new_transaction,
+    create_and_send_funding_transaction, create_and_send_output_pattern_transaction,
+    create_and_send_spending_transaction, create_test_setup, invalidate_block, mine_blocks,
+    monitor_output_pattern, monitor_spending_utxo, monitor_tx, sync_monitor,
 };
 
 mod utils;
@@ -101,6 +101,56 @@ fn test_transaction_monitor_confirmation_trigger() -> Result<(), anyhow::Error> 
             confirmation_trigger
         );
     }
+
+    bitcoind.stop()?;
+    clear_output();
+
+    Ok(())
+}
+
+/// Test that a reorg which re-includes the tx in a different block produces a second confirmation
+/// notification flagged as `resent_due_to_reorg`.
+#[test]
+fn test_trigger_reorg_resend_confirmations() -> Result<(), anyhow::Error> {
+    let confirmation_trigger = 3;
+    let max_monitoring_confirmations = 10;
+    let (bitcoin_client, monitor, bitcoind) = create_test_setup(max_monitoring_confirmations)?;
+
+    // Create the tx and remember the block that first included it, so we can reorg exactly that block.
+    let (_transaction, tx_id) = create_and_send_a_new_transaction(&bitcoin_client)?;
+    let original_height = best_height(&bitcoin_client)?;
+    let original_block = block_hash_at(&bitcoin_client, original_height)?;
+
+    let extra_data = "context of the transaction".to_string();
+    monitor_tx(&monitor, tx_id, &extra_data, Some(confirmation_trigger))?;
+    sync_monitor(&monitor)?;
+
+    // Reach the trigger (3 confirmations) and take the first, non-reorg notification.
+    mine_blocks(&bitcoin_client, 2)?;
+    sync_monitor(&monitor)?;
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1, "expected the initial confirmation news");
+    assert_tx_news_reorg(&news[0], tx_id, &extra_data, confirmation_trigger, false)?;
+    ack_tx_monitor(&monitor, tx_id, &extra_data)?;
+
+    // Reorg: drop the tx's block (and the two above it); the tx goes back to the mempool.
+    invalidate_block(&bitcoin_client, &original_block)?;
+
+    // Rebuild a new branch. The tx is re-mined into a different block and reaches the trigger again.
+    // Three blocks restore the height, so the tx sits at 3 confirmations on the new branch.
+    mine_blocks(&bitcoin_client, 3)?;
+    sync_monitor(&monitor)?;
+
+    // The re-notification must be flagged as caused by the reorg. Its block hash differs from the one
+    // stored at the first notification, which is exactly what marks it a reorg resend.
+    let new_block = block_hash_at(&bitcoin_client, original_height)?;
+    assert_ne!(
+        new_block, original_block,
+        "the reorg must re-include the tx in a different block"
+    );
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1, "expected a reorg resend notification");
+    assert_tx_news_reorg(&news[0], tx_id, &extra_data, confirmation_trigger, true)?;
 
     bitcoind.stop()?;
     clear_output();

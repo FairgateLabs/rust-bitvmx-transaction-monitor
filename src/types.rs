@@ -74,13 +74,23 @@ pub enum TypesToMonitor {
     NewBlock,
 }
 
+/// Payload of a transaction confirmation notification.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TransactionNews {
+    pub tx_id: Txid,
+    pub status: TransactionStatus,
+    /// The context of the transaction previously sent to the monitor.
+    pub context: String,
+    /// True when this is a repeat notification caused by a chain reorganization: the tx already reached its
+    /// confirmation trigger once, then a reorg re-mined it into a different block and it reached the trigger
+    /// again. False for the first notification and for confirmations that keep growing inside the same block.
+    pub resent_due_to_reorg: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MonitorNews {
-    // Transaction news
-    // - Txid: The transaction ID
-    // - TransactionStatus: The information of the transaction indexed
-    // - String: The context of the transaction previously sent to the monitor
-    Transaction(Txid, TransactionStatus, String),
+    // Transaction confirmation news. Carries the reorg-resend flag in `resent_due_to_reorg`.
+    Transaction(TransactionNews),
 
     // Spending UTXO transaction news
     // - Txid: The transaction ID
@@ -151,6 +161,7 @@ pub struct TransactionNewsEntry {
     pub tx_id: Txid,
     pub extra_data: String,
     pub ack: NewsAck,
+    pub resent_due_to_reorg: bool, // True when this pending news is a reorg-caused resend.
 }
 
 /// SpendingUTXO transaction news entry stored in storage
@@ -170,6 +181,8 @@ pub struct TransactionMonitorEntry {
     pub confirmation_trigger: Option<u32>,
     pub trigger_sent: bool,
     pub search_in_mempool: bool,
+    /// Block hash of the block that included the tx the last time its confirmation trigger fired. 
+    pub notified_block_hash: Option<BlockHash>,
 }
 
 /// Transaction monitor stored in active/inactive lists

@@ -2,7 +2,9 @@ use crate::config::{MonitorSettings, MonitorSettingsConfig};
 use crate::errors::MonitorError;
 use crate::helper::{is_spending_output, matches_output_pattern};
 use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
-use crate::types::{AckMonitorNews, MonitorNews, OutputPatternFilter, TypesToMonitor};
+use crate::types::{
+    AckMonitorNews, MonitorNews, OutputPatternFilter, TransactionNews, TypesToMonitor,
+};
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::indexer::IndexerApi;
@@ -14,7 +16,7 @@ use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Internal context prefix used to identify spending UTXO transactions in the monitor store.
 /// The full context format is: "INTERNAL_SPENDING_UTXO:{target_tx_id}:{target_utxo_index}:{original_extra_data}"
@@ -298,9 +300,14 @@ impl Monitor {
 
         for news in list_news {
             match news {
-                MonitoredTypes::Transaction(tx_id, extra_data) => {
+                MonitoredTypes::Transaction(tx_id, extra_data, resent_due_to_reorg) => {
                     let status = self.get_tx_status(&tx_id, true)?;
-                    return_news.push(MonitorNews::Transaction(tx_id, status, extra_data));
+                    return_news.push(MonitorNews::Transaction(TransactionNews {
+                        tx_id,
+                        status,
+                        context: extra_data,
+                        resent_due_to_reorg,
+                    }));
                 }
                 MonitoredTypes::OutputPatternTransaction(tx_id, tag) => {
                     let status = self.get_tx_status(&tx_id, true)?;
@@ -489,22 +496,39 @@ impl Monitor {
     /// # Behavior
     /// - With trigger: News is sent once when confirmations reach or exceed the trigger value
     /// - Without trigger: News is sent for every block until max_monitoring_confirmations is reached
+    /// Decide whether to emit confirmation news, and whether that emission is a reorg-caused resend.
+    ///
+    /// Returns `(should_send, resent_due_to_reorg)`.
     fn should_send_news(
         &self,
         tx_id: Txid,
         extra_data: &str,
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
-    ) -> Result<bool, MonitorError> {
-        let trigger_sent = self.store.get_transaction_trigger_sent(tx_id, extra_data)?;
-
+        tx_block_hash: Option<bitcoin::BlockHash>,
+    ) -> Result<(bool, bool), MonitorError> {
         if let Some(trigger) = number_confirmation_trigger {
-            // Send news when confirmations are greater than or equal to the trigger value
-            // but only once (when trigger_sent is false)
-            Ok(current_confirmations >= trigger && !trigger_sent)
+            if current_confirmations < trigger {
+                return Ok((false, false));
+            }
+            let notified_block_hash =
+                self.store.get_transaction_notified_block_hash(tx_id, extra_data)?;
+            match (notified_block_hash, tx_block_hash) {
+                // First time the trigger is reached: notify, not a reorg.
+                (None, _) => Ok((true, false)),
+                // Already notified while included in the same block: confirmations only grew, do not resend.
+                (Some(prev), Some(current)) if prev == current => Ok((false, false)),
+                // Already notified, now the tx is in a different block: a reorg re-included it, flag the resend.
+                (Some(_), Some(_)) => Ok((true, true)),
+                // Already notified but the tx currently has no including block (orphan/mempool): do not resend.
+                (Some(_), None) => Ok((false, false)),
+            }
         } else {
             // If None, always send news when current confirmations are less than the max monitoring confirmations
-            Ok(current_confirmations < self.settings.max_monitoring_confirmations)
+            Ok((
+                current_confirmations < self.settings.max_monitoring_confirmations,
+                false,
+            ))
         }
     }
 
@@ -596,12 +620,17 @@ impl Monitor {
             }
         }
 
-        // Check if we should send news based on number_confirmation_trigger
-        let should_send_news = self.should_send_news(
+        // The block that currently includes the tx.
+        let tx_block_hash = tx_info.block_info.as_ref().map(|b| b.hash);
+
+        // Check if we should send news based on number_confirmation_trigger, and whether this send is a
+        // repeat caused by a reorg re-mining the tx into a different block.
+        let (should_send_news, resent_due_to_reorg) = self.should_send_news(
             tx_id,
             &extra_data,
             number_confirmation_trigger,
             tx_info.confirmations,
+            tx_block_hash,
         )?;
 
         if should_send_news {
@@ -633,21 +662,29 @@ impl Monitor {
                 }
                 _ => {
                     self.store.update_news(
-                        MonitoredTypes::Transaction(tx_id, extra_data.clone()),
+                        MonitoredTypes::Transaction(tx_id, extra_data.clone(), resent_due_to_reorg),
                         current_block_hash,
                     )?;
                 }
             }
 
-            info!(
-                "News for Transaction({}) | Height({}) | Confirmations({})",
-                tx_id, indexer_best_block_height, tx_info.confirmations,
-            );
+            if resent_due_to_reorg {
+                warn!(
+                    "Reorg resend: Transaction({}) re-notified after a reorg re-included it in a different block | Height({}) | Confirmations({})",
+                    tx_id, indexer_best_block_height, tx_info.confirmations,
+                );
+            } else {
+                info!(
+                    "News for Transaction({}) | Height({}) | Confirmations({})",
+                    tx_id, indexer_best_block_height, tx_info.confirmations,
+                );
+            }
 
-            // Update trigger_sent flag if there's a trigger
+            // Remember the block that included the tx at this notification, so a later reorg into a
+            // different block is recognized as a resend.
             if number_confirmation_trigger.is_some() {
                 self.store
-                    .update_transaction_trigger_sent(tx_id, &extra_data, true)
+                    .update_transaction_notified_block_hash(tx_id, &extra_data, tx_block_hash)
                     .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
             }
         }

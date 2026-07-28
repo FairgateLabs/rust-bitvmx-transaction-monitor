@@ -55,7 +55,8 @@ enum BlockchainKey {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MonitoredTypes {
-    Transaction(Txid, String),
+    // Txid, context, resent_due_to_reorg.
+    Transaction(Txid, String, bool),
     SpendingUTXOTransaction(Txid, u32, String, Txid),
     NewBlock(BlockHash),
     OutputPatternTransaction(Txid, Vec<u8>),
@@ -135,6 +136,17 @@ pub trait MonitorStoreApi {
         tx_id: Txid,
         extra_data: &str,
         trigger_sent: bool,
+    ) -> Result<(), MonitorStoreError>;
+    fn get_transaction_notified_block_hash(
+        &self,
+        tx_id: Txid,
+        extra_data: &str,
+    ) -> Result<Option<BlockHash>, MonitorStoreError>;
+    fn update_transaction_notified_block_hash(
+        &self,
+        tx_id: Txid,
+        extra_data: &str,
+        block_hash: Option<BlockHash>,
     ) -> Result<(), MonitorStoreError>;
 }
 
@@ -218,7 +230,11 @@ impl MonitorStoreApi for MonitorStore {
 
         for entry in txs_news {
             if !entry.ack.acknowledged {
-                news.push(MonitoredTypes::Transaction(entry.tx_id, entry.extra_data));
+                news.push(MonitoredTypes::Transaction(
+                    entry.tx_id,
+                    entry.extra_data,
+                    entry.resent_due_to_reorg,
+                ));
             }
         }
 
@@ -271,7 +287,7 @@ impl MonitorStoreApi for MonitorStore {
         // If the notification is already in the store, it will be updated with the new block_hash and ack set to false.
 
         match data {
-            MonitoredTypes::Transaction(tx_id, extra_data) => {
+            MonitoredTypes::Transaction(tx_id, extra_data, resent_due_to_reorg) => {
                 let key = self.get_key(MonitorKey::TransactionsNews);
                 let mut txs_news: Vec<TransactionNewsEntry> =
                     self.store.get(&key, None)?.unwrap_or_default();
@@ -289,6 +305,7 @@ impl MonitorStoreApi for MonitorStore {
                             tx_id,
                             extra_data: extra_data.clone(),
                             ack: NewsAck::new(current_block_hash, false),
+                            resent_due_to_reorg,
                         });
                     }
                     Some(pos) => {
@@ -298,6 +315,7 @@ impl MonitorStoreApi for MonitorStore {
                                 tx_id,
                                 extra_data: extra_data.clone(),
                                 ack: NewsAck::new(current_block_hash, false),
+                                resent_due_to_reorg,
                             };
                         }
                     }
@@ -533,11 +551,14 @@ impl MonitorStoreApi for MonitorStore {
                             .iter()
                             .position(|e| e.extra_data == extra_data)
                         {
+
+                            let notified_block_hash = monitor.entries[pos].notified_block_hash;
                             monitor.entries[pos] = TransactionMonitorEntry {
                                 extra_data: extra_data.clone(),
                                 confirmation_trigger: from,
                                 trigger_sent: false,
                                 search_in_mempool,
+                                notified_block_hash,
                             };
                         } else {
                             // If extra_data is different, add it as a new tx_id-to-monitor entry
@@ -546,6 +567,7 @@ impl MonitorStoreApi for MonitorStore {
                                 confirmation_trigger: from,
                                 trigger_sent: false,
                                 search_in_mempool,
+                                notified_block_hash: None,
                             });
                         }
                     } else {
@@ -557,6 +579,7 @@ impl MonitorStoreApi for MonitorStore {
                                 confirmation_trigger: from,
                                 trigger_sent: false,
                                 search_in_mempool,
+                                notified_block_hash: None,
                             }],
                         });
                     }
@@ -937,6 +960,45 @@ impl MonitorStoreApi for MonitorStore {
                 .find(|e| e.extra_data == extra_data)
             {
                 entry.trigger_sent = trigger_sent;
+                self.store.set(&key, &txs, None)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_transaction_notified_block_hash(
+        &self,
+        tx_id: Txid,
+        extra_data: &str,
+    ) -> Result<Option<BlockHash>, MonitorStoreError> {
+        let key = self.get_key(MonitorKey::Transactions(true));
+        let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
+
+        if let Some(monitor) = txs.iter().find(|m| m.tx_id == tx_id) {
+            if let Some(entry) = monitor.entries.iter().find(|e| e.extra_data == extra_data) {
+                return Ok(entry.notified_block_hash);
+            }
+        }
+        Ok(None)
+    }
+
+    fn update_transaction_notified_block_hash(
+        &self,
+        tx_id: Txid,
+        extra_data: &str,
+        block_hash: Option<BlockHash>,
+    ) -> Result<(), MonitorStoreError> {
+        let key = self.get_key(MonitorKey::Transactions(true));
+        let mut txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
+
+        if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
+            if let Some(entry) = monitor
+                .entries
+                .iter_mut()
+                .find(|e| e.extra_data == extra_data)
+            {
+                entry.notified_block_hash = block_hash;
                 self.store.set(&key, &txs, None)?;
             }
         }
