@@ -125,6 +125,23 @@ pub fn mine_blocks(bitcoin_client: &BitcoinClient, number_blocks: u64) -> Result
     Ok(())
 }
 
+/// Current best block height.
+pub fn best_height(bitcoin_client: &BitcoinClient) -> Result<u32> {
+    Ok(bitcoin_client.get_best_block()?)
+}
+
+/// Block hash at a given height on the active chain.
+pub fn block_hash_at(bitcoin_client: &BitcoinClient, height: u32) -> Result<bitcoin::BlockHash> {
+    Ok(bitcoin_client.client.get_block_hash(height as u64)?)
+}
+
+/// Invalidate a block, which reorgs it and every block above it off the active chain. Any transactions
+/// they contained return to the mempool, ready to be re-mined into a new branch.
+pub fn invalidate_block(bitcoin_client: &BitcoinClient, hash: &bitcoin::BlockHash) -> Result<()> {
+    bitcoin_client.invalidate_block(hash)?;
+    Ok(())
+}
+
 /// Creates and sends a transaction that spends a specific UTXO.
 /// Returns the decoded transaction and its txid.
 pub fn create_and_send_a_new_transaction(
@@ -494,10 +511,33 @@ pub fn assert_tx_news(
     confirmations: u32,
 ) -> Result<()> {
     match news {
-        MonitorNews::Transaction(id, _tx_status, context) => {
-            assert_eq!(*id, tx_id);
-            assert_eq!(context, &extra_data);
-            assert_eq!(_tx_status.confirmations, confirmations);
+        MonitorNews::Transaction(n) => {
+            assert_eq!(n.tx_id, tx_id);
+            assert_eq!(n.context, extra_data);
+            assert_eq!(n.status.confirmations, confirmations);
+        }
+        _ => panic!("Expected Transaction news"),
+    }
+    Ok(())
+}
+
+/// Like `assert_tx_news`, but also asserts the reorg-resend flag on the notification.
+pub fn assert_tx_news_reorg(
+    news: &MonitorNews,
+    tx_id: Txid,
+    extra_data: &str,
+    confirmations: u32,
+    expected_resent_due_to_reorg: bool,
+) -> Result<()> {
+    match news {
+        MonitorNews::Transaction(n) => {
+            assert_eq!(n.tx_id, tx_id);
+            assert_eq!(n.context, extra_data);
+            assert_eq!(n.status.confirmations, confirmations);
+            assert_eq!(
+                n.resent_due_to_reorg, expected_resent_due_to_reorg,
+                "resent_due_to_reorg mismatch"
+            );
         }
         _ => panic!("Expected Transaction news"),
     }
