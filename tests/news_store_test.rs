@@ -93,7 +93,10 @@ fn news_test() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 1);
     assert_eq!(news[0], op_tx_news);
 
-    store.ack_news(AckMonitorNews::OutputPatternTransaction(tx.compute_txid(), op_tag))?;
+    store.ack_news(AckMonitorNews::OutputPatternTransaction(
+        tx.compute_txid(),
+        op_tag,
+    ))?;
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);
 
@@ -165,7 +168,8 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 
     // Test duplicate group transaction news
     let context_data = Uuid::new_v4();
-    let monitored_tx = MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string(), false);
+    let monitored_tx =
+        MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string(), false);
     store.update_news(monitored_tx.clone(), block_hash_1)?;
     store.update_news(monitored_tx.clone(), block_hash_1)?; // Try adding same group tx again
     let news = store.get_news()?;
@@ -178,8 +182,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
 
     // Test duplicate output pattern transaction news
     let op_tag = vec![0xde, 0xad];
-    let op_tx_news =
-        MonitoredTypes::OutputPatternTransaction(tx.compute_txid(), op_tag.clone());
+    let op_tx_news = MonitoredTypes::OutputPatternTransaction(tx.compute_txid(), op_tag.clone());
     store.update_news(op_tx_news.clone(), block_hash)?;
     store.update_news(op_tx_news.clone(), block_hash)?; // Try adding same output pattern tx again
     let news = store.get_news()?;
