@@ -203,7 +203,8 @@ fn test_spending_utxo_monitor_auto_deactivates_at_max_confirmations() -> Result<
 ///
 /// Note: The test uses 10 confirmations (instead of the default 100) for faster test execution.
 #[test]
-fn test_output_pattern_monitor_auto_deactivates_at_max_confirmations() -> Result<(), anyhow::Error> {
+fn test_output_pattern_monitor_auto_deactivates_at_max_confirmations() -> Result<(), anyhow::Error>
+{
     let max_monitoring_confirmations = 10;
 
     let max_confirmations = max_monitoring_confirmations - 1;
@@ -246,7 +247,8 @@ fn test_output_pattern_monitor_auto_deactivates_at_max_confirmations() -> Result
 
         // Verify the news contains correct information about the output pattern transaction
         assert_output_pattern_news(
-            &news[0], op_txid,       // The output pattern transaction ID
+            &news[0],
+            op_txid,     // The output pattern transaction ID
             &filter.tag, // The expected tag
             i,           // Current confirmation count
         )?;

@@ -93,7 +93,11 @@ fn to_store_data(data: TypesToMonitor, search_in_mempool: bool) -> Vec<TypesToMo
             )]
         }
         TypesToMonitor::OutputPattern(filter, trigger) => {
-            vec![TypesToMonitorStore::OutputPattern(filter, trigger, search_in_mempool)]
+            vec![TypesToMonitorStore::OutputPattern(
+                filter,
+                trigger,
+                search_in_mempool,
+            )]
         }
         TypesToMonitor::NewBlock => vec![TypesToMonitorStore::NewBlock],
     }
@@ -239,8 +243,10 @@ impl MonitorStoreApi for MonitorStore {
         }
 
         let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
-        let spending_news: Vec<SpendingUTXONewsEntry> =
-            self.store.get(&spending_news_key, None)?.unwrap_or_default();
+        let spending_news: Vec<SpendingUTXONewsEntry> = self
+            .store
+            .get(&spending_news_key, None)?
+            .unwrap_or_default();
 
         for entry in spending_news {
             if !entry.ack.acknowledged {
@@ -475,7 +481,8 @@ impl MonitorStoreApi for MonitorStore {
 
         // Get active transactions
         let txs_key = self.get_key(MonitorKey::Transactions(true));
-        let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&txs_key, None)?.unwrap_or_default();
+        let txs: Vec<SetTransactionMonitorEntry> =
+            self.store.get(&txs_key, None)?.unwrap_or_default();
 
         for monitor in txs {
             for entry in monitor.entries {
@@ -503,8 +510,10 @@ impl MonitorStoreApi for MonitorStore {
 
         // Get active spending UTXO transactions from list
         let spending_utxo_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-        let spending_utxos: Vec<SpendingUTXOMonitor> =
-            self.store.get(&spending_utxo_key, None)?.unwrap_or_default();
+        let spending_utxos: Vec<SpendingUTXOMonitor> = self
+            .store
+            .get(&spending_utxo_key, None)?
+            .unwrap_or_default();
 
         for monitor in spending_utxos {
             for entry in monitor.entries {
@@ -551,7 +560,6 @@ impl MonitorStoreApi for MonitorStore {
                             .iter()
                             .position(|e| e.extra_data == extra_data)
                         {
-
                             let notified_block_hash = monitor.entries[pos].notified_block_hash;
                             monitor.entries[pos] = TransactionMonitorEntry {
                                 extra_data: extra_data.clone(),
@@ -585,7 +593,11 @@ impl MonitorStoreApi for MonitorStore {
                     }
                     self.store.set(&key, &txs, None)?;
                 }
-                TypesToMonitorStore::OutputPattern(filter, confirmation_trigger, search_in_mempool) => {
+                TypesToMonitorStore::OutputPattern(
+                    filter,
+                    confirmation_trigger,
+                    search_in_mempool,
+                ) => {
                     let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
                     let mut subscriptions: Vec<OutputPatternSubscription> =
                         self.store.get(&key, None)?.unwrap_or_default();
@@ -951,7 +963,8 @@ impl MonitorStoreApi for MonitorStore {
         trigger_sent: bool,
     ) -> Result<(), MonitorStoreError> {
         let key = self.get_key(MonitorKey::Transactions(true));
-        let mut txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
+        let mut txs: Vec<SetTransactionMonitorEntry> =
+            self.store.get(&key, None)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor
@@ -990,7 +1003,8 @@ impl MonitorStoreApi for MonitorStore {
         block_hash: Option<BlockHash>,
     ) -> Result<(), MonitorStoreError> {
         let key = self.get_key(MonitorKey::Transactions(true));
-        let mut txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
+        let mut txs: Vec<SetTransactionMonitorEntry> =
+            self.store.get(&key, None)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor

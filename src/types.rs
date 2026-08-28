@@ -181,7 +181,7 @@ pub struct TransactionMonitorEntry {
     pub confirmation_trigger: Option<u32>,
     pub trigger_sent: bool,
     pub search_in_mempool: bool,
-    /// Block hash of the block that included the tx the last time its confirmation trigger fired. 
+    /// Block hash of the block that included the tx the last time its confirmation trigger fired.
     pub notified_block_hash: Option<BlockHash>,
 }
 
