@@ -452,10 +452,7 @@ impl Monitor {
     ) -> String {
         format!(
             "{}:{}:{}:{}",
-            INTERNAL_SPENDING_UTXO,
-            target_tx_id.to_string(),
-            target_utxo_index,
-            extra_data
+            INTERNAL_SPENDING_UTXO, target_tx_id, target_utxo_index, extra_data
         )
     }
 
@@ -496,6 +493,7 @@ impl Monitor {
     /// # Behavior
     /// - With trigger: News is sent once when confirmations reach or exceed the trigger value
     /// - Without trigger: News is sent for every block until max_monitoring_confirmations is reached
+    ///
     /// Decide whether to emit confirmation news, and whether that emission is a reorg-caused resend.
     ///
     /// Returns `(should_send, resent_due_to_reorg)`.
@@ -511,8 +509,9 @@ impl Monitor {
             if current_confirmations < trigger {
                 return Ok((false, false));
             }
-            let notified_block_hash =
-                self.store.get_transaction_notified_block_hash(tx_id, extra_data)?;
+            let notified_block_hash = self
+                .store
+                .get_transaction_notified_block_hash(tx_id, extra_data)?;
             match (notified_block_hash, tx_block_hash) {
                 // First time the trigger is reached: notify, not a reorg.
                 (None, _) => Ok((true, false)),
@@ -587,6 +586,7 @@ impl Monitor {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_transaction(
         &self,
         tx_id: Txid,
@@ -733,6 +733,7 @@ impl Monitor {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_spending_utxo_transaction(
         &self,
         target_tx_id: Txid,
