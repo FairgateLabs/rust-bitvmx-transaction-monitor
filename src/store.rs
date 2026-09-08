@@ -65,7 +65,7 @@ pub enum MonitoredTypes {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TypesToMonitorStore {
     Transaction(Txid, String, Option<u32>, bool),
-    SpendingUTXOTransaction(Txid, u32, String, Option<u32>, bool),
+    SpendingUTXOTransaction(Txid, u32, String, Option<u32>, bool, bool), // Txid, vout, extra_data, confirmation_trigger, search_in_mempool, backfill_done.
     NewBlock,
     OutputPattern(OutputPatternFilter, Option<u32>, bool),
 }
@@ -90,6 +90,7 @@ fn to_store_data(data: TypesToMonitor, search_in_mempool: bool) -> Vec<TypesToMo
                 extra_data,
                 trigger,
                 search_in_mempool,
+                false, // A new subscription has not been checked against an already spent UTXO yet.
             )]
         }
         TypesToMonitor::OutputPattern(filter, trigger) => {
@@ -112,6 +113,12 @@ pub trait MonitorStoreApi {
     fn update_spending_utxo_monitor(
         &self,
         data: (Txid, u32, Option<Txid>),
+    ) -> Result<(), MonitorStoreError>;
+    fn set_backfill_done(
+        &self,
+        tx_id: Txid,
+        vout: u32,
+        extra_data: &str,
     ) -> Result<(), MonitorStoreError>;
     fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
     fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
@@ -523,6 +530,7 @@ impl MonitorStoreApi for MonitorStore {
                     entry.extra_data,
                     entry.confirmation_trigger,
                     entry.search_in_mempool,
+                    entry.backfill_done,
                 ));
             }
         }
@@ -626,6 +634,7 @@ impl MonitorStoreApi for MonitorStore {
                     extra_data,
                     from,
                     search_in_mempool,
+                    backfill_done,
                 ) => {
                     let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
                     let mut txs: Vec<SpendingUTXOMonitor> =
@@ -641,11 +650,14 @@ impl MonitorStoreApi for MonitorStore {
                             .position(|e| e.extra_data == extra_data)
                         {
                             let existing_spender_tx_id = monitor.entries[pos].spender_tx_id;
+                            // Re-subscribing the same context must not schedule a second backfill scan.
+                            let existing_backfill_done = monitor.entries[pos].backfill_done;
                             monitor.entries[pos] = SpendingUTXOMonitorEntry {
                                 extra_data: extra_data.clone(),
                                 spender_tx_id: existing_spender_tx_id,
                                 confirmation_trigger: from,
                                 search_in_mempool,
+                                backfill_done: existing_backfill_done,
                             };
                         } else {
                             // If extra_data is different, add it as a new entry
@@ -654,6 +666,7 @@ impl MonitorStoreApi for MonitorStore {
                                 spender_tx_id: None,
                                 confirmation_trigger: from,
                                 search_in_mempool,
+                                backfill_done,
                             });
                         }
                     } else {
@@ -666,6 +679,7 @@ impl MonitorStoreApi for MonitorStore {
                                 spender_tx_id: None,
                                 confirmation_trigger: from,
                                 search_in_mempool,
+                                backfill_done,
                             }],
                         });
                     }
@@ -926,6 +940,31 @@ impl MonitorStoreApi for MonitorStore {
                 entry.spender_tx_id = data.2;
             }
             self.store.set(&key, &txs, None)?;
+        }
+
+        Ok(())
+    }
+
+    /// Marks the one time already spent check as run for the given subscription.
+    fn set_backfill_done(
+        &self,
+        tx_id: Txid,
+        vout: u32,
+        extra_data: &str,
+    ) -> Result<(), MonitorStoreError> {
+        // Scoped to a single extra_data because each context is an independent subscription with its own check.
+        let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
+        let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key, None)?.unwrap_or_default();
+
+        if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id && m.vout == vout) {
+            if let Some(entry) = monitor
+                .entries
+                .iter_mut()
+                .find(|e| e.extra_data == extra_data)
+            {
+                entry.backfill_done = true;
+                self.store.set(&key, &txs, None)?;
+            }
         }
 
         Ok(())
