@@ -32,7 +32,10 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use mockall::automock;
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
-use storage_backend::storage::{KeyValueStore, Storage};
+use storage_backend::{
+    key::StorageKey,
+    storage::{KeyValueStore, Storage},
+};
 
 pub struct MonitorStore {
     store: Rc<Storage>,
@@ -159,38 +162,64 @@ impl MonitorStore {
         Ok(Self { store })
     }
 
-    fn get_key(&self, key: MonitorKey) -> String {
-        let prefix = "monitor";
+    fn monitor_key<'a>(
+        namespace: &[&str],
+        tail: impl IntoIterator<Item = &'a str>,
+    ) -> Result<StorageKey, MonitorStoreError> {
+        Ok(StorageKey::new(
+            std::iter::once("monitor")
+                .chain(namespace.iter().copied())
+                .map(str::to_string)
+                .chain(tail.into_iter().map(str::to_string)),
+        )?)
+    }
+
+    fn tx_key<'a>(
+        tail: impl IntoIterator<Item = &'a str>,
+    ) -> Result<StorageKey, MonitorStoreError> {
+        Self::monitor_key(&["tx"], tail)
+    }
+
+    fn spending_utxo_tx_key<'a>(
+        tail: impl IntoIterator<Item = &'a str>,
+    ) -> Result<StorageKey, MonitorStoreError> {
+        Self::monitor_key(&["spending", "utxo", "tx"], tail)
+    }
+
+    fn new_block_key<'a>(
+        tail: impl IntoIterator<Item = &'a str>,
+    ) -> Result<StorageKey, MonitorStoreError> {
+        Self::monitor_key(&["new", "block"], tail)
+    }
+
+    fn output_pattern_key<'a>(
+        tail: impl IntoIterator<Item = &'a str>,
+    ) -> Result<StorageKey, MonitorStoreError> {
+        Self::monitor_key(&["output_pattern"], tail)
+    }
+
+    fn get_key(&self, key: MonitorKey) -> Result<StorageKey, MonitorStoreError> {
         match key {
-            MonitorKey::Transactions(is_active) => format!(
-                "{prefix}/tx/list/{status}",
-                status = if is_active { "active" } else { "inactive" }
-            ),
-            MonitorKey::SpendingUTXOTransactions(is_active) => format!(
-                "{prefix}/spending/utxo/tx/list/{status}",
-                status = if is_active { "active" } else { "inactive" }
-            ),
-            MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
-            MonitorKey::NewBlock => format!("{prefix}/new/block"),
-            MonitorKey::TransactionsNews => format!("{prefix}/tx/news"),
-            MonitorKey::SpendingUTXOTransactionsNews => {
-                format!("{prefix}/spending/utxo/tx/news")
+            MonitorKey::Transactions(is_active) => {
+                Self::tx_key(["list", if is_active { "active" } else { "inactive" }])
             }
-            MonitorKey::NewBlockNews => format!("{prefix}/new/block/news"),
-            MonitorKey::OutputPatternSubscriptions => {
-                format!("{prefix}/output_pattern/subscriptions")
+            MonitorKey::SpendingUTXOTransactions(is_active) => {
+                Self::spending_utxo_tx_key(["list", if is_active { "active" } else { "inactive" }])
             }
-            MonitorKey::OutputPatternTransactionsNews => {
-                format!("{prefix}/output_pattern/tx/news")
-            }
+            MonitorKey::PendingWork => Self::monitor_key(&["all"], ["pending_work"]),
+            MonitorKey::NewBlock => Self::new_block_key([]),
+            MonitorKey::TransactionsNews => Self::tx_key(["news"]),
+            MonitorKey::SpendingUTXOTransactionsNews => Self::spending_utxo_tx_key(["news"]),
+            MonitorKey::NewBlockNews => Self::new_block_key(["news"]),
+            MonitorKey::OutputPatternSubscriptions => Self::output_pattern_key(["subscriptions"]),
+            MonitorKey::OutputPatternTransactionsNews => Self::output_pattern_key(["tx", "news"]),
         }
     }
 
-    fn get_blockchain_key(&self, key: BlockchainKey) -> String {
-        let prefix = "monitor";
+    fn get_blockchain_key(&self, key: BlockchainKey) -> Result<StorageKey, MonitorStoreError> {
         match key {
             BlockchainKey::CurrentBlockHeight => {
-                format!("{prefix}/blockchain/current_block_height")
+                Self::monitor_key(&["blockchain"], ["current_block_height"])
             }
         }
     }
@@ -199,29 +228,29 @@ impl MonitorStore {
 #[automock]
 impl MonitorStoreApi for MonitorStore {
     fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError> {
-        let key = self.get_key(MonitorKey::PendingWork);
-        self.store.set(&key, is_pending_work, None)?;
+        let key = self.get_key(MonitorKey::PendingWork)?;
+        self.store.set(key.clone(), is_pending_work, None)?;
         Ok(())
     }
 
     fn has_pending_work(&self) -> Result<bool, MonitorStoreError> {
-        let key = self.get_key(MonitorKey::PendingWork);
-        let pending_work = self.store.get::<_, bool>(&key, None)?.unwrap_or(false);
+        let key = self.get_key(MonitorKey::PendingWork)?;
+        let pending_work = self.store.get::<bool>(key.clone(), None)?.unwrap_or(false);
         Ok(pending_work)
     }
 
     fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError> {
-        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
+        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight)?;
         let last_block_height = self
             .store
-            .get::<_, BlockHeight>(&last_block_height_key, None)?
+            .get::<BlockHeight>(last_block_height_key.clone(), None)?
             .unwrap_or_default();
 
         Ok(last_block_height)
     }
 
     fn update_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError> {
-        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
+        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight)?;
         self.store.set(last_block_height_key, height, None)?;
         Ok(())
     }
@@ -229,8 +258,9 @@ impl MonitorStoreApi for MonitorStore {
     fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError> {
         let mut news = Vec::new();
 
-        let key = self.get_key(MonitorKey::TransactionsNews);
-        let txs_news: Vec<TransactionNewsEntry> = self.store.get(&key, None)?.unwrap_or_default();
+        let key = self.get_key(MonitorKey::TransactionsNews)?;
+        let txs_news: Vec<TransactionNewsEntry> =
+            self.store.get(key.clone(), None)?.unwrap_or_default();
 
         for entry in txs_news {
             if !entry.ack.acknowledged {
@@ -242,10 +272,10 @@ impl MonitorStoreApi for MonitorStore {
             }
         }
 
-        let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
+        let spending_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews)?;
         let spending_news: Vec<SpendingUTXONewsEntry> = self
             .store
-            .get(&spending_news_key, None)?
+            .get(spending_news_key.clone(), None)?
             .unwrap_or_default();
 
         for entry in spending_news {
@@ -259,9 +289,11 @@ impl MonitorStoreApi for MonitorStore {
             }
         }
 
-        let op_news_key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
-        let op_news: Vec<OutputPatternNewsEntry> =
-            self.store.get(&op_news_key, None)?.unwrap_or_default();
+        let op_news_key = self.get_key(MonitorKey::OutputPatternTransactionsNews)?;
+        let op_news: Vec<OutputPatternNewsEntry> = self
+            .store
+            .get(op_news_key.clone(), None)?
+            .unwrap_or_default();
 
         for entry in op_news {
             if !entry.ack.acknowledged {
@@ -272,8 +304,8 @@ impl MonitorStoreApi for MonitorStore {
             }
         }
 
-        let block_news_key = self.get_key(MonitorKey::NewBlockNews);
-        let block_news: Option<NewsAck> = self.store.get(&block_news_key, None)?;
+        let block_news_key = self.get_key(MonitorKey::NewBlockNews)?;
+        let block_news: Option<NewsAck> = self.store.get(block_news_key.clone(), None)?;
 
         if let Some(ack) = block_news {
             if !ack.acknowledged {
@@ -294,9 +326,9 @@ impl MonitorStoreApi for MonitorStore {
 
         match data {
             MonitoredTypes::Transaction(tx_id, extra_data, resent_due_to_reorg) => {
-                let key = self.get_key(MonitorKey::TransactionsNews);
+                let key = self.get_key(MonitorKey::TransactionsNews)?;
                 let mut txs_news: Vec<TransactionNewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
 
                 // Check if news already exists for this (tx_id, extra_data) combination
                 // Different extra_data should generate separate news entries
@@ -327,12 +359,12 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&key, &txs_news, None)?;
+                self.store.set(key.clone(), &txs_news, None)?;
             }
             MonitoredTypes::OutputPatternTransaction(tx_id, tag) => {
-                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews)?;
                 let mut op_news: Vec<OutputPatternNewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
 
                 let existing = op_news
                     .iter()
@@ -357,7 +389,7 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&key, &op_news, None)?;
+                self.store.set(key.clone(), &op_news, None)?;
             }
             MonitoredTypes::SpendingUTXOTransaction(
                 tx_id,
@@ -365,9 +397,11 @@ impl MonitorStoreApi for MonitorStore {
                 extra_data,
                 spender_tx_id,
             ) => {
-                let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
-                let mut utxo_news: Vec<SpendingUTXONewsEntry> =
-                    self.store.get(&utxo_news_key, None)?.unwrap_or_default();
+                let utxo_news_key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews)?;
+                let mut utxo_news: Vec<SpendingUTXONewsEntry> = self
+                    .store
+                    .get(utxo_news_key.clone(), None)?
+                    .unwrap_or_default();
 
                 // Check if news already exists for this (tx_id, utxo_index, extra_data)
                 // Different extra_data should generate separate news entries
@@ -397,22 +431,25 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&utxo_news_key, &utxo_news, None)?;
+                self.store.set(utxo_news_key.clone(), &utxo_news, None)?;
             }
             MonitoredTypes::NewBlock(hash) => {
-                let key = self.get_key(MonitorKey::NewBlockNews);
+                let key = self.get_key(MonitorKey::NewBlockNews)?;
 
-                let data: Option<NewsAck> = self.store.get(&key, None)?;
+                let data: Option<NewsAck> = self.store.get(key.clone(), None)?;
 
                 if let Some(ack) = data {
                     if ack.block_hash != hash {
                         // Replace the notification with the new block hash
-                        self.store
-                            .set(&key, NewsAck::new(current_block_hash, false), None)?;
+                        self.store.set(
+                            key.clone(),
+                            NewsAck::new(current_block_hash, false),
+                            None,
+                        )?;
                     }
                 } else {
                     self.store
-                        .set(&key, NewsAck::new(current_block_hash, false), None)?;
+                        .set(key.clone(), NewsAck::new(current_block_hash, false), None)?;
                 }
             }
         }
@@ -423,9 +460,9 @@ impl MonitorStoreApi for MonitorStore {
     fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError> {
         match data {
             AckMonitorNews::Transaction(tx_id, extra_data) => {
-                let key = self.get_key(MonitorKey::TransactionsNews);
+                let key = self.get_key(MonitorKey::TransactionsNews)?;
                 let mut txs_news: Vec<TransactionNewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
 
                 // Acknowledge only the news entry matching both tx_id and extra_data
                 if let Some(entry) = txs_news
@@ -433,42 +470,42 @@ impl MonitorStoreApi for MonitorStore {
                     .find(|e| e.tx_id == tx_id && e.extra_data == extra_data)
                 {
                     entry.ack.acknowledged = true;
-                    self.store.set(&key, &txs_news, None)?;
+                    self.store.set(key.clone(), &txs_news, None)?;
                 }
             }
             AckMonitorNews::OutputPatternTransaction(tx_id, tag) => {
-                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews);
+                let key = self.get_key(MonitorKey::OutputPatternTransactionsNews)?;
                 let mut op_news: Vec<OutputPatternNewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
 
                 if let Some(entry) = op_news
                     .iter_mut()
                     .find(|e| e.tx_id == tx_id && e.tag == tag)
                 {
                     entry.ack.acknowledged = true;
-                    self.store.set(&key, &op_news, None)?;
+                    self.store.set(key.clone(), &op_news, None)?;
                 }
             }
             AckMonitorNews::SpendingUTXOTransaction(tx_id, utxo_index, extra_data) => {
-                let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews);
+                let key = self.get_key(MonitorKey::SpendingUTXOTransactionsNews)?;
                 let mut txs_news: Vec<SpendingUTXONewsEntry> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
 
                 // Acknowledge only the news entry matching (tx_id, utxo_index, extra_data)
                 if let Some(entry) = txs_news.iter_mut().find(|e| {
                     e.tx_id == tx_id && e.utxo_index == utxo_index && e.extra_data == extra_data
                 }) {
                     entry.ack.acknowledged = true;
-                    self.store.set(&key, &txs_news, None)?;
+                    self.store.set(key.clone(), &txs_news, None)?;
                 }
             }
             AckMonitorNews::NewBlock => {
-                let key = self.get_key(MonitorKey::NewBlockNews);
-                let mut new_block_news: Option<NewsAck> = self.store.get(&key, None)?;
+                let key = self.get_key(MonitorKey::NewBlockNews)?;
+                let mut new_block_news: Option<NewsAck> = self.store.get(key.clone(), None)?;
 
                 if let Some(ack) = new_block_news.as_mut() {
                     ack.acknowledged = true;
-                    self.store.set(&key, new_block_news, None)?;
+                    self.store.set(key.clone(), new_block_news, None)?;
                 }
             }
         }
@@ -480,9 +517,9 @@ impl MonitorStoreApi for MonitorStore {
         let mut monitors = Vec::<TypesToMonitorStore>::new();
 
         // Get active transactions
-        let txs_key = self.get_key(MonitorKey::Transactions(true));
+        let txs_key = self.get_key(MonitorKey::Transactions(true))?;
         let txs: Vec<SetTransactionMonitorEntry> =
-            self.store.get(&txs_key, None)?.unwrap_or_default();
+            self.store.get(txs_key.clone(), None)?.unwrap_or_default();
 
         for monitor in txs {
             for entry in monitor.entries {
@@ -496,9 +533,9 @@ impl MonitorStoreApi for MonitorStore {
         }
 
         // Get output pattern subscriptions
-        let op_key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+        let op_key = self.get_key(MonitorKey::OutputPatternSubscriptions)?;
         let op_subscriptions: Vec<OutputPatternSubscription> =
-            self.store.get(&op_key, None)?.unwrap_or_default();
+            self.store.get(op_key.clone(), None)?.unwrap_or_default();
 
         for sub in op_subscriptions {
             monitors.push(TypesToMonitorStore::OutputPattern(
@@ -509,10 +546,10 @@ impl MonitorStoreApi for MonitorStore {
         }
 
         // Get active spending UTXO transactions from list
-        let spending_utxo_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
+        let spending_utxo_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true))?;
         let spending_utxos: Vec<SpendingUTXOMonitor> = self
             .store
-            .get(&spending_utxo_key, None)?
+            .get(spending_utxo_key.clone(), None)?
             .unwrap_or_default();
 
         for monitor in spending_utxos {
@@ -528,10 +565,10 @@ impl MonitorStoreApi for MonitorStore {
         }
 
         // Get new block monitor
-        let new_block_key = self.get_key(MonitorKey::NewBlock);
+        let new_block_key = self.get_key(MonitorKey::NewBlock)?;
         let monitor_new_block = self
             .store
-            .get::<_, bool>(&new_block_key, None)?
+            .get::<bool>(new_block_key.clone(), None)?
             .unwrap_or_default();
 
         if monitor_new_block {
@@ -550,9 +587,9 @@ impl MonitorStoreApi for MonitorStore {
         for item in store_data {
             match item {
                 TypesToMonitorStore::Transaction(tx_id, extra_data, from, search_in_mempool) => {
-                    let key = self.get_key(MonitorKey::Transactions(true));
+                    let key = self.get_key(MonitorKey::Transactions(true))?;
                     let mut txs: Vec<SetTransactionMonitorEntry> =
-                        self.store.get(&key, None)?.unwrap_or_default();
+                        self.store.get(key.clone(), None)?.unwrap_or_default();
 
                     if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
                         if let Some(pos) = monitor
@@ -591,16 +628,16 @@ impl MonitorStoreApi for MonitorStore {
                             }],
                         });
                     }
-                    self.store.set(&key, &txs, None)?;
+                    self.store.set(key.clone(), &txs, None)?;
                 }
                 TypesToMonitorStore::OutputPattern(
                     filter,
                     confirmation_trigger,
                     search_in_mempool,
                 ) => {
-                    let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                    let key = self.get_key(MonitorKey::OutputPatternSubscriptions)?;
                     let mut subscriptions: Vec<OutputPatternSubscription> =
-                        self.store.get(&key, None)?.unwrap_or_default();
+                        self.store.get(key.clone(), None)?.unwrap_or_default();
 
                     let existing = subscriptions.iter().position(|s| s.filter == filter);
                     match existing {
@@ -618,7 +655,7 @@ impl MonitorStoreApi for MonitorStore {
                         }
                     }
 
-                    self.store.set(&key, &subscriptions, None)?;
+                    self.store.set(key.clone(), &subscriptions, None)?;
                 }
                 TypesToMonitorStore::SpendingUTXOTransaction(
                     txid,
@@ -627,9 +664,9 @@ impl MonitorStoreApi for MonitorStore {
                     from,
                     search_in_mempool,
                 ) => {
-                    let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
+                    let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true))?;
                     let mut txs: Vec<SpendingUTXOMonitor> =
-                        self.store.get(&key, None)?.unwrap_or_default();
+                        self.store.get(key.clone(), None)?.unwrap_or_default();
 
                     if let Some(monitor) =
                         txs.iter_mut().find(|m| m.tx_id == txid && m.vout == vout)
@@ -670,11 +707,11 @@ impl MonitorStoreApi for MonitorStore {
                         });
                     }
 
-                    self.store.set(&key, &txs, None)?;
+                    self.store.set(key.clone(), &txs, None)?;
                 }
                 TypesToMonitorStore::NewBlock => {
-                    let key = self.get_key(MonitorKey::NewBlock);
-                    self.store.set(&key, true, None)?;
+                    let key = self.get_key(MonitorKey::NewBlock)?;
+                    self.store.set(key.clone(), true, None)?;
                 }
             }
         }
@@ -685,14 +722,18 @@ impl MonitorStoreApi for MonitorStore {
     fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
         match data {
             TypesToMonitor::Transactions(tx_ids, extra_data, _) => {
-                let active_key = self.get_key(MonitorKey::Transactions(true));
-                let inactive_key = self.get_key(MonitorKey::Transactions(false));
+                let active_key = self.get_key(MonitorKey::Transactions(true))?;
+                let inactive_key = self.get_key(MonitorKey::Transactions(false))?;
 
-                let mut active_txs: Vec<SetTransactionMonitorEntry> =
-                    self.store.get(&active_key, None)?.unwrap_or_default();
+                let mut active_txs: Vec<SetTransactionMonitorEntry> = self
+                    .store
+                    .get(active_key.clone(), None)?
+                    .unwrap_or_default();
 
-                let mut inactive_txs: Vec<SetTransactionMonitorEntry> =
-                    self.store.get(&inactive_key, None)?.unwrap_or_default();
+                let mut inactive_txs: Vec<SetTransactionMonitorEntry> = self
+                    .store
+                    .get(inactive_key.clone(), None)?
+                    .unwrap_or_default();
 
                 // Move matching transactions from active to inactive
                 // For each matching txid, move only the entry with matching extra_data
@@ -741,26 +782,30 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&active_key, &active_txs, None)?;
-                self.store.set(&inactive_key, &inactive_txs, None)?;
+                self.store.set(active_key.clone(), &active_txs, None)?;
+                self.store.set(inactive_key.clone(), &inactive_txs, None)?;
             }
 
             TypesToMonitor::OutputPattern(filter, _) => {
-                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions)?;
                 let mut subscriptions: Vec<OutputPatternSubscription> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
                 subscriptions.retain(|s| s.filter != filter);
-                self.store.set(&key, &subscriptions, None)?;
+                self.store.set(key.clone(), &subscriptions, None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
-                let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-                let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
+                let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true))?;
+                let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false))?;
 
-                let mut active_txs: Vec<SpendingUTXOMonitor> =
-                    self.store.get(&active_key, None)?.unwrap_or_default();
+                let mut active_txs: Vec<SpendingUTXOMonitor> = self
+                    .store
+                    .get(active_key.clone(), None)?
+                    .unwrap_or_default();
 
-                let mut inactive_txs: Vec<SpendingUTXOMonitor> =
-                    self.store.get(&inactive_key, None)?.unwrap_or_default();
+                let mut inactive_txs: Vec<SpendingUTXOMonitor> = self
+                    .store
+                    .get(inactive_key.clone(), None)?
+                    .unwrap_or_default();
 
                 // Move matching transaction from active to inactive
                 // Find the matching (txid, vout) and move only the entry with matching extra_data
@@ -809,12 +854,12 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&active_key, &active_txs, None)?;
-                self.store.set(&inactive_key, &inactive_txs, None)?;
+                self.store.set(active_key.clone(), &active_txs, None)?;
+                self.store.set(inactive_key.clone(), &inactive_txs, None)?;
             }
             TypesToMonitor::NewBlock => {
-                let key = self.get_key(MonitorKey::NewBlock);
-                self.store.set(&key, false, None)?;
+                let key = self.get_key(MonitorKey::NewBlock)?;
+                self.store.set(key.clone(), false, None)?;
             }
         }
 
@@ -824,14 +869,18 @@ impl MonitorStoreApi for MonitorStore {
     fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
         match data {
             TypesToMonitor::Transactions(tx_ids, extra_data, _) => {
-                let active_key = self.get_key(MonitorKey::Transactions(true));
-                let inactive_key = self.get_key(MonitorKey::Transactions(false));
+                let active_key = self.get_key(MonitorKey::Transactions(true))?;
+                let inactive_key = self.get_key(MonitorKey::Transactions(false))?;
 
-                let mut active_txs: Vec<SetTransactionMonitorEntry> =
-                    self.store.get(&active_key, None)?.unwrap_or_default();
+                let mut active_txs: Vec<SetTransactionMonitorEntry> = self
+                    .store
+                    .get(active_key.clone(), None)?
+                    .unwrap_or_default();
 
-                let mut inactive_txs: Vec<SetTransactionMonitorEntry> =
-                    self.store.get(&inactive_key, None)?.unwrap_or_default();
+                let mut inactive_txs: Vec<SetTransactionMonitorEntry> = self
+                    .store
+                    .get(inactive_key.clone(), None)?
+                    .unwrap_or_default();
 
                 // Remove only the entry with matching extra_data for each txid
                 for txid in &tx_ids {
@@ -854,25 +903,29 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&active_key, &active_txs, None)?;
-                self.store.set(&inactive_key, &inactive_txs, None)?;
+                self.store.set(active_key.clone(), &active_txs, None)?;
+                self.store.set(inactive_key.clone(), &inactive_txs, None)?;
             }
             TypesToMonitor::OutputPattern(filter, _) => {
-                let key = self.get_key(MonitorKey::OutputPatternSubscriptions);
+                let key = self.get_key(MonitorKey::OutputPatternSubscriptions)?;
                 let mut subscriptions: Vec<OutputPatternSubscription> =
-                    self.store.get(&key, None)?.unwrap_or_default();
+                    self.store.get(key.clone(), None)?.unwrap_or_default();
                 subscriptions.retain(|s| s.filter != filter);
-                self.store.set(&key, &subscriptions, None)?;
+                self.store.set(key.clone(), &subscriptions, None)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(txid, vout, extra_data, _) => {
-                let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-                let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false));
+                let active_key = self.get_key(MonitorKey::SpendingUTXOTransactions(true))?;
+                let inactive_key = self.get_key(MonitorKey::SpendingUTXOTransactions(false))?;
 
-                let mut active_txs: Vec<SpendingUTXOMonitor> =
-                    self.store.get(&active_key, None)?.unwrap_or_default();
+                let mut active_txs: Vec<SpendingUTXOMonitor> = self
+                    .store
+                    .get(active_key.clone(), None)?
+                    .unwrap_or_default();
 
-                let mut inactive_txs: Vec<SpendingUTXOMonitor> =
-                    self.store.get(&inactive_key, None)?.unwrap_or_default();
+                let mut inactive_txs: Vec<SpendingUTXOMonitor> = self
+                    .store
+                    .get(inactive_key.clone(), None)?
+                    .unwrap_or_default();
 
                 // Remove only the entry with matching extra_data from active
                 if let Some(monitor) = active_txs
@@ -898,12 +951,12 @@ impl MonitorStoreApi for MonitorStore {
                     }
                 }
 
-                self.store.set(&active_key, &active_txs, None)?;
-                self.store.set(&inactive_key, &inactive_txs, None)?;
+                self.store.set(active_key.clone(), &active_txs, None)?;
+                self.store.set(inactive_key.clone(), &inactive_txs, None)?;
             }
             TypesToMonitor::NewBlock => {
-                let key = self.get_key(MonitorKey::NewBlock);
-                self.store.set(&key, false, None)?;
+                let key = self.get_key(MonitorKey::NewBlock)?;
+                self.store.set(key.clone(), false, None)?;
             }
         }
 
@@ -915,8 +968,9 @@ impl MonitorStoreApi for MonitorStore {
         data: (Txid, u32, Option<Txid>),
     ) -> Result<(), MonitorStoreError> {
         // Update spender_tx_id for the given (txid,vout) across all entries.
-        let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
-        let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key, None)?.unwrap_or_default();
+        let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true))?;
+        let mut txs: Vec<SpendingUTXOMonitor> =
+            self.store.get(key.clone(), None)?.unwrap_or_default();
 
         if let Some(monitor) = txs
             .iter_mut()
@@ -925,7 +979,7 @@ impl MonitorStoreApi for MonitorStore {
             for entry in monitor.entries.iter_mut() {
                 entry.spender_tx_id = data.2;
             }
-            self.store.set(&key, &txs, None)?;
+            self.store.set(key.clone(), &txs, None)?;
         }
 
         Ok(())
@@ -936,8 +990,9 @@ impl MonitorStoreApi for MonitorStore {
         tx_id: Txid,
         extra_data: &str,
     ) -> Result<bool, MonitorStoreError> {
-        let key = self.get_key(MonitorKey::Transactions(true));
-        let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
+        let key = self.get_key(MonitorKey::Transactions(true))?;
+        let txs: Vec<SetTransactionMonitorEntry> =
+            self.store.get(key.clone(), None)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor.entries.iter().find(|e| e.extra_data == extra_data) {
@@ -962,9 +1017,9 @@ impl MonitorStoreApi for MonitorStore {
         extra_data: &str,
         trigger_sent: bool,
     ) -> Result<(), MonitorStoreError> {
-        let key = self.get_key(MonitorKey::Transactions(true));
+        let key = self.get_key(MonitorKey::Transactions(true))?;
         let mut txs: Vec<SetTransactionMonitorEntry> =
-            self.store.get(&key, None)?.unwrap_or_default();
+            self.store.get(key.clone(), None)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor
@@ -973,7 +1028,7 @@ impl MonitorStoreApi for MonitorStore {
                 .find(|e| e.extra_data == extra_data)
             {
                 entry.trigger_sent = trigger_sent;
-                self.store.set(&key, &txs, None)?;
+                self.store.set(key.clone(), &txs, None)?;
             }
         }
 
@@ -985,8 +1040,9 @@ impl MonitorStoreApi for MonitorStore {
         tx_id: Txid,
         extra_data: &str,
     ) -> Result<Option<BlockHash>, MonitorStoreError> {
-        let key = self.get_key(MonitorKey::Transactions(true));
-        let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
+        let key = self.get_key(MonitorKey::Transactions(true))?;
+        let txs: Vec<SetTransactionMonitorEntry> =
+            self.store.get(key.clone(), None)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor.entries.iter().find(|e| e.extra_data == extra_data) {
@@ -1002,9 +1058,9 @@ impl MonitorStoreApi for MonitorStore {
         extra_data: &str,
         block_hash: Option<BlockHash>,
     ) -> Result<(), MonitorStoreError> {
-        let key = self.get_key(MonitorKey::Transactions(true));
+        let key = self.get_key(MonitorKey::Transactions(true))?;
         let mut txs: Vec<SetTransactionMonitorEntry> =
-            self.store.get(&key, None)?.unwrap_or_default();
+            self.store.get(key.clone(), None)?.unwrap_or_default();
 
         if let Some(monitor) = txs.iter_mut().find(|m| m.tx_id == tx_id) {
             if let Some(entry) = monitor
@@ -1013,7 +1069,7 @@ impl MonitorStoreApi for MonitorStore {
                 .find(|e| e.extra_data == extra_data)
             {
                 entry.notified_block_hash = block_hash;
-                self.store.set(&key, &txs, None)?;
+                self.store.set(key.clone(), &txs, None)?;
             }
         }
 
