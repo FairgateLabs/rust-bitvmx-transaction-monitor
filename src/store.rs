@@ -3,11 +3,6 @@
 //! This module provides the storage layer for the transaction monitor.
 //! It manages persistent storage of monitors, news items, and monitor state.
 //!
-//! ## Key Components
-//!
-//! - **MonitorStore**: The main storage implementation
-//! - **MonitorStoreApi**: Trait defining the storage operations
-//!
 //! ## Storage Structure
 //!
 //! The store maintains separate lists for:
@@ -19,7 +14,7 @@
 //! - Monitor height and pending work flags
 
 use crate::{
-    errors::MonitorStoreError,
+    errors::MonitorError,
     types::{
         AckMonitorNews, NewBlockNewsEntry, NewsAck, OutputPatternFilter, OutputPatternNewsEntry,
         OutputPatternSubscription, SetTransactionMonitorEntry, SpendingUTXOMonitor,
@@ -29,7 +24,6 @@ use crate::{
 };
 use bitcoin::{BlockHash, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
-use mockall::automock;
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -97,58 +91,8 @@ fn to_store_data(data: TypesToMonitor, search_in_mempool: bool) -> Vec<TypesToMo
         TypesToMonitor::NewBlock => vec![TypesToMonitorStore::NewBlock],
     }
 }
-pub trait MonitorStoreApi {
-    fn get_monitors(&self) -> Result<Vec<TypesToMonitorStore>, MonitorStoreError>;
-    fn add_monitor(
-        &self,
-        data: TypesToMonitor,
-        search_in_mempool: bool,
-    ) -> Result<(), MonitorStoreError>;
-    fn update_spending_utxo_monitor(
-        &self,
-        data: (Txid, u32, Option<Txid>),
-    ) -> Result<(), MonitorStoreError>;
-    fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
-    fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError>;
-
-    fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError>;
-    fn update_news(
-        &self,
-        data: MonitoredTypes,
-        current_block_hash: BlockHash,
-    ) -> Result<(), MonitorStoreError>;
-
-    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError>;
-
-    fn has_pending_work(&self) -> Result<bool, MonitorStoreError>;
-    fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError>;
-
-    fn get_transaction_trigger_sent(
-        &self,
-        tx_id: Txid,
-        extra_data: &str,
-    ) -> Result<bool, MonitorStoreError>;
-    fn update_transaction_trigger_sent(
-        &self,
-        tx_id: Txid,
-        extra_data: &str,
-        trigger_sent: bool,
-    ) -> Result<(), MonitorStoreError>;
-    fn get_transaction_notified_block_hash(
-        &self,
-        tx_id: Txid,
-        extra_data: &str,
-    ) -> Result<Option<BlockHash>, MonitorStoreError>;
-    fn update_transaction_notified_block_hash(
-        &self,
-        tx_id: Txid,
-        extra_data: &str,
-        block_hash: Option<BlockHash>,
-    ) -> Result<(), MonitorStoreError>;
-}
-
 impl MonitorStore {
-    pub fn new(store: Rc<Storage>) -> Result<Self, MonitorStoreError> {
+    pub fn new(store: Rc<Storage>) -> Result<Self, MonitorError> {
         Ok(Self { store })
     }
 
@@ -178,23 +122,20 @@ impl MonitorStore {
             }
         }
     }
-}
 
-#[automock]
-impl MonitorStoreApi for MonitorStore {
-    fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError> {
+    pub fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorError> {
         let key = self.get_key(MonitorKey::PendingWork);
         self.store.set(&key, is_pending_work, None)?;
         Ok(())
     }
 
-    fn has_pending_work(&self) -> Result<bool, MonitorStoreError> {
+    pub fn has_pending_work(&self) -> Result<bool, MonitorError> {
         let key = self.get_key(MonitorKey::PendingWork);
         let pending_work = self.store.get::<_, bool>(&key, None)?.unwrap_or(false);
         Ok(pending_work)
     }
 
-    fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError> {
+    pub fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorError> {
         let mut news = Vec::new();
 
         let key = self.get_key(MonitorKey::TransactionsNews);
@@ -252,11 +193,11 @@ impl MonitorStoreApi for MonitorStore {
         Ok(news)
     }
 
-    fn update_news(
+    pub fn update_news(
         &self,
         data: MonitoredTypes,
         current_block_hash: BlockHash,
-    ) -> Result<(), MonitorStoreError> {
+    ) -> Result<(), MonitorError> {
         // Notification will be updated if the block_hash is different
         // If the notification is already in the store, it will be updated with the new block_hash and ack set to false.
 
@@ -393,7 +334,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError> {
+    pub fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorError> {
         match data {
             AckMonitorNews::Transaction(tx_id, extra_data) => {
                 let key = self.get_key(MonitorKey::TransactionsNews);
@@ -449,7 +390,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn get_monitors(&self) -> Result<Vec<TypesToMonitorStore>, MonitorStoreError> {
+    pub fn get_monitors(&self) -> Result<Vec<TypesToMonitorStore>, MonitorError> {
         let mut monitors = Vec::<TypesToMonitorStore>::new();
 
         // Get active transactions
@@ -514,11 +455,11 @@ impl MonitorStoreApi for MonitorStore {
         Ok(monitors)
     }
 
-    fn add_monitor(
+    pub fn add_monitor(
         &self,
         data: TypesToMonitor,
         search_in_mempool: bool,
-    ) -> Result<(), MonitorStoreError> {
+    ) -> Result<(), MonitorError> {
         let store_data: Vec<TypesToMonitorStore> = to_store_data(data, search_in_mempool);
         for item in store_data {
             match item {
@@ -655,7 +596,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
+    pub fn deactivate_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
         match data {
             TypesToMonitor::Transactions(tx_ids, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::Transactions(true));
@@ -794,7 +735,7 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorStoreError> {
+    pub fn cancel_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
         match data {
             TypesToMonitor::Transactions(tx_ids, extra_data, _) => {
                 let active_key = self.get_key(MonitorKey::Transactions(true));
@@ -883,10 +824,10 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn update_spending_utxo_monitor(
+    pub fn update_spending_utxo_monitor(
         &self,
         data: (Txid, u32, Option<Txid>),
-    ) -> Result<(), MonitorStoreError> {
+    ) -> Result<(), MonitorError> {
         // Update spender_tx_id for the given (txid,vout) across all entries.
         let key = self.get_key(MonitorKey::SpendingUTXOTransactions(true));
         let mut txs: Vec<SpendingUTXOMonitor> = self.store.get(&key, None)?.unwrap_or_default();
@@ -904,11 +845,11 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn get_transaction_trigger_sent(
+    pub fn get_transaction_trigger_sent(
         &self,
         tx_id: Txid,
         extra_data: &str,
-    ) -> Result<bool, MonitorStoreError> {
+    ) -> Result<bool, MonitorError> {
         let key = self.get_key(MonitorKey::Transactions(true));
         let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
 
@@ -916,25 +857,25 @@ impl MonitorStoreApi for MonitorStore {
             if let Some(entry) = monitor.entries.iter().find(|e| e.extra_data == extra_data) {
                 Ok(entry.trigger_sent)
             } else {
-                Err(MonitorStoreError::TransactionNotFound(format!(
+                Err(MonitorError::TransactionNotFound(format!(
                     "Transaction with tx_id {} and extra_data {} not found when trying to get trigger_sent flag",
                     tx_id, extra_data
                 )))
             }
         } else {
-            Err(MonitorStoreError::TransactionNotFound(format!(
+            Err(MonitorError::TransactionNotFound(format!(
                 "Transaction with tx_id {} not found when trying to get trigger_sent flag",
                 tx_id
             )))
         }
     }
 
-    fn update_transaction_trigger_sent(
+    pub fn update_transaction_trigger_sent(
         &self,
         tx_id: Txid,
         extra_data: &str,
         trigger_sent: bool,
-    ) -> Result<(), MonitorStoreError> {
+    ) -> Result<(), MonitorError> {
         let key = self.get_key(MonitorKey::Transactions(true));
         let mut txs: Vec<SetTransactionMonitorEntry> =
             self.store.get(&key, None)?.unwrap_or_default();
@@ -953,11 +894,11 @@ impl MonitorStoreApi for MonitorStore {
         Ok(())
     }
 
-    fn get_transaction_notified_block_hash(
+    pub fn get_transaction_notified_block_hash(
         &self,
         tx_id: Txid,
         extra_data: &str,
-    ) -> Result<Option<BlockHash>, MonitorStoreError> {
+    ) -> Result<Option<BlockHash>, MonitorError> {
         let key = self.get_key(MonitorKey::Transactions(true));
         let txs: Vec<SetTransactionMonitorEntry> = self.store.get(&key, None)?.unwrap_or_default();
 
@@ -969,12 +910,12 @@ impl MonitorStoreApi for MonitorStore {
         Ok(None)
     }
 
-    fn update_transaction_notified_block_hash(
+    pub fn update_transaction_notified_block_hash(
         &self,
         tx_id: Txid,
         extra_data: &str,
         block_hash: Option<BlockHash>,
-    ) -> Result<(), MonitorStoreError> {
+    ) -> Result<(), MonitorError> {
         let key = self.get_key(MonitorKey::Transactions(true));
         let mut txs: Vec<SetTransactionMonitorEntry> =
             self.store.get(&key, None)?.unwrap_or_default();

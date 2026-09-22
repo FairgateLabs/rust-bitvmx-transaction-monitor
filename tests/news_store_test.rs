@@ -1,6 +1,6 @@
 use bitcoin::{absolute::LockTime, BlockHash, Transaction};
 use bitvmx_transaction_monitor::{
-    store::{MonitorStore, MonitorStoreApi, MonitoredTypes},
+    store::{MonitorStore, MonitoredTypes},
     types::AckMonitorNews,
 };
 

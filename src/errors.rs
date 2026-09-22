@@ -8,8 +8,8 @@ pub enum MonitorError {
     #[error("Error with Indexer: {0}")]
     IndexerError(#[from] IndexerError),
 
-    #[error("Error with Monitor Store: {0}")]
-    MonitorStoreError(#[from] MonitorStoreError),
+    #[error("Error with Internal Storage: {0}")]
+    StorageError(#[from] StorageError),
 
     #[error("Bitcoin Client Error: {0}")]
     BitcoinClientError(#[from] BitcoinClientError),
@@ -25,16 +25,4 @@ pub enum MonitorError {
 
     #[error("Invalid retention depth: the indexer keeps {0} blocks, monitoring needs {1}")]
     InvalidRetentionDepth(u32, u32),
-}
-
-#[derive(Error, Debug)]
-pub enum MonitorStoreError {
-    #[error("Error with Internal Storage: {0}")]
-    InternalStorageError(#[from] StorageError),
-
-    #[error("Unexpected error: {0}")]
-    UnexpectedError(String),
-
-    #[error("Transaction not found: {0}")]
-    TransactionNotFound(String),
 }

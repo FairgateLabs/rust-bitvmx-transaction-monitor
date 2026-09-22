@@ -1,7 +1,7 @@
 use crate::config::{MonitorSettings, MonitorSettingsConfig};
 use crate::errors::MonitorError;
 use crate::helper::{is_spending_output, matches_output_pattern};
-use crate::store::{MonitorStore, MonitorStoreApi, MonitoredTypes, TypesToMonitorStore};
+use crate::store::{MonitorStore, MonitoredTypes, TypesToMonitorStore};
 use crate::types::{
     AckMonitorNews, MonitorNews, OutputPatternFilter, TransactionNews, TypesToMonitor,
 };
@@ -63,8 +63,7 @@ impl Monitor {
         }
 
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let indexer_store = IndexerStore::new(storage.clone())
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+        let indexer_store = IndexerStore::new(storage.clone())?;
         let indexer = Indexer::new(
             bitcoin_client,
             Rc::new(indexer_store),
@@ -249,9 +248,7 @@ impl Monitor {
         if search_in_mempool {
             if let TypesToMonitor::Transactions(txids, _, _) = &data {
                 for txid in txids {
-                    self.indexer
-                        .add_mempool_watch(*txid)
-                        .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+                    self.indexer.add_mempool_watch(*txid)?;
                 }
             }
         }
@@ -400,9 +397,7 @@ impl Monitor {
     /// - `Ok(u64)`: The estimated fee rate in satoshis per byte
     /// - `Err`: If there was an error retrieving the fee rate
     pub fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
-        self.indexer
-            .get_estimated_fee_rate()
-            .map_err(MonitorError::IndexerError)
+        Ok(self.indexer.get_estimated_fee_rate()?)
     }
 
     /// Builds the context string for spending UTXO transactions
@@ -639,9 +634,11 @@ impl Monitor {
             // Remember the block that included the tx at this notification, so a later reorg into a
             // different block is recognized as a resend.
             if number_confirmation_trigger.is_some() {
-                self.store
-                    .update_transaction_notified_block_hash(tx_id, &extra_data, Some(tx_block_hash))
-                    .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
+                self.store.update_transaction_notified_block_hash(
+                    tx_id,
+                    &extra_data,
+                    Some(tx_block_hash),
+                )?;
             }
         }
 

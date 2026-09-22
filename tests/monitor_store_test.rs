@@ -1,6 +1,6 @@
 use bitcoin::{absolute::LockTime, Transaction, Txid};
 use bitvmx_transaction_monitor::{
-    store::{MonitorStore, MonitorStoreApi, TypesToMonitorStore},
+    store::{MonitorStore, TypesToMonitorStore},
     types::{OutputPatternFilter, TypesToMonitor},
 };
 use std::{rc::Rc, str::FromStr};
