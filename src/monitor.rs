@@ -46,20 +46,7 @@ impl Monitor {
         settings: Option<MonitorSettingsConfig>,
     ) -> Result<Self, MonitorError> {
         let settings = MonitorSettings::from(settings.unwrap_or_default());
-
-        // A transaction is watched until it reaches max_monitoring_confirmations, so the indexer must keep at least that many blocks.
-        let retention_depth = settings
-            .indexer_settings
-            .clone()
-            .unwrap_or_default()
-            .retention_depth;
-
-        if retention_depth < settings.max_monitoring_confirmations {
-            return Err(MonitorError::InvalidRetentionDepth(
-                retention_depth,
-                settings.max_monitoring_confirmations,
-            ));
-        }
+        settings.validate()?;
 
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer = Indexer::new(

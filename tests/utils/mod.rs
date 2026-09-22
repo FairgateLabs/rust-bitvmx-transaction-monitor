@@ -8,7 +8,6 @@ use bitcoin_indexer::config::IndexerSettings;
 use bitcoincore_rpc::RpcApi;
 use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
-use bitvmx_settings::settings;
 use bitvmx_transaction_monitor::{
     config::MonitorConfig,
     monitor::Monitor,
@@ -53,17 +52,15 @@ pub fn create_test_setup(
         .with_max_level(tracing::Level::INFO)
         .try_init();
 
-    let config = settings::load_config_file::<MonitorConfig>(Some(
-        "config/monitor_config.yaml".to_string(),
-    ))?;
+    let config = MonitorConfig::load_config("config/monitor_config.yaml")?;
 
     let bitcoind_config = BitcoindConfig::default();
 
-    let bitcoind = Bitcoind::new(bitcoind_config, config.bitcoin.clone(), None);
+    let bitcoind = Bitcoind::new(bitcoind_config, config.rpc.clone(), None);
 
     bitcoind.start()?;
 
-    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
+    let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
 
     mine_blocks(&bitcoin_client, 120)?;
 
@@ -77,11 +74,11 @@ pub fn create_test_setup(
         indexer_settings: Some(IndexerSettings::default()),
     };
 
-    let monitor = Monitor::new(&config.bitcoin, storage, Some(monitor_settings))?;
+    let monitor = Monitor::new(&config.rpc, storage, Some(monitor_settings))?;
 
     sync_monitor(&monitor)?;
 
-    let bitcoin_client = BitcoinClient::new_from_config(&config.bitcoin)?;
+    let bitcoin_client = BitcoinClient::new_from_config(&config.rpc)?;
 
     Ok((bitcoin_client, monitor, bitcoind))
 }
