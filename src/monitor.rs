@@ -7,7 +7,6 @@ use crate::types::{
 };
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::Indexer;
-use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::types::{FullBlock, TransactionStatus};
 use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
@@ -25,9 +24,9 @@ const INTERNAL_SPENDING_UTXO: &str = "INTERNAL_SPENDING_UTXO";
 const INTERNAL_OUTPUT_PATTERN: &str = "INTERNAL_OUTPUT_PATTERN_";
 
 pub struct Monitor {
-    pub indexer: IndexerType,
-    pub store: MonitorStore,
-    pub settings: MonitorSettings,
+    indexer: IndexerType,
+    store: MonitorStore,
+    settings: MonitorSettings,
 }
 
 impl Monitor {
@@ -35,13 +34,13 @@ impl Monitor {
     ///
     /// # Arguments
     /// * `rpc_config` - The RPC configuration to use for the indexer
-    /// * `storage` - The storage to use for the monitor
+    /// * `storage` - The storage the monitor and the indexer write to
     /// * `settings` - The settings to use for the monitor
     ///
     /// # Returns
     /// - `Ok(Monitor)`: The new Monitor instance
     /// - `Err(MonitorError)`: If there was an error creating the Monitor instance
-    pub fn new_with_paths(
+    pub fn new(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
         settings: Option<MonitorSettingsConfig>,
@@ -63,10 +62,9 @@ impl Monitor {
         }
 
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
-        let indexer_store = IndexerStore::new(storage.clone())?;
         let indexer = Indexer::new(
             bitcoin_client,
-            Rc::new(indexer_store),
+            storage.clone(),
             settings.indexer_settings.clone(),
         )?;
 
@@ -77,6 +75,12 @@ impl Monitor {
             store,
             settings,
         })
+    }
+
+    /// Number of confirmations a transaction is monitored for. Once a transaction reaches it the monitor stops
+    /// watching it, so it is also the reorg depth the monitor can still report on.
+    pub fn max_monitoring_confirmations(&self) -> u32 {
+        self.settings.max_monitoring_confirmations
     }
 
     /// Checks if the monitor is ready and fully synced with the blockchain.

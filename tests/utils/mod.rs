@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use bitcoin::{Amount, Transaction, Txid};
-use bitcoin_indexer::{config::IndexerSettings, indexer::Indexer, store::IndexerStore};
+use bitcoin_indexer::config::IndexerSettings;
 use bitcoincore_rpc::RpcApi;
 use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
 use bitvmx_bitcoin_rpc::bitcoin_client::{BitcoinClient, BitcoinClientApi};
@@ -47,9 +47,7 @@ pub fn create_test_setup(
     bitvmx_transaction_monitor::monitor::Monitor,
     Bitcoind,
 )> {
-    use bitvmx_transaction_monitor::{
-        config::MonitorSettings, monitor::Monitor, store::MonitorStore,
-    };
+    use bitvmx_transaction_monitor::{config::MonitorSettingsConfig, monitor::Monitor};
 
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
@@ -74,28 +72,12 @@ pub fn create_test_setup(
     let storage_config = storage_backend::storage_config::StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&storage_config)?);
 
-    let indexer_settings = IndexerSettings::default();
-
-    let indexer_store = IndexerStore::new(storage.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to create IndexerStore: {}", e))?;
-
-    let indexer = Indexer::new(
-        bitcoin_client,
-        Rc::new(indexer_store),
-        Some(indexer_settings.clone()),
-    )?;
-
-    let store = MonitorStore::new(storage)?;
-    let monitor_settings = MonitorSettings {
-        max_monitoring_confirmations,
-        indexer_settings: Some(indexer_settings),
+    let monitor_settings = MonitorSettingsConfig {
+        max_monitoring_confirmations: Some(max_monitoring_confirmations),
+        indexer_settings: Some(IndexerSettings::default()),
     };
 
-    let monitor = Monitor {
-        indexer,
-        store,
-        settings: monitor_settings,
-    };
+    let monitor = Monitor::new(&config.bitcoin, storage, Some(monitor_settings))?;
 
     sync_monitor(&monitor)?;
 
