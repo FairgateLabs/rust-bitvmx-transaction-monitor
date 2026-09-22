@@ -212,7 +212,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
             let transaction_status = &n.status;
             let context = &n.context;
             if let Some(pos) = txs_news_should_be.iter().position(|x| {
-                x.0 == transaction_status.tx.as_ref().unwrap().compute_txid() && x.1 == context
+                transaction_status.tx_id_or_err().is_ok_and(|id| id == x.0) && x.1 == context
             }) {
                 txs_news_should_be.remove(pos);
             }
@@ -229,7 +229,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
     for news in &spending_utxo_news_count {
         if let MonitorNews::SpendingUTXOTransaction(_, _, transaction_status, context) = news {
             if let Some(pos) = spending_utxo_news_should_be.iter().position(|x| {
-                x.0 == transaction_status.tx.as_ref().unwrap().compute_txid() && x.1 == context
+                transaction_status.tx_id_or_err().is_ok_and(|id| id == x.0) && x.1 == context
             }) {
                 spending_utxo_news_should_be.remove(pos);
             }
@@ -259,7 +259,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
 
     // Verify that the NewBlock news matches the current best block height
     if let MonitorNews::NewBlock(block_height, _) = &news[0] {
-        let block_height_should_be = bitcoin_client.get_best_block()?;
+        let block_height_should_be = bitcoin_client.get_tip_height()?;
         assert_eq!(
             block_height_should_be, *block_height,
             "Expected block height {:?} should be {:?}",

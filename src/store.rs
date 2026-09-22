@@ -21,7 +21,7 @@
 use crate::{
     errors::MonitorStoreError,
     types::{
-        AckMonitorNews, NewsAck, OutputPatternFilter, OutputPatternNewsEntry,
+        AckMonitorNews, NewBlockNewsEntry, NewsAck, OutputPatternFilter, OutputPatternNewsEntry,
         OutputPatternSubscription, SetTransactionMonitorEntry, SpendingUTXOMonitor,
         SpendingUTXOMonitorEntry, SpendingUTXONewsEntry, TransactionMonitorEntry,
         TransactionNewsEntry, TypesToMonitor,
@@ -49,16 +49,11 @@ enum MonitorKey {
     OutputPatternTransactionsNews,
 }
 
-enum BlockchainKey {
-    CurrentBlockHeight,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MonitoredTypes {
-    // Txid, context, resent_due_to_reorg.
-    Transaction(Txid, String, bool),
+    Transaction(Txid, String, bool), // Txid, context, resent_due_to_reorg.
     SpendingUTXOTransaction(Txid, u32, String, Txid),
-    NewBlock(BlockHash),
+    NewBlock(BlockHeight, BlockHash), // Height and hash of the indexed block.
     OutputPatternTransaction(Txid, Vec<u8>),
 }
 
@@ -125,8 +120,6 @@ pub trait MonitorStoreApi {
 
     fn ack_news(&self, data: AckMonitorNews) -> Result<(), MonitorStoreError>;
 
-    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError>;
-    fn update_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError>;
     fn has_pending_work(&self) -> Result<bool, MonitorStoreError>;
     fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorStoreError>;
 
@@ -185,15 +178,6 @@ impl MonitorStore {
             }
         }
     }
-
-    fn get_blockchain_key(&self, key: BlockchainKey) -> String {
-        let prefix = "monitor";
-        match key {
-            BlockchainKey::CurrentBlockHeight => {
-                format!("{prefix}/blockchain/current_block_height")
-            }
-        }
-    }
 }
 
 #[automock]
@@ -208,22 +192,6 @@ impl MonitorStoreApi for MonitorStore {
         let key = self.get_key(MonitorKey::PendingWork);
         let pending_work = self.store.get::<_, bool>(&key, None)?.unwrap_or(false);
         Ok(pending_work)
-    }
-
-    fn get_monitor_height(&self) -> Result<BlockHeight, MonitorStoreError> {
-        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
-        let last_block_height = self
-            .store
-            .get::<_, BlockHeight>(&last_block_height_key, None)?
-            .unwrap_or_default();
-
-        Ok(last_block_height)
-    }
-
-    fn update_monitor_height(&self, height: BlockHeight) -> Result<(), MonitorStoreError> {
-        let last_block_height_key = self.get_blockchain_key(BlockchainKey::CurrentBlockHeight);
-        self.store.set(last_block_height_key, height, None)?;
-        Ok(())
     }
 
     fn get_news(&self) -> Result<Vec<MonitoredTypes>, MonitorStoreError> {
@@ -273,11 +241,11 @@ impl MonitorStoreApi for MonitorStore {
         }
 
         let block_news_key = self.get_key(MonitorKey::NewBlockNews);
-        let block_news: Option<NewsAck> = self.store.get(&block_news_key, None)?;
+        let block_news: Option<NewBlockNewsEntry> = self.store.get(&block_news_key, None)?;
 
-        if let Some(ack) = block_news {
-            if !ack.acknowledged {
-                news.push(MonitoredTypes::NewBlock(ack.block_hash));
+        if let Some(entry) = block_news {
+            if !entry.ack.acknowledged {
+                news.push(MonitoredTypes::NewBlock(entry.height, entry.ack.block_hash));
             }
         }
 
@@ -399,20 +367,25 @@ impl MonitorStoreApi for MonitorStore {
 
                 self.store.set(&utxo_news_key, &utxo_news, None)?;
             }
-            MonitoredTypes::NewBlock(hash) => {
+            MonitoredTypes::NewBlock(height, hash) => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
 
-                let data: Option<NewsAck> = self.store.get(&key, None)?;
+                let data: Option<NewBlockNewsEntry> = self.store.get(&key, None)?;
 
-                if let Some(ack) = data {
-                    if ack.block_hash != hash {
-                        // Replace the notification with the new block hash
-                        self.store
-                            .set(&key, NewsAck::new(current_block_hash, false), None)?;
+                let entry = NewBlockNewsEntry {
+                    height,
+                    ack: NewsAck::new(hash, false),
+                };
+
+                match data {
+                    // Replace the notification when it is about a different block
+                    Some(stored) if stored.ack.block_hash != hash => {
+                        self.store.set(&key, entry, None)?;
                     }
-                } else {
-                    self.store
-                        .set(&key, NewsAck::new(current_block_hash, false), None)?;
+                    Some(_) => {}
+                    None => {
+                        self.store.set(&key, entry, None)?;
+                    }
                 }
             }
         }
@@ -464,10 +437,10 @@ impl MonitorStoreApi for MonitorStore {
             }
             AckMonitorNews::NewBlock => {
                 let key = self.get_key(MonitorKey::NewBlockNews);
-                let mut new_block_news: Option<NewsAck> = self.store.get(&key, None)?;
+                let mut new_block_news: Option<NewBlockNewsEntry> = self.store.get(&key, None)?;
 
-                if let Some(ack) = new_block_news.as_mut() {
-                    ack.acknowledged = true;
+                if let Some(entry) = new_block_news.as_mut() {
+                    entry.ack.acknowledged = true;
                     self.store.set(&key, new_block_news, None)?;
                 }
             }

@@ -127,7 +127,7 @@ pub fn mine_blocks(bitcoin_client: &BitcoinClient, number_blocks: u64) -> Result
 
 /// Current best block height.
 pub fn best_height(bitcoin_client: &BitcoinClient) -> Result<u32> {
-    Ok(bitcoin_client.get_best_block()?)
+    Ok(bitcoin_client.get_tip_height()?)
 }
 
 /// Block hash at a given height on the active chain.
@@ -276,23 +276,25 @@ pub fn assert_spending_utxo_news(
             assert_eq!(*vout, target_vout, "Expected vout {}", target_vout);
             assert_eq!(context, extra_data, "Expected extra_data {}", extra_data);
             assert_eq!(
-                tx_status.confirmations, confirmations,
+                tx_status.confirmations(),
+                confirmations,
                 "Expected {} confirmations, got {}",
-                confirmations, tx_status.confirmations
+                confirmations,
+                tx_status.confirmations()
             );
             assert_eq!(
-                tx_status.tx.as_ref().unwrap().compute_txid(),
+                tx_status.tx_id_or_err()?,
                 spender_txid,
                 "Expected spender txid {}, got {}",
                 spender_txid,
-                tx_status.tx.as_ref().unwrap().compute_txid()
+                tx_status.tx_id_or_err()?
             );
             assert_eq!(
-                tx_status.tx.as_ref().unwrap().compute_txid(),
+                tx_status.tx_id_or_err()?,
                 spending_txid,
                 "Expected spending txid {}, got {}",
                 spending_txid,
-                tx_status.tx.as_ref().unwrap().compute_txid()
+                tx_status.tx_id_or_err()?
             );
         }
         _ => panic!("Expected SpendingUTXOTransaction news, got {:?}", news),
@@ -404,9 +406,11 @@ pub fn assert_output_pattern_news(
                 tag
             );
             assert_eq!(
-                tx_status.confirmations, confirmations,
+                tx_status.confirmations(),
+                confirmations,
                 "Expected {} confirmations, got {}",
-                confirmations, tx_status.confirmations
+                confirmations,
+                tx_status.confirmations()
             );
         }
         _ => panic!("Expected OutputPatternTransaction news, got {:?}", news),
@@ -514,7 +518,7 @@ pub fn assert_tx_news(
         MonitorNews::Transaction(n) => {
             assert_eq!(n.tx_id, tx_id);
             assert_eq!(n.context, extra_data);
-            assert_eq!(n.status.confirmations, confirmations);
+            assert_eq!(n.status.confirmations(), confirmations);
         }
         _ => panic!("Expected Transaction news"),
     }
@@ -533,7 +537,7 @@ pub fn assert_tx_news_reorg(
         MonitorNews::Transaction(n) => {
             assert_eq!(n.tx_id, tx_id);
             assert_eq!(n.context, extra_data);
-            assert_eq!(n.status.confirmations, confirmations);
+            assert_eq!(n.status.confirmations(), confirmations);
             assert_eq!(
                 n.resent_due_to_reorg, expected_resent_due_to_reorg,
                 "resent_due_to_reorg mismatch"

@@ -212,7 +212,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     ))?;
 
     // Test duplicate new block news
-    let block_news = MonitoredTypes::NewBlock(block_hash);
+    let block_news = MonitoredTypes::NewBlock(1, block_hash);
     store.update_news(block_news.clone(), block_hash)?;
     store.update_news(block_news.clone(), block_hash)?; // Try adding same block news again
     let news = store.get_news()?;
@@ -412,7 +412,7 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 0);
 
     // Test multiple new block notifications
-    let block_news1 = MonitoredTypes::NewBlock(block_hash);
+    let block_news1 = MonitoredTypes::NewBlock(1, block_hash);
     store.update_news(block_news1.clone(), block_hash)?;
 
     let news = store.get_news()?;

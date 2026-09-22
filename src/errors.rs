@@ -22,6 +22,9 @@ pub enum MonitorError {
 
     #[error("Invalid confirmation trigger: requested {0}, max allowed {1}")]
     InvalidConfirmationTrigger(u32, u32),
+
+    #[error("Invalid retention depth: the indexer keeps {0} blocks, monitoring needs {1}")]
+    InvalidRetentionDepth(u32, u32),
 }
 
 #[derive(Error, Debug)]

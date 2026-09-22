@@ -7,7 +7,6 @@ use crate::types::{
 };
 use bitcoin::Txid;
 use bitcoin_indexer::indexer::Indexer;
-use bitcoin_indexer::indexer::IndexerApi;
 use bitcoin_indexer::store::IndexerStore;
 use bitcoin_indexer::types::{FullBlock, TransactionStatus};
 use bitcoin_indexer::IndexerType;
@@ -16,7 +15,7 @@ use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use std::rc::Rc;
 use storage_backend::storage::Storage;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Internal context prefix used to identify spending UTXO transactions in the monitor store.
 /// The full context format is: "INTERNAL_SPENDING_UTXO:{target_tx_id}:{target_utxo_index}:{original_extra_data}"
@@ -48,6 +47,21 @@ impl Monitor {
         settings: Option<MonitorSettingsConfig>,
     ) -> Result<Self, MonitorError> {
         let settings = MonitorSettings::from(settings.unwrap_or_default());
+
+        // A transaction is watched until it reaches max_monitoring_confirmations, so the indexer must keep at least that many blocks.
+        let retention_depth = settings
+            .indexer_settings
+            .clone()
+            .unwrap_or_default()
+            .retention_depth;
+
+        if retention_depth < settings.max_monitoring_confirmations {
+            return Err(MonitorError::InvalidRetentionDepth(
+                retention_depth,
+                settings.max_monitoring_confirmations,
+            ));
+        }
+
         let bitcoin_client = BitcoinClient::new_from_config(rpc_config)?;
         let indexer_store = IndexerStore::new(storage.clone())
             .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
@@ -89,25 +103,16 @@ impl Monitor {
     /// - `Ok(())`: If the tick completed successfully
     /// - `Err`: If there was an error during processing
     pub fn tick(&self) -> Result<(), MonitorError> {
-        self.indexer.tick()?;
+        let indexed = self.indexer.tick()?;
 
-        if !self.is_pending_work()? {
-            debug!("No pending work, skipping tick");
+        if !indexed && !self.store.has_pending_work()? {
+            debug!("No new block and no pending work, skipping tick");
             return Ok(());
         }
 
-        // Get the best block from the indexer
-        // If there's no best block, we can't process anything, so return early
-        let indexer_best_block = match self.indexer.get_best_block()? {
-            Some(block) => block,
-            None => {
-                error!("No best block available from indexer, skipping tick");
-                return Ok(());
-            }
-        };
-
-        let indexer_best_block_height = indexer_best_block.height;
-        let current_block_hash = indexer_best_block.hash;
+        let last_indexed_block = self.indexer.get_last_indexed_block()?;
+        let indexed_height = last_indexed_block.height;
+        let current_block_hash = last_indexed_block.hash;
 
         let txs_monitors = self.store.get_monitors()?;
 
@@ -123,7 +128,7 @@ impl Monitor {
                         tx_id,
                         extra_data,
                         number_confirmation_trigger,
-                        indexer_best_block_height,
+                        indexed_height,
                         current_block_hash,
                         false,
                         search_in_mempool,
@@ -137,8 +142,8 @@ impl Monitor {
                     self.process_output_pattern_transaction(
                         filter,
                         number_confirmation_trigger,
-                        &indexer_best_block,
-                        indexer_best_block_height,
+                        &last_indexed_block,
+                        indexed_height,
                         current_block_hash,
                         search_in_mempool,
                     )?;
@@ -155,50 +160,47 @@ impl Monitor {
                         target_utxo_index,
                         extra_data,
                         number_confirmation_trigger,
-                        &indexer_best_block,
-                        indexer_best_block_height,
+                        &last_indexed_block,
+                        indexed_height,
                         current_block_hash,
                         search_in_mempool,
                     )?;
                 }
                 TypesToMonitorStore::NewBlock => {
                     self.store.update_news(
-                        MonitoredTypes::NewBlock(current_block_hash),
+                        MonitoredTypes::NewBlock(indexed_height, current_block_hash),
                         current_block_hash,
                     )?;
                 }
             }
         }
 
-        self.store
-            .update_monitor_height(indexer_best_block_height)?;
-
         self.store.set_pending_work(false)?;
 
         Ok(())
     }
 
-    /// Gets the current block height that the monitor has processed.
+    /// Gets the height of the last block the indexer has read.
     ///
     /// # Returns
-    /// - `Ok(BlockHeight)`: The height of the last processed block
-    /// - `Err`: If there was an error retrieving the height
-    pub fn get_monitor_height(&self) -> Result<BlockHeight, MonitorError> {
-        self.store
-            .get_monitor_height()
-            .map_err(|e| MonitorError::UnexpectedError(e.to_string()))
+    /// - `Ok(BlockHeight)`: The height of the last indexed block
+    /// - `Err`: If the indexer has not read any block yet, or the height could not be retrieved
+    pub fn get_indexed_height(&self) -> Result<BlockHeight, MonitorError> {
+        Ok(self.indexer.get_indexed_height()?)
     }
 
-    /// Gets the current block of the monitor.
+    /// Gets the block at this height and hash, when it belongs to the chain the indexer has processed.
     ///
     /// # Returns
-    /// - `Ok(FullBlock)`: The current block of the monitor
+    /// - `Ok(Some(FullBlock))`: The block, read from the indexer or downloaded from the node
+    /// - `Ok(None)`: The indexer has not processed that block
     /// - `Err`: If there was an error retrieving the block
-    pub fn get_current_block(&self) -> Result<Option<FullBlock>, MonitorError> {
-        let block_height = self.get_monitor_height()?;
-        let block = self.indexer.get_block_by_height(block_height)?;
-
-        Ok(block)
+    pub fn get_block(
+        &self,
+        height: BlockHeight,
+        hash: &bitcoin::BlockHash,
+    ) -> Result<Option<FullBlock>, MonitorError> {
+        Ok(self.indexer.get_block(height, hash)?)
     }
 
     /// Starts monitoring transactions based on the provided monitor type.
@@ -324,11 +326,8 @@ impl Monitor {
                         tx_id, utxo_index, status, extra_data,
                     ));
                 }
-                MonitoredTypes::NewBlock(hash) => {
-                    let block_info = self.indexer.get_block_by_hash(&hash)?;
-                    if let Some(block_info) = block_info {
-                        return_news.push(MonitorNews::NewBlock(block_info.height, block_info.hash));
-                    }
+                MonitoredTypes::NewBlock(height, hash) => {
+                    return_news.push(MonitorNews::NewBlock(height, hash));
                 }
             }
         }
@@ -378,7 +377,7 @@ impl Monitor {
     /// Real-time RPC check for UTXO spendability via `gettxout`. Bypasses indexer cache.
     /// Returns true iff the `(txid, vout)` UTXO is currently unspent: in chain OR mempool
     ///  when `include_mempool` is true, chain-only when false.
-    pub fn is_utxo_unspent_rpc(
+    pub fn rpc_is_utxo_unspent(
         &self,
         txid: &Txid,
         vout: u32,
@@ -386,13 +385,13 @@ impl Monitor {
     ) -> Result<bool, MonitorError> {
         Ok(self
             .indexer
-            .is_utxo_unspent_rpc(txid, vout, include_mempool)?)
+            .rpc_is_utxo_unspent(txid, vout, include_mempool)?)
     }
 
     /// Live `getrawtransaction` confirmation probe (requires `-txindex`). Returns `None` if the node
     /// does not know the tx, `Some(0)` if in the mempool, `Some(n>=1)` if confirmed with `n` confs.
-    pub fn get_tx_confirmations(&self, txid: &Txid) -> Result<Option<u32>, MonitorError> {
-        Ok(self.indexer.get_tx_confirmations(txid)?)
+    pub fn rpc_get_tx_confirmations(&self, txid: &Txid) -> Result<Option<u32>, MonitorError> {
+        Ok(self.indexer.rpc_get_tx_confirmations(txid)?)
     }
 
     /// Gets the estimated fee rate from the indexer.
@@ -404,44 +403,6 @@ impl Monitor {
         self.indexer
             .get_estimated_fee_rate()
             .map_err(MonitorError::IndexerError)
-    }
-
-    /// Checks if the monitor has pending work to be done.
-    ///
-    /// This method determines if the monitor needs to process new blocks by checking:
-    /// 1. If there's a pending work flag set in the store
-    /// 2. If the monitor's current block matches the indexer's best block
-    ///
-    /// # Returns
-    /// - `Ok(true)`: If there's pending work (store flag is set, no block found, or block hash mismatch)
-    /// - `Ok(false)`: If the monitor is fully synced with the indexer
-    /// - `Err`: If there was an error checking the sync status
-    fn is_pending_work(&self) -> Result<bool, MonitorError> {
-        let is_pending_work = self.store.has_pending_work()?;
-
-        if is_pending_work {
-            return Ok(true);
-        }
-
-        let monitor_block = match self.get_current_block()? {
-            Some(block) => block,
-            None => {
-                debug!("No block found in Monitor, pending work to be done");
-                return Ok(true);
-            }
-        };
-
-        let indexer_block = match self.indexer.get_best_block()? {
-            Some(block) => block,
-            None => return Ok(false),
-        };
-
-        if indexer_block.hash != monitor_block.hash {
-            debug!("Best block hash mismatch, pending work to be done");
-            return Ok(true);
-        }
-
-        Ok(false)
     }
 
     /// Builds the context string for spending UTXO transactions
@@ -503,7 +464,7 @@ impl Monitor {
         extra_data: &str,
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
-        tx_block_hash: Option<bitcoin::BlockHash>,
+        tx_block_hash: bitcoin::BlockHash,
     ) -> Result<(bool, bool), MonitorError> {
         if let Some(trigger) = number_confirmation_trigger {
             if current_confirmations < trigger {
@@ -512,15 +473,13 @@ impl Monitor {
             let notified_block_hash = self
                 .store
                 .get_transaction_notified_block_hash(tx_id, extra_data)?;
-            match (notified_block_hash, tx_block_hash) {
+            match notified_block_hash {
                 // First time the trigger is reached: notify, not a reorg.
-                (None, _) => Ok((true, false)),
+                None => Ok((true, false)),
                 // Already notified while included in the same block: confirmations only grew, do not resend.
-                (Some(prev), Some(current)) if prev == current => Ok((false, false)),
+                Some(prev) if prev == tx_block_hash => Ok((false, false)),
                 // Already notified, now the tx is in a different block: a reorg re-included it, flag the resend.
-                (Some(_), Some(_)) => Ok((true, true)),
-                // Already notified but the tx currently has no including block (orphan/mempool): do not resend.
-                (Some(_), None) => Ok((false, false)),
+                Some(_) => Ok((true, true)),
             }
         } else {
             // If None, always send news when current confirmations are less than the max monitoring confirmations
@@ -551,12 +510,12 @@ impl Monitor {
         &self,
         filter: OutputPatternFilter,
         number_confirmation_trigger: Option<u32>,
-        indexer_best_block: &FullBlock,
-        indexer_best_block_height: u32,
+        last_indexed_block: &FullBlock,
+        indexed_height: u32,
         current_block_hash: bitcoin::BlockHash,
         search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
-        let new_txs_ids = self.detect_output_pattern_txs(indexer_best_block.clone(), &filter)?;
+        let new_txs_ids = self.detect_output_pattern_txs(last_indexed_block.clone(), &filter)?;
 
         let tag_hex = hex::encode(&filter.tag);
         let context = format!("{}{}", INTERNAL_OUTPUT_PATTERN, tag_hex);
@@ -576,7 +535,7 @@ impl Monitor {
                 *tx_id,
                 context.clone(),
                 number_confirmation_trigger,
-                indexer_best_block_height,
+                indexed_height,
                 current_block_hash,
                 true,
                 search_in_mempool,
@@ -592,36 +551,33 @@ impl Monitor {
         tx_id: Txid,
         extra_data: String,
         number_confirmation_trigger: Option<u32>,
-        indexer_best_block_height: BlockHeight,
+        indexed_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
         should_exist: bool,
         search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
         let tx_info = self.indexer.get_transaction(&tx_id, search_in_mempool)?;
 
-        if tx_info.is_not_found() || tx_info.is_in_mempool() {
-            if should_exist {
-                return Err(MonitorError::UnexpectedError(format!(
-                    "Transaction({}) not found or in mempool",
-                    tx_id
-                )));
+        // The block that includes the tx, and how many confirmations it has there. A transaction that is not in a
+        // block of the indexed chain has nothing to report yet.
+        let (tx_block_hash, confirmations) = match tx_info {
+            TransactionStatus::Confirmed {
+                block_hash,
+                confirmations,
+                ..
+            } => (block_hash, confirmations),
+            _ => {
+                if should_exist {
+                    return Err(MonitorError::UnexpectedError(format!(
+                        "Transaction({}) not found or in mempool",
+                        tx_id
+                    )));
+                }
+
+                // If the transaction does not exist, nothing to do.
+                return Ok(());
             }
-
-            // If the transaction does not exist, nothing to do.
-            return Ok(());
-        }
-
-        if tx_info.is_orphan() {
-            if let Some(block_info) = &tx_info.block_info {
-                info!(
-                    "Orphan Transaction({}) | Height({})",
-                    tx_id, block_info.height
-                );
-            }
-        }
-
-        // The block that currently includes the tx.
-        let tx_block_hash = tx_info.block_info.as_ref().map(|b| b.hash);
+        };
 
         // Check if we should send news based on number_confirmation_trigger, and whether this send is a
         // repeat caused by a reorg re-mining the tx into a different block.
@@ -629,7 +585,7 @@ impl Monitor {
             tx_id,
             &extra_data,
             number_confirmation_trigger,
-            tx_info.confirmations,
+            confirmations,
             tx_block_hash,
         )?;
 
@@ -671,12 +627,12 @@ impl Monitor {
             if resent_due_to_reorg {
                 warn!(
                     "Reorg resend: Transaction({}) re-notified after a reorg re-included it in a different block | Height({}) | Confirmations({})",
-                    tx_id, indexer_best_block_height, tx_info.confirmations,
+                    tx_id, indexed_height, confirmations,
                 );
             } else {
                 info!(
                     "News for Transaction({}) | Height({}) | Confirmations({})",
-                    tx_id, indexer_best_block_height, tx_info.confirmations,
+                    tx_id, indexed_height, confirmations,
                 );
             }
 
@@ -684,7 +640,7 @@ impl Monitor {
             // different block is recognized as a resend.
             if number_confirmation_trigger.is_some() {
                 self.store
-                    .update_transaction_notified_block_hash(tx_id, &extra_data, tx_block_hash)
+                    .update_transaction_notified_block_hash(tx_id, &extra_data, Some(tx_block_hash))
                     .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
             }
         }
@@ -692,7 +648,7 @@ impl Monitor {
         // Check if we should deactivate monitor based on max_monitoring_confirmations
         // Once a transaction reaches the maximum monitoring confirmations, we stop tracking it
         // to avoid unnecessary processing and storage overhead
-        if tx_info.confirmations >= self.settings.max_monitoring_confirmations {
+        if confirmations >= self.settings.max_monitoring_confirmations {
             self.store.deactivate_monitor(TypesToMonitor::Transactions(
                 vec![tx_id],
                 extra_data.clone(),
@@ -704,7 +660,7 @@ impl Monitor {
 
             info!(
                 "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
-                tx_id, indexer_best_block_height, self.settings.max_monitoring_confirmations,
+                tx_id, indexed_height, self.settings.max_monitoring_confirmations,
             );
 
             // If this is a spending UTXO transaction, also deactivate the SpendingUTXOTransaction monitor
@@ -724,7 +680,7 @@ impl Monitor {
                         "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
                         target_tx_id,
                         target_utxo_index,
-                        indexer_best_block_height,
+                        indexed_height,
                         self.settings.max_monitoring_confirmations,
                     );
             }
@@ -740,13 +696,13 @@ impl Monitor {
         target_utxo_index: u32,
         extra_data: String,
         number_confirmation_trigger: Option<u32>,
-        indexer_best_block: &FullBlock,
-        indexer_best_block_height: BlockHeight,
+        last_indexed_block: &FullBlock,
+        indexed_height: BlockHeight,
         current_block_hash: bitcoin::BlockHash,
         search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
         // Check each transaction in the new block for a spending transaction of the target UTXO
-        for tx in indexer_best_block.txs.iter() {
+        for tx in last_indexed_block.txs.iter() {
             let is_spending_output = is_spending_output(tx, target_tx_id, target_utxo_index);
 
             if is_spending_output {
@@ -770,7 +726,7 @@ impl Monitor {
                     spending_tx_id,
                     spending_context,
                     number_confirmation_trigger,
-                    indexer_best_block_height,
+                    indexed_height,
                     current_block_hash,
                     true,
                     search_in_mempool,

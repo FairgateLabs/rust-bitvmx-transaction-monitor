@@ -8,7 +8,8 @@ bitcoin:
 settings:
   max_monitoring_confirmations: 100
   indexer_settings:
-    checkpoint_height: 10
+    retention_depth: 100
+    catch_up: true
 
 storage:
   path: data

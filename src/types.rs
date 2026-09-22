@@ -155,6 +155,13 @@ impl NewsAck {
     }
 }
 
+/// New block news entry stored in storage.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct NewBlockNewsEntry {
+    pub height: BlockHeight,
+    pub ack: NewsAck,
+}
+
 /// Transaction news entry stored in storage
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TransactionNewsEntry {
