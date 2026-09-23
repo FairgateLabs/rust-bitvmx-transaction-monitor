@@ -94,6 +94,11 @@ pub fn create_and_send_funding_transaction(
     let funding_amount = Amount::from_sat(1_000_000); // 0.01 BTC
     let (transaction, vout) = bitcoin_client.fund_address(&wallet_address, funding_amount)?;
     let txid = transaction.compute_txid();
+
+    bitcoin_client
+        .client
+        .lock_unspent(&[OutPoint::new(txid, vout)])?;
+
     Ok((transaction, txid, vout))
 }
 
