@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use bitcoin::{Amount, Transaction, Txid};
+use bitcoin::{Amount, OutPoint, Transaction, Txid};
 use bitcoin_indexer::config::IndexerSettings;
 use bitcoincore_rpc::RpcApi;
 use bitcoind::{bitcoind::Bitcoind, config::BitcoindConfig};
@@ -250,9 +250,14 @@ pub fn assert_spending_utxo_news(
     confirmations: u32,
 ) -> Result<()> {
     match news {
-        MonitorNews::SpendingUTXOTransaction(tx_id, vout, tx_status, context) => {
-            assert_eq!(*tx_id, target_txid, "Expected target txid {}", target_txid);
-            assert_eq!(*vout, target_vout, "Expected vout {}", target_vout);
+        MonitorNews::SpendingUTXOTransaction(outpoint, tx_status, context) => {
+            assert_eq!(
+                *outpoint,
+                OutPoint::new(target_txid, target_vout),
+                "Expected outpoint {}:{}",
+                target_txid,
+                target_vout
+            );
             assert_eq!(context, extra_data, "Expected extra_data {}", extra_data);
             assert_eq!(
                 tx_status.confirmations(),
@@ -317,8 +322,7 @@ pub fn monitor_spending_utxo(
 ) -> Result<()> {
     monitor.monitor(
         TypesToMonitor::SpendingUTXOTransaction(
-            tx_id,
-            vout,
+            OutPoint::new(tx_id, vout),
             extra_data.to_string(),
             confirmation_trigger,
         ),
@@ -351,8 +355,7 @@ pub fn ack_spending_utxo_monitor(
     extra_data: &str,
 ) -> Result<()> {
     monitor.ack_news(AckMonitorNews::SpendingUTXOTransaction(
-        target_txid,
-        target_vout,
+        OutPoint::new(target_txid, target_vout),
         extra_data.to_string(),
     ))?;
     Ok(())

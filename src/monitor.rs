@@ -1,11 +1,11 @@
 use crate::config::{MonitorSettings, MonitorSettingsConfig};
 use crate::errors::MonitorError;
 use crate::helper::{is_spending_output, matches_output_pattern};
-use crate::store::{MonitorStore, MonitoredTypes, TypesToMonitorStore};
+use crate::store::{MonitorStore, MonitoredTypes};
 use crate::types::{
     AckMonitorNews, MonitorNews, OutputPatternFilter, TransactionNews, TypesToMonitor,
 };
-use bitcoin::Txid;
+use bitcoin::{OutPoint, Txid};
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::types::{FullBlock, TransactionStatus};
 use bitcoin_indexer::IndexerType;
@@ -55,7 +55,7 @@ impl Monitor {
             settings.indexer_settings.clone(),
         )?;
 
-        let store = MonitorStore::new(storage)?;
+        let store = MonitorStore::new(storage);
 
         Ok(Self {
             indexer,
@@ -104,65 +104,52 @@ impl Monitor {
         let indexed_height = last_indexed_block.height;
         let current_block_hash = last_indexed_block.hash;
 
-        let txs_monitors = self.store.get_monitors()?;
-
-        for tx_type in txs_monitors {
-            match tx_type {
-                TypesToMonitorStore::Transaction(
-                    tx_id,
-                    extra_data,
-                    number_confirmation_trigger,
-                    search_in_mempool,
-                ) => {
-                    self.process_transaction(
-                        tx_id,
-                        extra_data,
-                        number_confirmation_trigger,
-                        indexed_height,
-                        current_block_hash,
-                        false,
-                        search_in_mempool,
-                    )?;
-                }
-                TypesToMonitorStore::OutputPattern(
-                    filter,
-                    number_confirmation_trigger,
-                    search_in_mempool,
-                ) => {
-                    self.process_output_pattern_transaction(
-                        filter,
-                        number_confirmation_trigger,
-                        &last_indexed_block,
-                        indexed_height,
-                        current_block_hash,
-                        search_in_mempool,
-                    )?;
-                }
-                TypesToMonitorStore::SpendingUTXOTransaction(
-                    target_tx_id,
-                    target_utxo_index,
-                    extra_data,
-                    number_confirmation_trigger,
-                    search_in_mempool,
-                ) => {
-                    self.process_spending_utxo_transaction(
-                        target_tx_id,
-                        target_utxo_index,
-                        extra_data,
-                        number_confirmation_trigger,
-                        &last_indexed_block,
-                        indexed_height,
-                        current_block_hash,
-                        search_in_mempool,
-                    )?;
-                }
-                TypesToMonitorStore::NewBlock => {
-                    self.store.update_news(
-                        MonitoredTypes::NewBlock(indexed_height, current_block_hash),
-                        current_block_hash,
-                    )?;
-                }
+        for monitor in self.store.get_transaction_monitors()? {
+            for entry in monitor.entries {
+                self.process_transaction(
+                    monitor.tx_id,
+                    entry.entry.context,
+                    entry.entry.confirmation_trigger,
+                    indexed_height,
+                    current_block_hash,
+                    false,
+                    entry.entry.search_in_mempool,
+                )?;
             }
+        }
+
+        for monitor in self.store.get_output_pattern_monitors()? {
+            for entry in monitor.entries {
+                self.process_output_pattern_transaction(
+                    monitor.filter.clone(),
+                    entry.confirmation_trigger,
+                    &last_indexed_block,
+                    indexed_height,
+                    current_block_hash,
+                    entry.search_in_mempool,
+                )?;
+            }
+        }
+
+        for monitor in self.store.get_spending_utxo_monitors()? {
+            for entry in monitor.entries {
+                self.process_spending_utxo_transaction(
+                    monitor.outpoint,
+                    entry.context,
+                    entry.confirmation_trigger,
+                    &last_indexed_block,
+                    indexed_height,
+                    current_block_hash,
+                    entry.search_in_mempool,
+                )?;
+            }
+        }
+
+        if self.store.is_monitoring_new_block()? {
+            self.store.update_news(
+                MonitoredTypes::NewBlock(indexed_height, current_block_hash),
+                current_block_hash,
+            )?;
         }
 
         self.store.set_pending_work(false)?;
@@ -221,7 +208,7 @@ impl Monitor {
         match &data {
             TypesToMonitor::Transactions(_, _, confirmation_trigger)
             | TypesToMonitor::OutputPattern(_, confirmation_trigger)
-            | TypesToMonitor::SpendingUTXOTransaction(_, _, _, confirmation_trigger) => {
+            | TypesToMonitor::SpendingUTXOTransaction(_, _, confirmation_trigger) => {
                 if let Some(confirmation_trigger) = confirmation_trigger {
                     if *confirmation_trigger >= self.settings.max_monitoring_confirmations {
                         return Err(MonitorError::InvalidConfirmationTrigger(
@@ -268,7 +255,7 @@ impl Monitor {
                 let _ = self.indexer.remove_mempool_watch(txid);
             }
         }
-        self.store.cancel_monitor(data)?;
+        self.store.remove_monitor(data)?;
 
         Ok(())
     }
@@ -303,15 +290,10 @@ impl Monitor {
                     let status = self.get_tx_status(&tx_id, true)?;
                     return_news.push(MonitorNews::OutputPatternTransaction(tx_id, status, tag));
                 }
-                MonitoredTypes::SpendingUTXOTransaction(
-                    tx_id,
-                    utxo_index,
-                    extra_data,
-                    spender_tx_id,
-                ) => {
+                MonitoredTypes::SpendingUTXOTransaction(outpoint, extra_data, spender_tx_id) => {
                     let status = self.get_tx_status(&spender_tx_id, true)?;
                     return_news.push(MonitorNews::SpendingUTXOTransaction(
-                        tx_id, utxo_index, status, extra_data,
+                        outpoint, status, extra_data,
                     ));
                 }
                 MonitoredTypes::NewBlock(height, hash) => {
@@ -392,20 +374,16 @@ impl Monitor {
     }
 
     /// Builds the context string for spending UTXO transactions
-    fn build_spending_utxo_context(
-        target_tx_id: Txid,
-        target_utxo_index: u32,
-        extra_data: &str,
-    ) -> String {
+    fn build_spending_utxo_context(outpoint: OutPoint, extra_data: &str) -> String {
         format!(
             "{}:{}:{}:{}",
-            INTERNAL_SPENDING_UTXO, target_tx_id, target_utxo_index, extra_data
+            INTERNAL_SPENDING_UTXO, outpoint.txid, outpoint.vout, extra_data
         )
     }
 
-    /// Parses the spending UTXO context and extracts target_tx_id, target_utxo_index, and original_extra_data
+    /// Parses the spending UTXO context and extracts the watched outpoint and the original extra data
     /// Returns None if the context is not valid or cannot be parsed
-    fn parse_spending_utxo_context(extra_data: &str) -> Option<(Txid, u32, String)> {
+    fn parse_spending_utxo_context(extra_data: &str) -> Option<(OutPoint, String)> {
         if !extra_data.starts_with(INTERNAL_SPENDING_UTXO) {
             return None;
         }
@@ -417,7 +395,10 @@ impl Monitor {
                 (parts[1].parse::<Txid>(), parts[2].parse::<u32>())
             {
                 let original_extra_data = parts[3..].join(":");
-                return Some((target_tx_id, target_utxo_index, original_extra_data));
+                return Some((
+                    OutPoint::new(target_tx_id, target_utxo_index),
+                    original_extra_data,
+                ));
             }
         }
 
@@ -588,13 +569,12 @@ impl Monitor {
                     )?;
                 }
                 ed if ed.starts_with(INTERNAL_SPENDING_UTXO) => {
-                    if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
+                    if let Some((outpoint, original_extra_data)) =
                         Self::parse_spending_utxo_context(ed)
                     {
                         self.store.update_news(
                             MonitoredTypes::SpendingUTXOTransaction(
-                                target_tx_id,
-                                target_utxo_index,
+                                outpoint,
                                 original_extra_data,
                                 tx_id,
                             ),
@@ -637,7 +617,7 @@ impl Monitor {
         // Once a transaction reaches the maximum monitoring confirmations, we stop tracking it
         // to avoid unnecessary processing and storage overhead
         if confirmations >= self.settings.max_monitoring_confirmations {
-            self.store.deactivate_monitor(TypesToMonitor::Transactions(
+            self.store.remove_monitor(TypesToMonitor::Transactions(
                 vec![tx_id],
                 extra_data.clone(),
                 number_confirmation_trigger,
@@ -651,26 +631,22 @@ impl Monitor {
                 tx_id, indexed_height, self.settings.max_monitoring_confirmations,
             );
 
-            // If this is a spending UTXO transaction, also deactivate the SpendingUTXOTransaction monitor
+            // If this is a spending UTXO transaction, also remove the SpendingUTXOTransaction monitor
             // This ensures both the transaction monitor and the UTXO spending monitor are properly cleaned up
-            if let Some((target_tx_id, target_utxo_index, original_extra_data)) =
+            if let Some((outpoint, original_extra_data)) =
                 Self::parse_spending_utxo_context(&extra_data)
             {
                 self.store
-                    .deactivate_monitor(TypesToMonitor::SpendingUTXOTransaction(
-                        target_tx_id,
-                        target_utxo_index,
+                    .remove_monitor(TypesToMonitor::SpendingUTXOTransaction(
+                        outpoint,
                         original_extra_data,
                         number_confirmation_trigger,
                     ))?;
 
                 info!(
-                        "Stop monitoring SpendingUTXOTransaction({}:{}) | Height({}) | Confirmations({})",
-                        target_tx_id,
-                        target_utxo_index,
-                        indexed_height,
-                        self.settings.max_monitoring_confirmations,
-                    );
+                    "Stop monitoring SpendingUTXOTransaction({}) | Height({}) | Confirmations({})",
+                    outpoint, indexed_height, self.settings.max_monitoring_confirmations,
+                );
             }
         }
 
@@ -680,8 +656,7 @@ impl Monitor {
     #[allow(clippy::too_many_arguments)]
     fn process_spending_utxo_transaction(
         &self,
-        target_tx_id: Txid,
-        target_utxo_index: u32,
+        outpoint: OutPoint,
         extra_data: String,
         number_confirmation_trigger: Option<u32>,
         last_indexed_block: &FullBlock,
@@ -691,14 +666,11 @@ impl Monitor {
     ) -> Result<(), MonitorError> {
         // Check each transaction in the new block for a spending transaction of the target UTXO
         for tx in last_indexed_block.txs.iter() {
-            let is_spending_output = is_spending_output(tx, target_tx_id, target_utxo_index);
-
-            if is_spending_output {
+            if is_spending_output(tx, outpoint) {
                 let spending_tx_id = tx.compute_txid();
 
                 // Create a monitor for the spending transaction with the special context
-                let spending_context =
-                    Self::build_spending_utxo_context(target_tx_id, target_utxo_index, &extra_data);
+                let spending_context = Self::build_spending_utxo_context(outpoint, &extra_data);
 
                 self.store.add_monitor(
                     TypesToMonitor::Transactions(

@@ -1,4 +1,4 @@
-use bitcoin::{absolute::LockTime, BlockHash, Transaction};
+use bitcoin::{absolute::LockTime, BlockHash, OutPoint, Transaction};
 use bitvmx_transaction_monitor::{
     store::{MonitorStore, MonitoredTypes},
     types::AckMonitorNews,
@@ -7,7 +7,6 @@ use bitvmx_transaction_monitor::{
 use std::{rc::Rc, str::FromStr};
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use utils::{clear_output, generate_random_string};
-use uuid::Uuid;
 mod utils;
 
 /// Test the news functionality of the MonitorStore
@@ -31,7 +30,7 @@ fn news_test() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
-    let store = MonitorStore::new(storage)?;
+    let store = MonitorStore::new(storage);
     let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
@@ -140,7 +139,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
-    let store = MonitorStore::new(storage)?;
+    let store = MonitorStore::new(storage);
     let tx = Transaction {
         version: bitcoin::transaction::Version::TWO,
         lock_time: LockTime::from_time(1653195600).unwrap(),
@@ -167,7 +166,7 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     ))?;
 
     // Test duplicate group transaction news
-    let context_data = Uuid::new_v4();
+    let context_data = generate_random_string();
     let monitored_tx =
         MonitoredTypes::Transaction(tx.compute_txid(), context_data.to_string(), false);
     store.update_news(monitored_tx.clone(), block_hash_1)?;
@@ -194,22 +193,13 @@ fn test_duplicate_news() -> Result<(), anyhow::Error> {
     ))?;
 
     // Test duplicate spending UTXO transaction news
-    let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(
-        tx.compute_txid(),
-        0,
-        String::new(),
-        tx.compute_txid(),
-    );
+    let spending_tx_news = MonitoredTypes::SpendingUTXOTransaction(OutPoint::new(tx.compute_txid(), 0), String::new(), tx.compute_txid());
     store.update_news(spending_tx_news.clone(), block_hash)?;
     store.update_news(spending_tx_news.clone(), block_hash)?; // Try adding same spending tx again
     let news = store.get_news()?;
     assert_eq!(news.len(), 1); // Should have only spending tx
     assert!(news.contains(&spending_tx_news));
-    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
-        tx.compute_txid(),
-        0,
-        String::new(),
-    ))?;
+    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(OutPoint::new(tx.compute_txid(), 0), String::new()))?;
 
     // Test duplicate new block news
     let block_news = MonitoredTypes::NewBlock(1, block_hash);
@@ -233,7 +223,7 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     let path = format!("test_outputs/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
     let storage = Rc::new(Storage::new(&config)?);
-    let store = MonitorStore::new(storage)?;
+    let store = MonitorStore::new(storage);
 
     // Create 3 different transactions
     let tx1 = Transaction {
@@ -293,9 +283,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 0);
 
     // Test multiple group transactions
-    let context_data1 = Uuid::new_v4();
-    let context_data2 = Uuid::new_v4();
-    let context_data3 = Uuid::new_v4();
+    let context_data1 = generate_random_string();
+    let context_data2 = generate_random_string();
+    let context_data3 = generate_random_string();
 
     let monitored_tx1 =
         MonitoredTypes::Transaction(tx1.compute_txid(), context_data1.to_string(), false);
@@ -363,24 +353,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert_eq!(news.len(), 0);
 
     // Test multiple spending UTXO transactions
-    let spending_tx1 = MonitoredTypes::SpendingUTXOTransaction(
-        tx1.compute_txid(),
-        0,
-        String::new(),
-        tx1.compute_txid(),
-    );
-    let spending_tx2 = MonitoredTypes::SpendingUTXOTransaction(
-        tx2.compute_txid(),
-        1,
-        String::new(),
-        tx1.compute_txid(),
-    );
-    let spending_tx3 = MonitoredTypes::SpendingUTXOTransaction(
-        tx3.compute_txid(),
-        2,
-        String::new(),
-        tx1.compute_txid(),
-    );
+    let spending_tx1 = MonitoredTypes::SpendingUTXOTransaction(OutPoint::new(tx1.compute_txid(), 0), String::new(), tx1.compute_txid());
+    let spending_tx2 = MonitoredTypes::SpendingUTXOTransaction(OutPoint::new(tx2.compute_txid(), 1), String::new(), tx1.compute_txid());
+    let spending_tx3 = MonitoredTypes::SpendingUTXOTransaction(OutPoint::new(tx3.compute_txid(), 2), String::new(), tx1.compute_txid());
 
     store.update_news(spending_tx1.clone(), block_hash)?;
     store.update_news(spending_tx2.clone(), block_hash)?;
@@ -392,21 +367,9 @@ fn test_multiple_transactions_per_type() -> Result<(), anyhow::Error> {
     assert!(news.contains(&spending_tx2));
     assert!(news.contains(&spending_tx3));
 
-    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
-        tx1.compute_txid(),
-        0,
-        String::new(),
-    ))?;
-    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
-        tx2.compute_txid(),
-        1,
-        String::new(),
-    ))?;
-    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(
-        tx3.compute_txid(),
-        2,
-        String::new(),
-    ))?;
+    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(OutPoint::new(tx1.compute_txid(), 0), String::new()))?;
+    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(OutPoint::new(tx2.compute_txid(), 1), String::new()))?;
+    store.ack_news(AckMonitorNews::SpendingUTXOTransaction(OutPoint::new(tx3.compute_txid(), 2), String::new()))?;
 
     let news = store.get_news()?;
     assert_eq!(news.len(), 0);

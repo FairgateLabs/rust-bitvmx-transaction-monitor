@@ -4,9 +4,12 @@
 //! It includes functions for matching output patterns and checking UTXO spending.
 
 use bitcoin::script::Instruction;
-use bitcoin::{OutPoint, Script, Transaction, Txid};
+use bitcoin::{BlockHash, OutPoint, Script, Transaction};
 
-use crate::types::OutputPatternFilter;
+use crate::types::{
+    MonitorEntry, NewsAck, OutputPatternFilter, OutputPatternMonitor, SpendingUtxoMonitor,
+    TransactionMonitor, TransactionMonitorEntry,
+};
 
 /// Extracts pushed data from a Bitcoin script.
 ///
@@ -59,17 +62,75 @@ pub fn matches_output_pattern(tx: &Transaction, filter: &OutputPatternFilter) ->
 ///
 /// # Arguments
 /// * `tx` - The transaction to check
-/// * `target_txid` - The transaction ID of the UTXO being checked
-/// * `target_vout` - The output index (vout) of the UTXO being checked
+/// * `outpoint` - The UTXO being checked
 ///
 /// # Returns
 /// `true` if the transaction spends the specified UTXO, `false` otherwise
-pub fn is_spending_output(tx: &Transaction, target_txid: Txid, target_vout: u32) -> bool {
-    tx.input.iter().any(|input| {
-        input.previous_output
-            == OutPoint {
-                txid: target_txid,
-                vout: target_vout,
-            }
-    })
+pub fn is_spending_output(tx: &Transaction, outpoint: OutPoint) -> bool {
+    tx.input
+        .iter()
+        .any(|input| input.previous_output == outpoint)
+}
+
+impl NewsAck {
+    pub fn new(block_hash: BlockHash, acknowledged: bool) -> Self {
+        Self {
+            block_hash,
+            acknowledged,
+        }
+    }
+}
+
+impl MonitorEntry {
+    pub fn new(
+        context: String,
+        confirmation_trigger: Option<u32>,
+        search_in_mempool: bool,
+    ) -> Self {
+        Self {
+            context,
+            confirmation_trigger,
+            search_in_mempool,
+        }
+    }
+}
+
+impl TransactionMonitor {
+    /// Adds a subscription, or replaces the parameters of the one under the same context.
+    /// Replacing only the parameters keeps the block the transaction was notified in.
+    pub fn add_or_replace(&mut self, entry: MonitorEntry) {
+        match self
+            .entries
+            .iter_mut()
+            .find(|e| e.entry.context == entry.context)
+        {
+            Some(existing) => existing.entry = entry,
+            None => self.entries.push(TransactionMonitorEntry {
+                entry,
+                notified_block_hash: None,
+            }),
+        }
+    }
+}
+
+impl SpendingUtxoMonitor {
+    /// Adds a subscription, or replaces the one under the same context.
+    pub fn add_or_replace(&mut self, entry: MonitorEntry) {
+        add_or_replace_entry(&mut self.entries, entry);
+    }
+}
+
+impl OutputPatternMonitor {
+    /// Adds a subscription, or replaces the one under the same context.
+    pub fn add_or_replace(&mut self, entry: MonitorEntry) {
+        add_or_replace_entry(&mut self.entries, entry);
+    }
+}
+
+/// Adds a subscription to a target, or replaces the one it already has under the same context.
+fn add_or_replace_entry(entries: &mut Vec<MonitorEntry>, entry: MonitorEntry) {
+    match entries.iter().position(|e| e.context == entry.context) {
+        Some(pos) => entries[pos] = entry,
+        None => entries.push(entry),
+    }
 }

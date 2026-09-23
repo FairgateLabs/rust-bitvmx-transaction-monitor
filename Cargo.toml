@@ -16,15 +16,13 @@ rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitv
 bitvmx-bitcoin-rpc = { git = "https://github.com/FairgateLabs/rust-bitvmx-bitcoin-rpc.git", tag = "v0.8.5" }
 bitcoin = "0.32.102"
 tracing = "0.1.44"
-tracing-subscriber = "0.3.23"
-anyhow = "1.0.104"
 thiserror = "2.0.20"
-mockall = "0.15.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.24.0", features = ["v4", "serde"] }
 hex = "0.4"
 
 [dev-dependencies]
 bitcoind = { git = "https://github.com/FairgateLabs/rust-bitcoind.git", tag = "v0.8.5" }
 bitcoincore-rpc = "0.19"
+tracing-subscriber = "0.3.23"
+anyhow = "1.0.104"
+serde_json = "1.0"

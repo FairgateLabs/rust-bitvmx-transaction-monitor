@@ -1,8 +1,7 @@
-use bitcoin::{BlockHash, Transaction, Txid};
+use bitcoin::{BlockHash, OutPoint, Txid};
 use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Generic filter for detecting transactions that match a specific output pattern.
 ///
@@ -19,36 +18,6 @@ pub struct OutputPatternFilter {
     pub max_outputs: Option<usize>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TransactionStore {
-    pub tx_id: Txid,
-    pub tx: Option<Transaction>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct BlockInfo {
-    pub block_height: BlockHeight,
-    pub block_hash: BlockHash,
-    pub is_orphan: bool,
-    pub transactions: Vec<Txid>,
-}
-
-impl BlockInfo {
-    pub fn new(
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        is_orphan: bool,
-        transactions: Vec<Txid>,
-    ) -> Self {
-        Self {
-            block_height,
-            block_hash,
-            is_orphan,
-            transactions,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypesToMonitor {
     // Transactions to monitor
@@ -58,11 +27,10 @@ pub enum TypesToMonitor {
     Transactions(Vec<Txid>, String, Option<u32>),
 
     // Spending UTXO transaction to monitor
-    // - Txid: The transaction ID to monitor
-    // - u32: The vout index of the UTXO to monitor
+    // - OutPoint: The UTXO to monitor
     // - String: The context of the transaction
     // - Option<u32>: The number of confirmations to wait for receive news about the transaction
-    SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
+    SpendingUTXOTransaction(OutPoint, String, Option<u32>),
 
     // Generic output pattern transaction to monitor
     // - OutputPatternFilter: The filter describing which output/tag to match
@@ -93,11 +61,10 @@ pub enum MonitorNews {
     Transaction(TransactionNews),
 
     // Spending UTXO transaction news
-    // - Txid: The transaction ID
-    // - u32: The vout index of the UTXO
+    // - OutPoint: The UTXO that was spent
     // - TransactionStatus: The information of the transaction indexed
     // - String: The context of the transaction previously sent to the monitor
-    SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
+    SpendingUTXOTransaction(OutPoint, TransactionStatus, String),
 
     // Generic output pattern transaction news
     // - Txid: The transaction ID
@@ -124,16 +91,13 @@ pub enum AckMonitorNews {
     OutputPatternTransaction(Txid, Vec<u8>),
 
     // Spending UTXO transaction news
-    // - Txid: The transaction ID
-    // - u32: The vout index of the UTXO
+    // - OutPoint: The UTXO that was spent
     // - String: The context of the transaction
-    SpendingUTXOTransaction(Txid, u32, String),
+    SpendingUTXOTransaction(OutPoint, String),
 
     // New block news
     NewBlock,
 }
-
-pub type Id = Uuid;
 
 pub type FullBlock = bitcoin_indexer::types::FullBlock;
 
@@ -144,15 +108,6 @@ pub type FullBlock = bitcoin_indexer::types::FullBlock;
 pub struct NewsAck {
     pub block_hash: BlockHash,
     pub acknowledged: bool,
-}
-
-impl NewsAck {
-    pub fn new(block_hash: BlockHash, acknowledged: bool) -> Self {
-        Self {
-            block_hash,
-            acknowledged,
-        }
-    }
 }
 
 /// New block news entry stored in storage.
@@ -166,7 +121,7 @@ pub struct NewBlockNewsEntry {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TransactionNewsEntry {
     pub tx_id: Txid,
-    pub extra_data: String,
+    pub context: String,
     pub ack: NewsAck,
     pub resent_due_to_reorg: bool, // True when this pending news is a reorg-caused resend.
 }
@@ -174,54 +129,48 @@ pub struct TransactionNewsEntry {
 /// SpendingUTXO transaction news entry stored in storage
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SpendingUTXONewsEntry {
-    pub tx_id: Txid,
-    pub utxo_index: u32,
-    pub extra_data: String,
+    pub outpoint: OutPoint,
+    pub context: String,
     pub spender_tx_id: Txid,
     pub ack: NewsAck,
 }
 
-/// Transaction monitor entry (extra_data, confirmation_trigger, trigger_sent)
+/// The parameters of one subscription to a target. The same for every kind of monitor.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MonitorEntry {
+    pub context: String,
+    pub confirmation_trigger: Option<u32>,
+    pub search_in_mempool: bool,
+}
+
+/// A subscription to a transaction. Only transactions are followed confirmation by confirmation, so only they
+/// carry the state that follow needs.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TransactionMonitorEntry {
-    pub extra_data: String,
-    pub confirmation_trigger: Option<u32>,
-    pub trigger_sent: bool,
-    pub search_in_mempool: bool,
+    pub entry: MonitorEntry,
     /// Block hash of the block that included the tx the last time its confirmation trigger fired.
     pub notified_block_hash: Option<BlockHash>,
 }
 
-/// Transaction monitor stored in active/inactive lists
+/// Every subscription to one transaction, under the contexts it was monitored with.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SetTransactionMonitorEntry {
+pub struct TransactionMonitor {
     pub tx_id: Txid,
     pub entries: Vec<TransactionMonitorEntry>,
 }
 
-/// SpendingUTXO monitor entry (extra_data, spender_tx_id, confirmation_trigger)
+/// Every subscription to the spending of one UTXO.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SpendingUTXOMonitorEntry {
-    pub extra_data: String,
-    pub spender_tx_id: Option<Txid>,
-    pub confirmation_trigger: Option<u32>,
-    pub search_in_mempool: bool,
+pub struct SpendingUtxoMonitor {
+    pub outpoint: OutPoint,
+    pub entries: Vec<MonitorEntry>,
 }
 
-/// SpendingUTXO monitor stored in active/inactive lists
+/// Every subscription to one output pattern.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SpendingUTXOMonitor {
-    pub tx_id: Txid,
-    pub vout: u32,
-    pub entries: Vec<SpendingUTXOMonitorEntry>,
-}
-
-/// A single active output-pattern subscription
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct OutputPatternSubscription {
+pub struct OutputPatternMonitor {
     pub filter: OutputPatternFilter,
-    pub confirmation_trigger: Option<u32>,
-    pub search_in_mempool: bool,
+    pub entries: Vec<MonitorEntry>,
 }
 
 /// Output-pattern transaction news entry stored in storage

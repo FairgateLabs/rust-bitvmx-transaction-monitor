@@ -151,7 +151,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
             MonitorNews::Transaction(_) => {
                 tx_news_count.push(news_item);
             }
-            MonitorNews::SpendingUTXOTransaction(_, _, _, _) => {
+            MonitorNews::SpendingUTXOTransaction(_, _, _) => {
                 spending_utxo_news_count.push(news_item);
             }
             MonitorNews::OutputPatternTransaction(_, _, _) => {
@@ -227,7 +227,7 @@ fn test_multiple_monitors_all_types() -> Result<(), anyhow::Error> {
 
     let mut spending_utxo_news_should_be = spending_utxo_news_should_be.clone();
     for news in &spending_utxo_news_count {
-        if let MonitorNews::SpendingUTXOTransaction(_, _, transaction_status, context) = news {
+        if let MonitorNews::SpendingUTXOTransaction(_, transaction_status, context) = news {
             if let Some(pos) = spending_utxo_news_should_be.iter().position(|x| {
                 transaction_status.tx_id_or_err().is_ok_and(|id| id == x.0) && x.1 == context
             }) {
