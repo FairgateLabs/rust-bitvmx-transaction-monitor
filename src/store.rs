@@ -11,8 +11,9 @@ use crate::{
     errors::MonitorError,
     types::{
         AckMonitorNews, MonitorEntry, NewBlockNewsEntry, NewsAck, OutputPatternMonitor,
-        OutputPatternNewsEntry, SpendingUTXONewsEntry, SpendingUtxoMonitor, TransactionMonitor,
-        TransactionMonitorEntry, TransactionNewsEntry, TypesToMonitor,
+        OutputPatternNewsEntry, SpendingUTXONewsEntry, SpendingUtxoMonitor,
+        SpendingUtxoMonitorEntry, TransactionMonitor, TransactionMonitorEntry,
+        TransactionNewsEntry, TypesToMonitor,
     },
 };
 use bitcoin::{BlockHash, OutPoint, Txid};
@@ -30,7 +31,7 @@ enum MonitorKey {
     SpendingUtxos,
     OutputPatterns,
     NewBlock,
-    PendingWork,
+    PendingFirstChecks,
     TransactionsNews,
     SpendingUtxosNews,
     OutputPatternsNews,
@@ -57,7 +58,7 @@ impl MonitorStore {
             MonitorKey::SpendingUtxos => format!("{prefix}/spending/utxo/tx/list"),
             MonitorKey::OutputPatterns => format!("{prefix}/output_pattern/list"),
             MonitorKey::NewBlock => format!("{prefix}/new/block"),
-            MonitorKey::PendingWork => format!("{prefix}/all/pending_work"),
+            MonitorKey::PendingFirstChecks => format!("{prefix}/all/pending_first_checks"),
             MonitorKey::TransactionsNews => format!("{prefix}/tx/news"),
             MonitorKey::SpendingUtxosNews => format!("{prefix}/spending/utxo/tx/news"),
             MonitorKey::OutputPatternsNews => format!("{prefix}/output_pattern/tx/news"),
@@ -81,20 +82,24 @@ impl MonitorStore {
     }
 
     // =========================================================================
-    // Pending work
+    // Pending first checks
     // =========================================================================
+    //
+    // A tick only reads the monitors when a block was indexed, or when some subscription still has its first check
+    // to run. This flag answers the second question with one small read instead of loading every monitor.
 
-    pub fn set_pending_work(&self, is_pending_work: bool) -> Result<(), MonitorError> {
-        let key = self.get_key(MonitorKey::PendingWork);
-        self.store.set(&key, is_pending_work, None)?;
+    pub fn set_pending_first_checks(&self, pending: bool) -> Result<(), MonitorError> {
+        let key = self.get_key(MonitorKey::PendingFirstChecks);
+        self.store.set(&key, pending, None)?;
         Ok(())
     }
 
-    /// Whether a monitor was registered since the last tick. False while the key is unwritten, which is nothing to do.
-    pub fn has_pending_work(&self) -> Result<bool, MonitorError> {
-        let key = self.get_key(MonitorKey::PendingWork);
-        let pending_work = self.store.get::<_, bool>(&key, None)?.unwrap_or(false);
-        Ok(pending_work)
+    /// Whether some subscription was registered since last tick, whose first check has not run yet.
+    /// False while the key is unwritten, which is nothing to check.
+    pub fn has_pending_first_checks(&self) -> Result<bool, MonitorError> {
+        let key = self.get_key(MonitorKey::PendingFirstChecks);
+        let pending = self.store.get::<_, bool>(&key, None)?.unwrap_or(false);
+        Ok(pending)
     }
 
     // =========================================================================
@@ -329,7 +334,8 @@ impl MonitorStore {
         Ok(self.store.get::<_, bool>(&key, None)?.unwrap_or(false))
     }
 
-    /// Adds a subscription, or replaces the one this target already has under the same context.
+    /// Adds a subscription, or replaces the one this target already has under the same context. Transactions and
+    /// spending UTXOs are stored with their first check pending, and the flag that says so is raised with them.
     pub fn add_monitor(
         &self,
         data: TypesToMonitor,
@@ -342,20 +348,11 @@ impl MonitorStore {
                 for tx_id in tx_ids {
                     let entry =
                         MonitorEntry::new(context.clone(), confirmation_trigger, search_in_mempool);
-
-                    match monitors.iter_mut().find(|m| m.tx_id == tx_id) {
-                        Some(monitor) => monitor.add_or_replace(entry),
-                        None => monitors.push(TransactionMonitor {
-                            tx_id,
-                            entries: vec![TransactionMonitorEntry {
-                                entry,
-                                notified_block_hash: None,
-                            }],
-                        }),
-                    }
+                    add_transaction_entry(&mut monitors, tx_id, entry, false);
                 }
 
                 self.set_list(MonitorKey::Transactions, &monitors)?;
+                self.set_pending_first_checks(true)?;
             }
             TypesToMonitor::SpendingUTXOTransaction(outpoint, context, confirmation_trigger) => {
                 let mut monitors = self.get_spending_utxo_monitors()?;
@@ -366,11 +363,15 @@ impl MonitorStore {
                     Some(monitor) => monitor.add_or_replace(entry),
                     None => monitors.push(SpendingUtxoMonitor {
                         outpoint,
-                        entries: vec![entry],
+                        entries: vec![SpendingUtxoMonitorEntry {
+                            entry,
+                            first_check_done: false,
+                        }],
                     }),
                 }
 
                 self.set_list(MonitorKey::SpendingUtxos, &monitors)?;
+                self.set_pending_first_checks(true)?;
             }
             TypesToMonitor::OutputPattern(filter, confirmation_trigger) => {
                 let mut monitors = self.get_output_pattern_monitors()?;
@@ -397,6 +398,60 @@ impl MonitorStore {
         Ok(())
     }
 
+    /// Adds a subscription to a transaction that was just found in an indexed block, so its first check is already
+    /// answered. This is how an output pattern or a spending UTXO follows what its scan found.
+    pub fn add_found_transaction_monitor(
+        &self,
+        tx_id: Txid,
+        entry: MonitorEntry,
+    ) -> Result<(), MonitorError> {
+        let mut monitors = self.get_transaction_monitors()?;
+        add_transaction_entry(&mut monitors, tx_id, entry, true);
+        self.set_list(MonitorKey::Transactions, &monitors)?;
+
+        Ok(())
+    }
+
+    /// Records that a transaction subscription was looked up, so later ticks read stored data only.
+    pub fn mark_transaction_first_check_done(
+        &self,
+        tx_id: Txid,
+        context: &str,
+    ) -> Result<(), MonitorError> {
+        let mut monitors = self.get_transaction_monitors()?;
+
+        if let Some(entry) = monitors
+            .iter_mut()
+            .find(|m| m.tx_id == tx_id)
+            .and_then(|m| m.entries.iter_mut().find(|e| e.entry.context == context))
+        {
+            entry.first_check_done = true;
+            self.set_list(MonitorKey::Transactions, &monitors)?;
+        }
+
+        Ok(())
+    }
+
+    /// Records that a spending UTXO subscription asked the node whether its UTXO was already spent.
+    pub fn mark_spending_utxo_first_check_done(
+        &self,
+        outpoint: OutPoint,
+        context: &str,
+    ) -> Result<(), MonitorError> {
+        let mut monitors = self.get_spending_utxo_monitors()?;
+
+        if let Some(entry) = monitors
+            .iter_mut()
+            .find(|m| m.outpoint == outpoint)
+            .and_then(|m| m.entries.iter_mut().find(|e| e.entry.context == context))
+        {
+            entry.first_check_done = true;
+            self.set_list(MonitorKey::SpendingUtxos, &monitors)?;
+        }
+
+        Ok(())
+    }
+
     /// Removes a subscription. A target with no subscription left is removed with it.
     pub fn remove_monitor(&self, data: TypesToMonitor) -> Result<(), MonitorError> {
         match data {
@@ -416,7 +471,7 @@ impl MonitorStore {
                 let mut monitors = self.get_spending_utxo_monitors()?;
 
                 if let Some(monitor) = monitors.iter_mut().find(|m| m.outpoint == outpoint) {
-                    monitor.entries.retain(|e| e.context != context);
+                    monitor.entries.retain(|e| e.entry.context != context);
                 }
                 monitors.retain(|m| !m.entries.is_empty());
 
@@ -472,5 +527,25 @@ impl MonitorStore {
         }
 
         Ok(())
+    }
+}
+
+/// Adds a transaction subscription to the list, creating the record for that transaction when it is the first one.
+fn add_transaction_entry(
+    monitors: &mut Vec<TransactionMonitor>,
+    tx_id: Txid,
+    entry: MonitorEntry,
+    first_check_done: bool,
+) {
+    match monitors.iter_mut().find(|m| m.tx_id == tx_id) {
+        Some(monitor) => monitor.add_or_replace(entry, first_check_done),
+        None => monitors.push(TransactionMonitor {
+            tx_id,
+            entries: vec![TransactionMonitorEntry {
+                entry,
+                notified_block_hash: None,
+                first_check_done,
+            }],
+        }),
     }
 }

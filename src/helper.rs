@@ -8,7 +8,7 @@ use bitcoin::{BlockHash, OutPoint, Script, Transaction};
 
 use crate::types::{
     MonitorEntry, NewsAck, OutputPatternFilter, OutputPatternMonitor, SpendingUtxoMonitor,
-    TransactionMonitor, TransactionMonitorEntry,
+    SpendingUtxoMonitorEntry, TransactionMonitor, TransactionMonitorEntry,
 };
 
 /// Extracts pushed data from a Bitcoin script.
@@ -96,41 +96,51 @@ impl MonitorEntry {
 }
 
 impl TransactionMonitor {
-    /// Adds a subscription, or replaces the parameters of the one under the same context.
-    /// Replacing only the parameters keeps the block the transaction was notified in.
-    pub fn add_or_replace(&mut self, entry: MonitorEntry) {
+    /// Adds a subscription to this transaction, or replaces the one under the same context.
+    /// `first_check_done` is true when the caller already knows where the transaction is.
+    pub fn add_or_replace(&mut self, entry: MonitorEntry, first_check_done: bool) {
         match self
             .entries
             .iter_mut()
             .find(|e| e.entry.context == entry.context)
         {
+            // Only the parameters change.
             Some(existing) => existing.entry = entry,
+            // A new subscription.
             None => self.entries.push(TransactionMonitorEntry {
                 entry,
                 notified_block_hash: None,
+                first_check_done,
             }),
         }
     }
 }
 
 impl SpendingUtxoMonitor {
-    /// Adds a subscription, or replaces the one under the same context.
+    /// Adds a subscription to the spending of this UTXO, or replaces the one under the same context.
     pub fn add_or_replace(&mut self, entry: MonitorEntry) {
-        add_or_replace_entry(&mut self.entries, entry);
+        match self
+            .entries
+            .iter_mut()
+            .find(|e| e.entry.context == entry.context)
+        {
+            // Only the parameters change, and a subscription that already asked about the past stays checked.
+            Some(existing) => existing.entry = entry,
+            // A new subscription has not asked whether the UTXO was already spent.
+            None => self.entries.push(SpendingUtxoMonitorEntry {
+                entry,
+                first_check_done: false,
+            }),
+        }
     }
 }
 
 impl OutputPatternMonitor {
-    /// Adds a subscription, or replaces the one under the same context.
+    /// Adds a subscription to this output pattern, or replaces the one under the same context.
     pub fn add_or_replace(&mut self, entry: MonitorEntry) {
-        add_or_replace_entry(&mut self.entries, entry);
-    }
-}
-
-/// Adds a subscription to a target, or replaces the one it already has under the same context.
-fn add_or_replace_entry(entries: &mut Vec<MonitorEntry>, entry: MonitorEntry) {
-    match entries.iter().position(|e| e.context == entry.context) {
-        Some(pos) => entries[pos] = entry,
-        None => entries.push(entry),
+        match self.entries.iter().position(|e| e.context == entry.context) {
+            Some(pos) => self.entries[pos] = entry,
+            None => self.entries.push(entry),
+        }
     }
 }

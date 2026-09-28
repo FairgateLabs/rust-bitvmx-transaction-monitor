@@ -150,6 +150,9 @@ pub struct TransactionMonitorEntry {
     pub entry: MonitorEntry,
     /// Block hash of the block that included the tx the last time its confirmation trigger fired.
     pub notified_block_hash: Option<BlockHash>,
+    /// False until this subscription has been looked up once. That first lookup is the only one allowed to ask the
+    /// node, which is what finds a transaction that was already mined before the subscription existed.
+    pub first_check_done: bool,
 }
 
 /// Every subscription to one transaction, under the contexts it was monitored with.
@@ -159,11 +162,19 @@ pub struct TransactionMonitor {
     pub entries: Vec<TransactionMonitorEntry>,
 }
 
+/// A subscription to the spending of a UTXO. Its first check asks the node whether the UTXO is already spent, so
+/// like a transaction subscription it carries whether that check has run.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SpendingUtxoMonitorEntry {
+    pub entry: MonitorEntry,
+    pub first_check_done: bool,
+}
+
 /// Every subscription to the spending of one UTXO.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SpendingUtxoMonitor {
     pub outpoint: OutPoint,
-    pub entries: Vec<MonitorEntry>,
+    pub entries: Vec<SpendingUtxoMonitorEntry>,
 }
 
 /// Every subscription to one output pattern.

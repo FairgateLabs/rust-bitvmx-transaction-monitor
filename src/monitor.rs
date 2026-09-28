@@ -3,9 +3,10 @@ use crate::errors::MonitorError;
 use crate::helper::{is_spending_output, matches_output_pattern};
 use crate::store::{MonitorStore, MonitoredTypes};
 use crate::types::{
-    AckMonitorNews, MonitorNews, OutputPatternFilter, TransactionNews, TypesToMonitor,
+    AckMonitorNews, MonitorEntry, MonitorNews, OutputPatternFilter, SpendingUtxoMonitor,
+    TransactionMonitor, TransactionNews, TypesToMonitor,
 };
-use bitcoin::{OutPoint, Txid};
+use bitcoin::{OutPoint, Transaction, Txid};
 use bitcoin_indexer::indexer::Indexer;
 use bitcoin_indexer::types::{FullBlock, TransactionStatus};
 use bitcoin_indexer::IndexerType;
@@ -17,7 +18,7 @@ use storage_backend::storage::Storage;
 use tracing::{debug, info, warn};
 
 /// Internal context prefix used to identify spending UTXO transactions in the monitor store.
-/// The full context format is: "INTERNAL_SPENDING_UTXO:{target_tx_id}:{target_utxo_index}:{original_extra_data}"
+/// The full context format is: "INTERNAL_SPENDING_UTXO:{target_tx_id}:{target_utxo_index}:{parent_context}"
 /// This allows the monitor to track when a specific UTXO is spent and generate appropriate news.
 const INTERNAL_SPENDING_UTXO: &str = "INTERNAL_SPENDING_UTXO";
 
@@ -83,78 +84,232 @@ impl Monitor {
 
     /// Processes one tick of the monitor's operation.
     ///
-    /// This method:
-    /// - Checks for new blocks and updates the monitor's state
-    /// - Updates confirmation counts for tracked transactions
-    /// - Detects new transactions that need to be monitored
-    /// - Triggers the indexer to continue syncing if needed
-    ///
     /// # Returns
     /// - `Ok(())`: If the tick completed successfully
     /// - `Err`: If there was an error during processing
     pub fn tick(&self) -> Result<(), MonitorError> {
+        // Whether a new block was indexed by the indexer since the last tick.
         let indexed = self.indexer.tick()?;
+        // Whether some subscription was registered since the last tick, whose first check has not run yet.
+        let pending_first_checks = self.store.has_pending_first_checks()?;
 
-        if !indexed && !self.store.has_pending_work()? {
-            debug!("No new block and no pending work, skipping tick");
+        // Without a new block nor a pending first check, there is nothing to do.
+        if !indexed && !pending_first_checks {
+            debug!("No new block and no pending first checks, skipping monitor tick");
             return Ok(());
         }
 
-        let last_indexed_block = self.indexer.get_last_indexed_block()?;
-        let indexed_height = last_indexed_block.height;
-        let current_block_hash = last_indexed_block.hash;
+        let block = self.indexer.get_last_indexed_block()?;
 
-        for monitor in self.store.get_transaction_monitors()? {
-            for entry in monitor.entries {
-                self.process_transaction(
-                    monitor.tx_id,
-                    entry.entry.context,
-                    entry.entry.confirmation_trigger,
-                    indexed_height,
-                    current_block_hash,
-                    false,
-                    entry.entry.search_in_mempool,
-                )?;
+        // Read from storage once, and given to both phases below. Each phase reads first_check_done to take only
+        // the subscriptions it handles, so going over the lists twice adds no storage read, and the second time
+        // only happens when a block was indexed. That is clearer than mixing both phases in a single loop.
+        let transactions = self.store.get_transaction_monitors()?;
+        let spending_utxos = self.store.get_spending_utxo_monitors()?;
+
+        // Phase 1: Subscriptions registered since the last tick, whether or not a block was indexed.
+        self.first_check_transactions(&transactions, &block)?;
+        self.first_check_spending_utxos(&spending_utxos, &block)?;
+        self.store.set_pending_first_checks(false)?; // All pending first checks have been processed.
+
+        // Phase 2: Work a new block brings.
+        if indexed {
+            self.check_transactions(&transactions, &block)?;
+            self.check_spending_utxos(&spending_utxos, &block)?;
+            self.check_output_patterns(&block)?;
+            self.notify_new_block(&block)?;
+        }
+
+        Ok(())
+    }
+
+    /// Looks up the transactions monitored since the last tick, asking the node when needed.
+    fn first_check_transactions(
+        &self,
+        monitors: &[TransactionMonitor],
+        block: &FullBlock,
+    ) -> Result<(), MonitorError> {
+        for monitor in monitors {
+            for entry in monitor.entries.iter().filter(|e| !e.first_check_done) {
+                // The only lookup allowed to ask the node, which also finds a transaction mined before the indexer window.
+                let status = self
+                    .indexer
+                    .get_transaction(&monitor.tx_id, entry.entry.search_in_mempool)?;
+                self.store
+                    .mark_transaction_first_check_done(monitor.tx_id, &entry.entry.context)?;
+                self.process_transaction(monitor.tx_id, &entry.entry, status, block, true)?;
             }
         }
 
+        Ok(())
+    }
+
+    /// Updates the transactions already looked up, reading the block just indexed.
+    fn check_transactions(
+        &self,
+        monitors: &[TransactionMonitor],
+        block: &FullBlock,
+    ) -> Result<(), MonitorError> {
+        for monitor in monitors {
+            for entry in monitor.entries.iter().filter(|e| e.first_check_done) {
+                // Check the status in the local indexer storage.
+                let status = self.indexer.get_stored_transaction(&monitor.tx_id, false)?;
+                self.process_transaction(monitor.tx_id, &entry.entry, status, block, false)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Looks for spenders of the UTXOs monitored since the last tick, which may have been spent before.
+    fn first_check_spending_utxos(
+        &self,
+        monitors: &[SpendingUtxoMonitor],
+        block: &FullBlock,
+    ) -> Result<(), MonitorError> {
+        for monitor in monitors {
+            for entry in monitor.entries.iter().filter(|e| !e.first_check_done) {
+                self.first_check_spending_utxo(monitor.outpoint, &entry.entry, block)?;
+                self.store
+                    .mark_spending_utxo_first_check_done(monitor.outpoint, &entry.entry.context)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Looks for spenders of the monitored UTXOs in the block just indexed.
+    fn check_spending_utxos(
+        &self,
+        monitors: &[SpendingUtxoMonitor],
+        block: &FullBlock,
+    ) -> Result<(), MonitorError> {
+        for monitor in monitors {
+            for entry in &monitor.entries {
+                for tx in block.txs.iter() {
+                    if is_spending_output(tx, monitor.outpoint) {
+                        let context = Self::build_spending_utxo_context(
+                            monitor.outpoint,
+                            &entry.entry.context,
+                        );
+                        self.monitor_detected_transaction(tx, block, block, context, &entry.entry)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Monitors the transactions of the block just indexed that match a monitored output pattern.
+    fn check_output_patterns(&self, block: &FullBlock) -> Result<(), MonitorError> {
+        // A pattern is matched only against blocks indexed after it was registered.
         for monitor in self.store.get_output_pattern_monitors()? {
-            for entry in monitor.entries {
-                self.process_output_pattern_transaction(
-                    monitor.filter.clone(),
-                    entry.confirmation_trigger,
-                    &last_indexed_block,
-                    indexed_height,
-                    current_block_hash,
-                    entry.search_in_mempool,
-                )?;
+            for entry in &monitor.entries {
+                let context = Self::build_output_pattern_context(&monitor.filter);
+                for tx in block.txs.iter() {
+                    if matches_output_pattern(tx, &monitor.filter) {
+                        self.monitor_detected_transaction(tx, block, block, context.clone(), entry)?;
+                    }
+                }
             }
         }
 
-        for monitor in self.store.get_spending_utxo_monitors()? {
-            for entry in monitor.entries {
-                self.process_spending_utxo_transaction(
-                    monitor.outpoint,
-                    entry.context,
-                    entry.confirmation_trigger,
-                    &last_indexed_block,
-                    indexed_height,
-                    current_block_hash,
-                    entry.search_in_mempool,
-                )?;
-            }
-        }
+        Ok(())
+    }
 
+    /// Reports the block just indexed, when new blocks are monitored.
+    fn notify_new_block(&self, block: &FullBlock) -> Result<(), MonitorError> {
         if self.store.is_monitoring_new_block()? {
             self.store.update_news(
-                MonitoredTypes::NewBlock(indexed_height, current_block_hash),
-                current_block_hash,
+                MonitoredTypes::NewBlock(block.height, block.hash),
+                block.hash,
             )?;
         }
 
-        self.store.set_pending_work(false)?;
+        Ok(())
+    }
+
+    /// Looks for a spend of this UTXO that happened before the subscription existed.
+    fn first_check_spending_utxo(
+        &self,
+        outpoint: OutPoint,
+        entry: &MonitorEntry,
+        tip: &FullBlock,
+    ) -> Result<(), MonitorError> {
+        // Ask the node whether the UTXO is still unspent.
+        if self
+            .indexer
+            .rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, true)?
+        {
+            return Ok(()); // Unspent, so there is no spender to look for.
+        }
+
+        // Already spent: look for the spender in the stored blocks, newest first, following each prev_hash. Only
+        // stored blocks are read, so a spend from before the indexer started is not reported: The retention depth
+        // bounds the walk, which normally ends earlier.
+        let mut block = tip.clone();
+
+        for _ in 0..self.retention_depth() {
+            if let Some(tx) = block.txs.iter().find(|tx| is_spending_output(tx, outpoint)) {
+                let context = Self::build_spending_utxo_context(outpoint, &entry.context);
+                self.monitor_detected_transaction(tx, &block, tip, context, entry)?;
+
+                return Ok(()); // A UTXO is spent once, so this is the spender.
+            }
+
+            if block.height == 0 {
+                break; // Genesis, there is nothing older to read.
+            }
+
+            match self
+                .indexer
+                .get_stored_block(block.height - 1, &block.prev_hash)?
+            {
+                Some(previous) => block = previous,
+                None => break, // Nothing older stored, and the node is not asked for it.
+            }
+        }
 
         Ok(())
+    }
+
+    /// Starts monitoring a transaction that a spending UTXO or an output pattern detected in a block, and
+    /// processes it right away so its news goes out in this same tick.
+    fn monitor_detected_transaction(
+        &self,
+        tx: &Transaction,
+        found_in: &FullBlock,
+        tip: &FullBlock,
+        context: String,
+        parent: &MonitorEntry,
+    ) -> Result<(), MonitorError> {
+        let tx_id = tx.compute_txid();
+
+        // It was found in a block the indexer holds, so its subscription needs no first check.
+        let entry = MonitorEntry::new(
+            context,
+            parent.confirmation_trigger,
+            parent.search_in_mempool,
+        );
+        self.store
+            .add_found_transaction_monitor(tx_id, entry.clone())?;
+
+        // The block it is in is known, so its status is built here instead of looking it up again.
+        let confirmations = tip.height - found_in.height + 1;
+        let status =
+            TransactionStatus::new(tx.clone(), found_in.height, found_in.hash, confirmations);
+
+        self.process_transaction(tx_id, &entry, status, tip, true)
+    }
+
+    /// Number of blocks the indexer keeps, which bounds how far back a first check can look.
+    fn retention_depth(&self) -> BlockHeight {
+        self.settings
+            .indexer_settings
+            .clone()
+            .unwrap_or_default()
+            .retention_depth
     }
 
     /// Gets the height of the last block the indexer has read.
@@ -197,10 +352,6 @@ impl Monitor {
         data: TypesToMonitor,
         search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
-        if data != TypesToMonitor::NewBlock {
-            self.store.set_pending_work(true)?;
-        }
-
         // Check if the TypesToMonitor instance has a confirmation trigger (if it's a transaction), and if so,
         // ensure it does not exceed the configured max_monitoring_confirmations.
         // Max monitoring confirmations is the number of confirmations that the monitor will wait for before deactivating the monitor.
@@ -277,12 +428,12 @@ impl Monitor {
 
         for news in list_news {
             match news {
-                MonitoredTypes::Transaction(tx_id, extra_data, resent_due_to_reorg) => {
+                MonitoredTypes::Transaction(tx_id, context, resent_due_to_reorg) => {
                     let status = self.get_tx_status(&tx_id, true)?;
                     return_news.push(MonitorNews::Transaction(TransactionNews {
                         tx_id,
                         status,
-                        context: extra_data,
+                        context: context,
                         resent_due_to_reorg,
                     }));
                 }
@@ -290,10 +441,10 @@ impl Monitor {
                     let status = self.get_tx_status(&tx_id, true)?;
                     return_news.push(MonitorNews::OutputPatternTransaction(tx_id, status, tag));
                 }
-                MonitoredTypes::SpendingUTXOTransaction(outpoint, extra_data, spender_tx_id) => {
+                MonitoredTypes::SpendingUTXOTransaction(outpoint, context, spender_tx_id) => {
                     let status = self.get_tx_status(&spender_tx_id, true)?;
                     return_news.push(MonitorNews::SpendingUTXOTransaction(
-                        outpoint, status, extra_data,
+                        outpoint, status, context,
                     ));
                 }
                 MonitoredTypes::NewBlock(height, hash) => {
@@ -374,30 +525,35 @@ impl Monitor {
     }
 
     /// Builds the context string for spending UTXO transactions
-    fn build_spending_utxo_context(outpoint: OutPoint, extra_data: &str) -> String {
+    fn build_spending_utxo_context(outpoint: OutPoint, context: &str) -> String {
         format!(
             "{}:{}:{}:{}",
-            INTERNAL_SPENDING_UTXO, outpoint.txid, outpoint.vout, extra_data
+            INTERNAL_SPENDING_UTXO, outpoint.txid, outpoint.vout, context
         )
+    }
+
+    /// Builds the context string for the transactions an output pattern matches
+    fn build_output_pattern_context(filter: &OutputPatternFilter) -> String {
+        format!("{}{}", INTERNAL_OUTPUT_PATTERN, hex::encode(&filter.tag))
     }
 
     /// Parses the spending UTXO context and extracts the watched outpoint and the original extra data
     /// Returns None if the context is not valid or cannot be parsed
-    fn parse_spending_utxo_context(extra_data: &str) -> Option<(OutPoint, String)> {
-        if !extra_data.starts_with(INTERNAL_SPENDING_UTXO) {
+    fn parse_spending_utxo_context(context: &str) -> Option<(OutPoint, String)> {
+        if !context.starts_with(INTERNAL_SPENDING_UTXO) {
             return None;
         }
 
-        // Parse the context: INTERNAL_SPENDING_UTXO:{target_tx_id_hex}:{target_utxo_index}:{original_extra_data}
-        let parts: Vec<&str> = extra_data.split(':').collect();
+        // Parse the context: INTERNAL_SPENDING_UTXO:{target_tx_id_hex}:{target_utxo_index}:{parent_context}
+        let parts: Vec<&str> = context.split(':').collect();
         if parts.len() >= 4 {
             if let (Ok(target_tx_id), Ok(target_utxo_index)) =
                 (parts[1].parse::<Txid>(), parts[2].parse::<u32>())
             {
-                let original_extra_data = parts[3..].join(":");
+                let parent_context = parts[3..].join(":");
                 return Some((
                     OutPoint::new(target_tx_id, target_utxo_index),
-                    original_extra_data,
+                    parent_context,
                 ));
             }
         }
@@ -405,41 +561,26 @@ impl Monitor {
         None
     }
 
-    /// Determines if news should be sent based on the confirmation trigger.
-    ///
-    /// # Arguments
-    /// * `tx_id` - The transaction ID being checked
-    /// * `extra_data` - The context/extra data associated with the transaction
-    /// * `number_confirmation_trigger` - Optional confirmation threshold. If Some(n), news is sent once when confirmations >= n
-    /// * `current_confirmations` - Current number of confirmations for the transaction
-    ///
-    /// # Returns
-    /// - `Ok(true)`: If news should be sent (trigger reached and not yet sent, or no trigger and within max confirmations)
-    /// - `Ok(false)`: If news should not be sent
-    /// - `Err`: If there was an error checking the trigger status
-    ///
-    /// # Behavior
-    /// - With trigger: News is sent once when confirmations reach or exceed the trigger value
-    /// - Without trigger: News is sent for every block until max_monitoring_confirmations is reached
-    ///
-    /// Decide whether to emit confirmation news, and whether that emission is a reorg-caused resend.
+    /// Decides whether to emit confirmation news, and whether that emission is a reorg-caused resend.
     ///
     /// Returns `(should_send, resent_due_to_reorg)`.
     fn should_send_news(
         &self,
         tx_id: Txid,
-        extra_data: &str,
+        context: &str,
         number_confirmation_trigger: Option<u32>,
         current_confirmations: u32,
         tx_block_hash: bitcoin::BlockHash,
+        is_first_check: bool,
     ) -> Result<(bool, bool), MonitorError> {
         if let Some(trigger) = number_confirmation_trigger {
+            // With a trigger, nothing is sent until the transaction reaches that many confirmations.
             if current_confirmations < trigger {
                 return Ok((false, false));
             }
             let notified_block_hash = self
                 .store
-                .get_transaction_notified_block_hash(tx_id, extra_data)?;
+                .get_transaction_notified_block_hash(tx_id, context)?;
             match notified_block_hash {
                 // First time the trigger is reached: notify, not a reorg.
                 None => Ok((true, false)),
@@ -449,143 +590,75 @@ impl Monitor {
                 Some(_) => Ok((true, true)),
             }
         } else {
-            // If None, always send news when current confirmations are less than the max monitoring confirmations
+            // A first check reaches this point only when the transaction was found on chain, so it is reported
+            // whatever its age. After that, news is sent on every block until the maximum confirmations.
             Ok((
-                current_confirmations < self.settings.max_monitoring_confirmations,
+                is_first_check
+                    || current_confirmations < self.settings.max_monitoring_confirmations,
                 false,
             ))
         }
     }
 
-    fn detect_output_pattern_txs(
-        &self,
-        full_block: FullBlock,
-        filter: &OutputPatternFilter,
-    ) -> Result<Vec<Txid>, MonitorError> {
-        let mut txs_ids = Vec::new();
-
-        for tx in full_block.txs.iter() {
-            if matches_output_pattern(tx, filter) {
-                txs_ids.push(tx.compute_txid());
-            }
-        }
-
-        Ok(txs_ids)
-    }
-
-    fn process_output_pattern_transaction(
-        &self,
-        filter: OutputPatternFilter,
-        number_confirmation_trigger: Option<u32>,
-        last_indexed_block: &FullBlock,
-        indexed_height: u32,
-        current_block_hash: bitcoin::BlockHash,
-        search_in_mempool: bool,
-    ) -> Result<(), MonitorError> {
-        let new_txs_ids = self.detect_output_pattern_txs(last_indexed_block.clone(), &filter)?;
-
-        let tag_hex = hex::encode(&filter.tag);
-        let context = format!("{}{}", INTERNAL_OUTPUT_PATTERN, tag_hex);
-
-        // Add new transactions to monitoring using add_monitor with INTERNAL_OUTPUT_PATTERN context
-        for tx_id in &new_txs_ids {
-            self.store.add_monitor(
-                TypesToMonitor::Transactions(
-                    vec![*tx_id],
-                    context.clone(),
-                    number_confirmation_trigger,
-                ),
-                search_in_mempool,
-            )?;
-
-            self.process_transaction(
-                *tx_id,
-                context.clone(),
-                number_confirmation_trigger,
-                indexed_height,
-                current_block_hash,
-                true,
-                search_in_mempool,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
+    /// Reports what `tx_info` says about a monitored transaction.
     fn process_transaction(
         &self,
         tx_id: Txid,
-        extra_data: String,
-        number_confirmation_trigger: Option<u32>,
-        indexed_height: BlockHeight,
-        current_block_hash: bitcoin::BlockHash,
-        should_exist: bool,
-        search_in_mempool: bool,
+        entry: &MonitorEntry,
+        tx_info: TransactionStatus,
+        block: &FullBlock,
+        is_first_check: bool,
     ) -> Result<(), MonitorError> {
-        let tx_info = self.indexer.get_transaction(&tx_id, search_in_mempool)?;
+        let context = &entry.context;
+        let confirmation_trigger = entry.confirmation_trigger;
 
-        // The block that includes the tx, and how many confirmations it has there. A transaction that is not in a
-        // block of the indexed chain has nothing to report yet.
         let (tx_block_hash, confirmations) = match tx_info {
             TransactionStatus::Confirmed {
-                block_hash,
-                confirmations,
+                block_hash,    // The block that includes the tx
+                confirmations, // How many confirmations the tx has in that block
                 ..
             } => (block_hash, confirmations),
-            _ => {
-                if should_exist {
-                    return Err(MonitorError::UnexpectedError(format!(
-                        "Transaction({}) not found or in mempool",
-                        tx_id
-                    )));
-                }
-
-                // If the transaction does not exist, nothing to do.
-                return Ok(());
-            }
+            _ => return Ok(()), // Not in a block of the indexed chain, so there is nothing to report yet.
         };
 
-        // Check if we should send news based on number_confirmation_trigger, and whether this send is a
-        // repeat caused by a reorg re-mining the tx into a different block.
         let (should_send_news, resent_due_to_reorg) = self.should_send_news(
             tx_id,
-            &extra_data,
-            number_confirmation_trigger,
+            context,
+            confirmation_trigger,
             confirmations,
             tx_block_hash,
+            is_first_check,
         )?;
 
         if should_send_news {
-            // Dispatch news update based on extra_data pattern to determine the monitor type
-            match extra_data.as_str() {
+            // Dispatch news update based on context pattern to determine the monitor type
+            match context.as_str() {
                 ed if ed.starts_with(INTERNAL_OUTPUT_PATTERN) => {
                     let tag_hex = &ed[INTERNAL_OUTPUT_PATTERN.len()..];
                     let tag = hex::decode(tag_hex)
                         .map_err(|e| MonitorError::UnexpectedError(e.to_string()))?;
                     self.store.update_news(
                         MonitoredTypes::OutputPatternTransaction(tx_id, tag),
-                        current_block_hash,
+                        block.hash,
                     )?;
                 }
                 ed if ed.starts_with(INTERNAL_SPENDING_UTXO) => {
-                    if let Some((outpoint, original_extra_data)) =
-                        Self::parse_spending_utxo_context(ed)
+                    if let Some((outpoint, parent_context)) = Self::parse_spending_utxo_context(ed)
                     {
                         self.store.update_news(
                             MonitoredTypes::SpendingUTXOTransaction(
                                 outpoint,
-                                original_extra_data,
+                                parent_context,
                                 tx_id,
                             ),
-                            current_block_hash,
+                            block.hash,
                         )?;
                     }
                 }
                 _ => {
                     self.store.update_news(
-                        MonitoredTypes::Transaction(tx_id, extra_data.clone(), resent_due_to_reorg),
-                        current_block_hash,
+                        MonitoredTypes::Transaction(tx_id, context.clone(), resent_due_to_reorg),
+                        block.hash,
                     )?;
                 }
             }
@@ -593,21 +666,21 @@ impl Monitor {
             if resent_due_to_reorg {
                 warn!(
                     "Reorg resend: Transaction({}) re-notified after a reorg re-included it in a different block | Height({}) | Confirmations({})",
-                    tx_id, indexed_height, confirmations,
+                    tx_id, block.height, confirmations,
                 );
             } else {
                 info!(
                     "News for Transaction({}) | Height({}) | Confirmations({})",
-                    tx_id, indexed_height, confirmations,
+                    tx_id, block.height, confirmations,
                 );
             }
 
             // Remember the block that included the tx at this notification, so a later reorg into a
             // different block is recognized as a resend.
-            if number_confirmation_trigger.is_some() {
+            if confirmation_trigger.is_some() {
                 self.store.update_transaction_notified_block_hash(
                     tx_id,
-                    &extra_data,
+                    context,
                     Some(tx_block_hash),
                 )?;
             }
@@ -619,8 +692,8 @@ impl Monitor {
         if confirmations >= self.settings.max_monitoring_confirmations {
             self.store.remove_monitor(TypesToMonitor::Transactions(
                 vec![tx_id],
-                extra_data.clone(),
-                number_confirmation_trigger,
+                context.clone(),
+                confirmation_trigger,
             ))?;
             // Also remove from the indexer mempool watch list since we are done
             // monitoring this transaction.
@@ -628,69 +701,23 @@ impl Monitor {
 
             info!(
                 "Stop monitoring Transaction({}) | Height({}) | Confirmations({})",
-                tx_id, indexed_height, self.settings.max_monitoring_confirmations,
+                tx_id, block.height, self.settings.max_monitoring_confirmations,
             );
 
             // If this is a spending UTXO transaction, also remove the SpendingUTXOTransaction monitor
             // This ensures both the transaction monitor and the UTXO spending monitor are properly cleaned up
-            if let Some((outpoint, original_extra_data)) =
-                Self::parse_spending_utxo_context(&extra_data)
-            {
+            if let Some((outpoint, parent_context)) = Self::parse_spending_utxo_context(context) {
                 self.store
                     .remove_monitor(TypesToMonitor::SpendingUTXOTransaction(
                         outpoint,
-                        original_extra_data,
-                        number_confirmation_trigger,
+                        parent_context,
+                        confirmation_trigger,
                     ))?;
 
                 info!(
                     "Stop monitoring SpendingUTXOTransaction({}) | Height({}) | Confirmations({})",
-                    outpoint, indexed_height, self.settings.max_monitoring_confirmations,
+                    outpoint, block.height, self.settings.max_monitoring_confirmations,
                 );
-            }
-        }
-
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn process_spending_utxo_transaction(
-        &self,
-        outpoint: OutPoint,
-        extra_data: String,
-        number_confirmation_trigger: Option<u32>,
-        last_indexed_block: &FullBlock,
-        indexed_height: BlockHeight,
-        current_block_hash: bitcoin::BlockHash,
-        search_in_mempool: bool,
-    ) -> Result<(), MonitorError> {
-        // Check each transaction in the new block for a spending transaction of the target UTXO
-        for tx in last_indexed_block.txs.iter() {
-            if is_spending_output(tx, outpoint) {
-                let spending_tx_id = tx.compute_txid();
-
-                // Create a monitor for the spending transaction with the special context
-                let spending_context = Self::build_spending_utxo_context(outpoint, &extra_data);
-
-                self.store.add_monitor(
-                    TypesToMonitor::Transactions(
-                        vec![spending_tx_id],
-                        spending_context.clone(),
-                        number_confirmation_trigger,
-                    ),
-                    search_in_mempool,
-                )?;
-
-                // Process the spending transaction monitor
-                self.process_transaction(
-                    spending_tx_id,
-                    spending_context,
-                    number_confirmation_trigger,
-                    indexed_height,
-                    current_block_hash,
-                    true,
-                    search_in_mempool,
-                )?;
             }
         }
 

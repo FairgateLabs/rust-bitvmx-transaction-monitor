@@ -259,8 +259,8 @@ fn test_spending_utxo_multiple_entries() -> Result<(), anyhow::Error> {
         vout_zero
             .entries
             .iter()
-            .find(|e| e.context == "extra1")
-            .and_then(|e| e.confirmation_trigger),
+            .find(|e| e.entry.context == "extra1")
+            .and_then(|e| e.entry.confirmation_trigger),
         Some(10)
     );
 
