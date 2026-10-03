@@ -199,6 +199,7 @@ pub struct SpendingUTXOMonitorEntry {
     pub spender_tx_id: Option<Txid>,
     pub confirmation_trigger: Option<u32>,
     pub search_in_mempool: bool,
+    pub backfill_done: bool, // False until the one time check for an already spent UTXO has run for this subscription.
 }
 
 /// SpendingUTXO monitor stored in active/inactive lists

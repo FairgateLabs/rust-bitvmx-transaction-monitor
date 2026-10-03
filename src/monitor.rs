@@ -149,7 +149,28 @@ impl Monitor {
                     extra_data,
                     number_confirmation_trigger,
                     search_in_mempool,
+                    backfill_done,
                 ) => {
+                    // One time catch up for a subscription created after its UTXO had already been spent. The flag
+                    // is only set once the check completes, so a transient failure is retried on a later tick.
+                    if !backfill_done {
+                        self.backfill_spending_utxo(
+                            target_tx_id,
+                            target_utxo_index,
+                            &extra_data,
+                            number_confirmation_trigger,
+                            indexer_best_block_height,
+                            current_block_hash,
+                            search_in_mempool,
+                        )?;
+
+                        self.store.set_backfill_done(
+                            target_tx_id,
+                            target_utxo_index,
+                            &extra_data,
+                        )?;
+                    }
+
                     self.process_spending_utxo_transaction(
                         target_tx_id,
                         target_utxo_index,
@@ -747,34 +768,130 @@ impl Monitor {
     ) -> Result<(), MonitorError> {
         // Check each transaction in the new block for a spending transaction of the target UTXO
         for tx in indexer_best_block.txs.iter() {
-            let is_spending_output = is_spending_output(tx, target_tx_id, target_utxo_index);
-
-            if is_spending_output {
-                let spending_tx_id = tx.compute_txid();
-
-                // Create a monitor for the spending transaction with the special context
-                let spending_context =
-                    Self::build_spending_utxo_context(target_tx_id, target_utxo_index, &extra_data);
-
-                self.store.add_monitor(
-                    TypesToMonitor::Transactions(
-                        vec![spending_tx_id],
-                        spending_context.clone(),
-                        number_confirmation_trigger,
-                    ),
-                    search_in_mempool,
-                )?;
-
-                // Process the spending transaction monitor
-                self.process_transaction(
-                    spending_tx_id,
-                    spending_context,
+            if is_spending_output(tx, target_tx_id, target_utxo_index) {
+                self.register_spender(
+                    target_tx_id,
+                    target_utxo_index,
+                    &extra_data,
+                    tx.compute_txid(),
                     number_confirmation_trigger,
                     indexer_best_block_height,
                     current_block_hash,
-                    true,
                     search_in_mempool,
                 )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Registers a spending transaction and pushes it through the transaction notification path.
+    /// Shared by live detection and by the one time catch up.
+    #[allow(clippy::too_many_arguments)]
+    fn register_spender(
+        &self,
+        target_tx_id: Txid,
+        target_utxo_index: u32,
+        extra_data: &str,
+        spending_tx_id: Txid,
+        number_confirmation_trigger: Option<u32>,
+        indexer_best_block_height: BlockHeight,
+        current_block_hash: bitcoin::BlockHash,
+        search_in_mempool: bool,
+    ) -> Result<(), MonitorError> {
+        // Create a monitor for the spending transaction with the special context
+        let spending_context =
+            Self::build_spending_utxo_context(target_tx_id, target_utxo_index, extra_data);
+
+        self.store.add_monitor(
+            TypesToMonitor::Transactions(
+                vec![spending_tx_id],
+                spending_context.clone(),
+                number_confirmation_trigger,
+            ),
+            search_in_mempool,
+        )?;
+
+        // Process the spending transaction monitor
+        self.process_transaction(
+            spending_tx_id,
+            spending_context,
+            number_confirmation_trigger,
+            indexer_best_block_height,
+            current_block_hash,
+            true,
+            search_in_mempool,
+        )
+    }
+
+    /// One-time catch-up for subscriptions created after their UTXO was spent.
+    ///
+    /// `tick` only sees the current block, so earlier spends are missed. Walk the already-indexed gap locally
+    ///  to catch them without fetching from the node.
+    #[allow(clippy::too_many_arguments)]
+    fn backfill_spending_utxo(
+        &self,
+        target_tx_id: Txid,
+        target_utxo_index: u32,
+        extra_data: &str,
+        number_confirmation_trigger: Option<u32>,
+        indexer_best_block_height: BlockHeight,
+        current_block_hash: bitcoin::BlockHash,
+        search_in_mempool: bool,
+    ) -> Result<(), MonitorError> {
+        // While the UTXO is still unspent there is nothing to catch up on.
+        if self.is_utxo_unspent_rpc(&target_tx_id, target_utxo_index, true)? {
+            return Ok(());
+        }
+
+        // A spender cannot exist before the block that created the UTXO, so that height bounds the scan below.
+        let creation_height = match self
+            .indexer
+            .get_transaction(&target_tx_id, false)?
+            .block_info
+            .map(|block| block.height)
+        {
+            Some(height) => height,
+            None => {
+                warn!(
+                    "UTXO({}:{}) is spent but its creating transaction is not indexed, skipping catch up",
+                    target_tx_id, target_utxo_index
+                );
+                return Ok(());
+            }
+        };
+
+        for height in creation_height..=indexer_best_block_height {
+            let block = match self.indexer.get_block_by_height(height)? {
+                Some(block) => block,
+                None => continue,
+            };
+
+            for tx in block.txs.iter() {
+                if !is_spending_output(tx, target_tx_id, target_utxo_index) {
+                    continue;
+                }
+
+                let spending_tx_id = tx.compute_txid();
+
+                info!(
+                    "Catch up found Transaction({}) spending UTXO({}:{}) | Height({})",
+                    spending_tx_id, target_tx_id, target_utxo_index, height
+                );
+
+                self.register_spender(
+                    target_tx_id,
+                    target_utxo_index,
+                    extra_data,
+                    spending_tx_id,
+                    number_confirmation_trigger,
+                    indexer_best_block_height,
+                    current_block_hash,
+                    search_in_mempool,
+                )?;
+
+                // An outpoint can only be spent once in the active chain.
+                return Ok(());
             }
         }
 
