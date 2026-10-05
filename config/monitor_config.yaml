@@ -9,7 +9,3 @@ settings:
   max_monitoring_confirmations: 100
   indexer_settings:
     retention_depth: 100
-    catch_up: true
-
-storage:
-  path: data

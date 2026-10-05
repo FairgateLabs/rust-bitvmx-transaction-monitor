@@ -3,7 +3,6 @@ use bitcoin_indexer::config::IndexerSettings;
 use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
 use bitvmx_settings::settings::load_config_file;
 use serde::Deserialize;
-use storage_backend::storage_config::StorageConfig;
 
 macro_rules! ensure {
     ($cond:expr, $msg:expr) => {
@@ -16,7 +15,6 @@ macro_rules! ensure {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)] // Enforce fields.
 pub struct MonitorConfig {
-    pub storage: StorageConfig,
     pub rpc: RpcConfig,
 
     #[serde(default)]
@@ -118,7 +116,7 @@ mod tests {
         // A window shorter than the confirmations being monitored is rejected.
         let settings = MonitorSettings {
             max_monitoring_confirmations: 50,
-            indexer_settings: Some(IndexerSettings::new(49, true)),
+            indexer_settings: Some(IndexerSettings::new(49)),
         };
         assert!(matches!(
             settings.validate().unwrap_err(),
@@ -128,7 +126,7 @@ mod tests {
         // The same depth as the confirmations being monitored is enough.
         let settings = MonitorSettings {
             max_monitoring_confirmations: 50,
-            indexer_settings: Some(IndexerSettings::new(50, true)),
+            indexer_settings: Some(IndexerSettings::new(50)),
         };
         assert!(settings.validate().is_ok());
     }
