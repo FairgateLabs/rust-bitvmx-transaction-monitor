@@ -122,26 +122,6 @@ impl MonitorStore {
         Ok(())
     }
 
-    /// Takes these targets off the queue, in one big read and one big write. That saves each of them a node call it no longer needs.
-    pub fn dequeue_first_checks(&self, targets: &[MonitorTarget]) -> Result<(), MonitorError> {
-        if targets.is_empty() {
-            return Ok(()); // The block answered for nobody, so the queue is not even read.
-        }
-
-        let mut queue = self.get_first_check_queue()?;
-        let queued = queue.len();
-        queue.retain(|other| !targets.contains(other));
-
-        if queue.len() == queued {
-            return Ok(()); // None of them was queued, so there is nothing to write back.
-        }
-
-        self.store
-            .set(self.get_key(StoreKey::FirstCheckQueue), &queue, None)?;
-
-        Ok(())
-    }
-
     // ================================
     //  NEWS
     // ================================
@@ -357,7 +337,7 @@ mod tests {
             .is_some());
     }
 
-    // The queue holds one entry per target however many times it is asked for, and dequeuing empties it.
+    // The queue holds one entry per target however many times it is asked for, and clearing it takes the lot.
     #[test]
     fn first_check_queue_is_deduplicated() {
         let store = store();
@@ -368,14 +348,13 @@ mod tests {
             .queue_first_checks(&[target.clone(), target.clone()])
             .unwrap();
         store.queue_first_checks(&[other.clone()]).unwrap();
-        assert_eq!(store.get_first_check_queue().unwrap().len(), 2);
+        assert_eq!(
+            store.get_first_check_queue().unwrap(),
+            vec![target, other] // In the order they were asked for, each of them once.
+        );
 
-        store.dequeue_first_checks(&[target.clone()]).unwrap();
-        assert_eq!(store.get_first_check_queue().unwrap(), vec![other.clone()]);
-
-        // Dequeuing something that was never queued is not an error and changes nothing.
-        store.dequeue_first_checks(&[target]).unwrap();
-        assert_eq!(store.get_first_check_queue().unwrap(), vec![other]);
+        store.clear_first_check_queue().unwrap();
+        assert!(store.get_first_check_queue().unwrap().is_empty());
     }
 
     fn transaction_news(txid_byte: u8, due_to_reorg: bool) -> MonitorNews {
