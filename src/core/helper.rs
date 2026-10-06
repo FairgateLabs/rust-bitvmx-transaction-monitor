@@ -1,8 +1,7 @@
 //! What the monitor's types can do. The types themselves are declared in `types.rs`, which holds no behaviour.
 
 use bitcoin::script::Instruction;
-use bitcoin::{OutPoint, Script, Transaction};
-use bitcoin_indexer::types::TransactionStatus;
+use bitcoin::{OutPoint, Script, Transaction, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 
 use crate::errors::MonitorError;
@@ -38,22 +37,8 @@ impl MonitorEntry {
 
 impl TrackedTx {
     /// A transaction found in a block, which is the only place one is ever tracked from.
-    pub fn new(tx: Transaction, confirmed_at: BlockRef) -> Self {
-        Self {
-            txid: tx.compute_txid(),
-            tx,
-            confirmed_at,
-        }
-    }
-
-    /// What the consumer is told about it at this many confirmations.
-    pub fn status(&self, confirmations: u32) -> TransactionStatus {
-        TransactionStatus::new(
-            self.tx.clone(),
-            self.confirmed_at.height,
-            self.confirmed_at.hash,
-            confirmations,
-        )
+    pub fn new(txid: Txid, confirmed_at: BlockRef) -> Self {
+        Self { txid, confirmed_at }
     }
 }
 

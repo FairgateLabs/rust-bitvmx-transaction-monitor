@@ -1,4 +1,4 @@
-use bitcoin::{BlockHash, OutPoint, Transaction, Txid};
+use bitcoin::{BlockHash, OutPoint, Txid};
 use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,6 @@ pub struct MonitorRecord {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TrackedTx {
     pub txid: Txid,
-    pub tx: Transaction,        // The full transaction itself
     pub confirmed_at: BlockRef, // The block it is in. Set when it is discovered and never changed afterwards (except for a reorg).
 }
 

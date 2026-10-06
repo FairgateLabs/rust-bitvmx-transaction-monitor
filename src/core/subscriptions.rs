@@ -196,11 +196,7 @@ impl Subscriptions {
             let wanted_mempool = wants_mempool_watch(record);
 
             // It checks every tracked transaction in the record, and reports the ones that are at their trigger or have reached the maximum.
-            let (reported, stopped_tracking) = advance_to_block(
-                record,
-                block.height,
-                self.settings.max_monitoring_confirmations,
-            )?;
+            let (reported, stopped_tracking) = self.advance_to_block(record, block.height)?;
             news.extend(reported);
 
             // Starting and stopping are the only two things a block does to a record. If neither happened, there is nothing to write.
@@ -251,14 +247,10 @@ impl Subscriptions {
                     // Without a trigger every change is reported. With one, only is reported when the count was at or aboveit before
                     // the unwind, and is below it now. A transaction that lost its block falls here too, with no confirmations at all.
                     if trigger.is_none_or(|trigger| before >= trigger && now < trigger) {
-                        // Check if the transaction is still in a block, and report its status accordingly.
-                        let status = match (gone, search_in_mempool) {
-                            (false, _) => tracked.status(now),
-                            (true, true) => {
-                                self.indexer.get_stored_transaction(&tracked.txid, true)?
-                            }
-                            (true, false) => TransactionStatus::NotFound,
-                        };
+                        // Asks the indexer where the transaction is now, and reports it with its new status.
+                        let status = self
+                            .indexer
+                            .get_stored_transaction(&tracked.txid, search_in_mempool)?;
 
                         news.push(transaction_news(
                             &target,
@@ -363,19 +355,18 @@ impl Subscriptions {
         );
 
         let mut news = Vec::new();
-        let mut added = false;
+        // Surviving are the entries that will continue to be tracked. The only ones that are dropped are those
+        // that are older than the maximum confirmations the monitor follows.
+        let mut surviving = Vec::with_capacity(record.entries.len());
+        let mut changed = false; // Whether the record changed and needs to be written back
 
-        for entry in &mut record.entries {
+        for mut entry in record.entries.drain(..) {
             // This context already tracks it, which is what a re-registration runs into, and it has already
             // been told. Another context registering must not make it hear about the same thing twice.
             if entry.tracked.iter().any(|tracked| tracked.txid == txid) {
+                surviving.push(entry); // No change to the record, but it is kept for the next block.
                 continue;
             }
-
-            entry
-                .tracked
-                .push(TrackedTx::new(tx.clone(), confirmed_at.clone()));
-            added = true;
 
             // A trigger uses >= here, and not the == a block uses, because the one thing a first check is for
             // is a transaction mined long before the subscription existed.
@@ -391,11 +382,30 @@ impl Subscriptions {
                     false,
                 ));
             }
+
+            match confirmations < self.settings.max_monitoring_confirmations {
+                true => {
+                    entry
+                        .tracked
+                        .push(TrackedTx::new(txid, confirmed_at.clone()));
+                    surviving.push(entry);
+                }
+                // Already as deep as the monitor ever follows, so there is nothing left to track and this
+                // subscription is over. Tracking it would report it a second time on the next block and end there.
+                false => info!(
+                    "{:?} was already at {confirmations} confirmations, finishing context {}",
+                    record.target, entry.context
+                ),
+            }
+
+            changed = true;
         }
 
-        // Nothing new to track, so the record is exactly as it was and there is nothing to write.
-        if added {
-            self.store.save_record(&record)?;
+        record.entries = surviving;
+
+        // Every entry was already tracking it, so the record is exactly as it was and there is nothing to write.
+        if changed {
+            self.persist(&record)?;
         }
 
         Ok(news)
@@ -454,10 +464,10 @@ impl Subscriptions {
         // The index holds positions and a copy of each filter, so nothing borrows the records any more and the
         // walk can write to them as it goes.
         let confirmed_at = BlockRef::from(block);
-        let mut track = |index: usize, txid: Txid, tx: &Transaction| {
+        let mut track = |index: usize, txid: Txid| {
             let (record, started_tracking) = &mut records[index];
 
-            if add_tracked_tx(record, tx, &confirmed_at) {
+            if add_tracked_tx(record, txid, &confirmed_at) {
                 info!("{:?} found {txid} in block {}", record.target, block.height);
                 *started_tracking = true;
             }
@@ -468,20 +478,20 @@ impl Subscriptions {
 
             // A subscription to this very transaction.
             if let Some(&index) = by_txid.get(&txid) {
-                track(index, txid, tx);
+                track(index, txid);
             }
 
             // A subscription to any outpoint this transaction spends. A block cannot spend one twice, so each
             // input answers for at most one record.
             for input in &tx.input {
                 if let Some(&index) = by_outpoint.get(&input.previous_output) {
-                    track(index, txid, tx);
+                    track(index, txid);
                 }
             }
 
             for (index, filter) in &patterns {
                 if matches_output_pattern(tx, filter) {
-                    track(*index, txid, tx);
+                    track(*index, txid);
                 }
             }
         }
@@ -539,72 +549,83 @@ impl Subscriptions {
             None => IndexerSettings::default().retention_depth,
         }
     }
-}
 
-/// Reports every tracked transaction of the record at this block, and drops the ones that have reached the maximum.
-/// Returns the news and whether any transaction reached the maximum, which is what can end a subscription.
-fn advance_to_block(
-    record: &mut MonitorRecord,
-    height: BlockHeight,
-    maximum: u32,
-) -> Result<(Vec<MonitorNews>, bool), MonitorError> {
-    let target = record.target.clone();
-    let mut news = Vec::new();
-    let mut surviving = Vec::with_capacity(record.entries.len());
-    let mut stopped_tracking = false; // True once some transaction of the record has been followed as far as it ever will be.
+    /// Reports every tracked transaction of the record at this block, and drops the ones that have reached the maximum.
+    /// Returns the news and whether any transaction reached the maximum, which is what can end a subscription.
+    fn advance_to_block(
+        &self,
+        record: &mut MonitorRecord,
+        height: BlockHeight,
+    ) -> Result<(Vec<MonitorNews>, bool), MonitorError> {
+        let maximum = self.settings.max_monitoring_confirmations;
+        let target = record.target.clone();
+        let mut news = Vec::new();
+        let mut surviving = Vec::with_capacity(record.entries.len());
+        let mut stopped_tracking = false; // True once some transaction of the record has been followed as far as it ever will be.
 
-    // A transaction subscription ends with its transaction and a UTXO subscription with its spender, both of
-    // which track one at a time. A pattern is a standing rule, so it keeps matching the blocks that come.
-    let ends_with_its_transaction = matches!(
-        target,
-        MonitorTarget::Transaction(_) | MonitorTarget::SpendingUtxo(_)
-    );
+        // A transaction subscription ends with its transaction and a UTXO subscription with its spender, both of
+        // which track one at a time. A pattern is a standing rule, so it keeps matching the blocks that come.
+        let ends_with_its_transaction = matches!(
+            target,
+            MonitorTarget::Transaction(_) | MonitorTarget::SpendingUtxo(_)
+        );
 
-    for mut entry in record.entries.drain(..) {
-        let trigger = entry.confirmation_trigger;
-        let context = &entry.context;
-        let mut kept = Vec::with_capacity(entry.tracked.len());
-        // True once a transaction of this entry has reached the maximum in this block, which is what both takes
-        // it out of the tracked list and can end the subscription that was watching for it.
-        let mut reached_maximum = false;
+        for mut entry in record.entries.drain(..) {
+            let trigger = entry.confirmation_trigger;
+            let context = &entry.context;
+            let mut kept = Vec::with_capacity(entry.tracked.len());
+            // True once a transaction of this entry has reached the maximum in this block, which is what both takes
+            // it out of the tracked list and can end the subscription that was watching for it.
+            let mut reached_maximum = false;
 
-        for tracked in entry.tracked.drain(..) {
-            let confirmations = tracked.confirmed_at.confirmations_at(height)?;
+            for tracked in entry.tracked.drain(..) {
+                let confirmations = tracked.confirmed_at.confirmations_at(height)?;
 
-            // Without a trigger every block is reported. With one, the block where the count equals it is.
-            if trigger.is_none_or(|trigger| confirmations == trigger) {
-                let status = tracked.status(confirmations);
-                news.push(transaction_news(
-                    &target,
-                    context,
-                    tracked.txid,
-                    status,
-                    false,
-                ));
+                // Without a trigger every block is reported. With one, the block where the count equals it is.
+                if trigger.is_none_or(|trigger| confirmations == trigger) {
+                    // Only what is reported is read, and always from indexer storage.
+                    let status = self.indexer.get_stored_transaction(&tracked.txid, false)?;
+
+                    // The transaction should be confirmed in the indexer's storage, because it was in the current block.
+                    if !matches!(status, TransactionStatus::Confirmed { .. }) {
+                        return Err(MonitorError::InvariantViolation(format!(
+                            "tracked transaction {} is not in a block the indexer holds",
+                            tracked.txid
+                        )));
+                    }
+
+                    news.push(transaction_news(
+                        &target,
+                        context,
+                        tracked.txid,
+                        status,
+                        false,
+                    ));
+                }
+
+                // At the maximum the monitor stops watching it, which is also the deepest reorg it can report.
+                match confirmations < maximum {
+                    true => kept.push(tracked),
+                    false => reached_maximum = true,
+                }
             }
 
-            // At the maximum the monitor stops watching it, which is also the deepest reorg it can report.
-            match confirmations < maximum {
-                true => kept.push(tracked),
-                false => reached_maximum = true,
+            entry.tracked = kept;
+            stopped_tracking |= reached_maximum;
+
+            // What this subscription was watching for is over, so it goes with it.
+            if reached_maximum && ends_with_its_transaction && entry.tracked.is_empty() {
+                debug!("{target:?} finished for context {}", entry.context);
+                continue;
             }
+
+            surviving.push(entry);
         }
 
-        entry.tracked = kept;
-        stopped_tracking |= reached_maximum;
+        record.entries = surviving;
 
-        // What this subscription was watching for is over, so it goes with it.
-        if reached_maximum && ends_with_its_transaction && entry.tracked.is_empty() {
-            debug!("{target:?} finished for context {}", entry.context);
-            continue;
-        }
-
-        surviving.push(entry);
+        Ok((news, stopped_tracking))
     }
-
-    record.entries = surviving;
-
-    Ok((news, stopped_tracking))
 }
 
 /// True when some entry of this record still wants its transaction watched in the node's mempool.
@@ -613,8 +634,7 @@ fn wants_mempool_watch(record: &MonitorRecord) -> bool {
 }
 
 /// Adds a TrackedTx for this transaction to the record, in every entry that does not already hold it.
-fn add_tracked_tx(record: &mut MonitorRecord, tx: &Transaction, confirmed_at: &BlockRef) -> bool {
-    let txid = tx.compute_txid();
+fn add_tracked_tx(record: &mut MonitorRecord, txid: Txid, confirmed_at: &BlockRef) -> bool {
     let mut added = false;
 
     for entry in &mut record.entries {
@@ -626,7 +646,7 @@ fn add_tracked_tx(record: &mut MonitorRecord, tx: &Transaction, confirmed_at: &B
 
         entry
             .tracked
-            .push(TrackedTx::new(tx.clone(), confirmed_at.clone()));
+            .push(TrackedTx::new(txid, confirmed_at.clone()));
         added = true;
     }
 
