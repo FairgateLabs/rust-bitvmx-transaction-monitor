@@ -190,12 +190,15 @@ impl MonitorStore {
             StoreKey::SpendingUtxoMonitor(utxo) => {
                 format!("{}{}:{}", self.spending_utxo_space(), utxo.txid, utxo.vout)
             }
-            // max_outputs is a filter parameter, not part of what identifies the subscription, so it is left out.
+            // Every field of the filter is in the key, because a different bound on the outputs is a different rule
+            // and gets its own record. That makes the key and the target the same thing, so a record always holds
+            // the filter it is stored under and no registration can change another one's bound.
             StoreKey::OutputPatternMonitor(filter) => format!(
-                "{}{}:{}",
+                "{}{}:{}:{}",
                 self.output_pattern_space(),
                 filter.output_index,
-                hex::encode(&filter.tag)
+                hex::encode(&filter.tag),
+                filter.max_outputs.map_or_else(|| "any".to_string(), |max| max.to_string())
             ),
             StoreKey::NewBlockMonitor => format!("{PREFIX}/newblock"),
             StoreKey::FirstCheckQueue => format!("{PREFIX}/first_check"),
@@ -425,8 +428,8 @@ mod tests {
             store.record_key(&MonitorTarget::SpendingUtxo(outpoint(2, 1)))
         );
 
-        // max_outputs is a filter parameter, so it does not change the key, and the tag is hex so it can never
-        // contain the separator and run into the next component.
+        // The whole filter is in the key, so two bounds are two targets. The tag is hex, so it can never contain
+        // the separator and run into the next component.
         let filter = |max| OutputPatternFilter {
             output_index: 0,
             tag: vec![0xab],
@@ -434,11 +437,11 @@ mod tests {
         };
         assert_eq!(
             store.record_key(&MonitorTarget::OutputPattern(filter(None))),
-            "monitor/pattern/0:ab"
+            "monitor/pattern/0:ab:any"
         );
         assert_eq!(
             store.record_key(&MonitorTarget::OutputPattern(filter(Some(3)))),
-            "monitor/pattern/0:ab"
+            "monitor/pattern/0:ab:3"
         );
     }
 
