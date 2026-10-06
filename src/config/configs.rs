@@ -107,7 +107,7 @@ mod tests {
 
     // The defaults pass validation, and both bounds are enforced.
     #[test]
-    fn validate() {
+    fn test_validate() {
         let defaults = MonitorSettings::from(MonitorSettingsConfig::default());
         assert!(defaults.validate().is_ok());
         assert_eq!(
@@ -167,7 +167,7 @@ mod tests {
 
     // Settings left out take their defaults, and a setting that no longer exists fails to parse.
     #[test]
-    fn parse() {
+    fn test_parse() {
         let config: MonitorSettingsConfig =
             serde_json::from_str(r#"{"max_monitoring_confirmations": 6}"#).unwrap();
         assert_eq!(config.max_monitoring_confirmations, Some(6));
@@ -182,7 +182,7 @@ mod tests {
 
     // The development config loads and validates, and a missing file is an invalid configuration.
     #[test]
-    fn load_config() {
+    fn test_load_config() {
         let config = MonitorConfig::load_config("config/monitor_config.yaml").unwrap();
         assert!(MonitorSettings::from(config.settings).validate().is_ok());
 

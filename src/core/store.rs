@@ -301,7 +301,7 @@ mod tests {
 
     // A record is written and read back under its own key, and deleting it leaves nothing behind.
     #[test]
-    fn record_round_trip() {
+    fn test_record_round_trip() {
         let store = store();
         let target = MonitorTarget::Transaction(txid(1));
 
@@ -317,7 +317,7 @@ mod tests {
 
     // Each kind is read by its own key space, so one kind never sees another's records.
     #[test]
-    fn records_are_separated_by_kind() {
+    fn test_records_are_separated_by_kind() {
         let store = store();
 
         store
@@ -342,7 +342,7 @@ mod tests {
 
     // The queue holds one entry per target however many times it is asked for, and clearing it takes the lot.
     #[test]
-    fn first_check_queue_is_deduplicated() {
+    fn test_first_check_queue_is_deduplicated() {
         let store = store();
         let target = MonitorTarget::Transaction(txid(1));
         let other = MonitorTarget::SpendingUtxo(outpoint(2, 1));
@@ -374,7 +374,7 @@ mod tests {
 
     // News is grouped by the transaction it is about and comes back in the order it was added.
     #[test]
-    fn news_is_grouped_and_ordered() {
+    fn test_news_is_grouped_and_ordered() {
         let store = store();
         let first = transaction_news(1, false);
         let second = transaction_news(1, true);
@@ -410,7 +410,7 @@ mod tests {
 
     // Each key says what it holds, and two things of one kind never land in the same one.
     #[test]
-    fn keys_name_what_they_hold() {
+    fn test_keys_name_what_they_hold() {
         let store = store();
 
         assert_eq!(
@@ -447,7 +447,7 @@ mod tests {
 
     // An item of news is filed under what it is about, and block heights are padded so the keys sort by height.
     #[test]
-    fn news_keys_follow_what_they_report() {
+    fn test_news_keys_follow_what_they_report() {
         let store = store();
 
         // The spender names the key, not the outpoint, so every item about that spender stays together.

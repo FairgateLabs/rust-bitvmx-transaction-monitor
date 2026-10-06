@@ -142,7 +142,7 @@ mod tests {
 
     // The tag is a prefix of the pushed data, at the index the filter names and nowhere else.
     #[test]
-    fn a_tag_matches_where_the_filter_looks() {
+    fn test_a_tag_matches_where_the_filter_looks() {
         let matching = tx(1, vec![], vec![op_return(b"tagAndMore")]);
         assert!(matches_output_pattern(&matching, &filter(0, b"tag", None)));
 
@@ -162,7 +162,7 @@ mod tests {
 
     // Only an OP_RETURN carries a tag, and the bound on the outputs narrows an otherwise good match.
     #[test]
-    fn a_match_needs_an_op_return_within_the_bound() {
+    fn test_a_match_needs_an_op_return_within_the_bound() {
         let not_op_return = tx(1, vec![], vec![anything_else()]);
         assert!(!matches_output_pattern(
             &not_op_return,
@@ -182,7 +182,7 @@ mod tests {
 
     // Spending is decided by the outpoint a transaction consumes, not by anything it pays.
     #[test]
-    fn spending_is_decided_by_the_input() {
+    fn test_spending_is_decided_by_the_input() {
         let spent = outpoint(7, 0);
         let spender = tx(1, vec![spent], vec![]);
 

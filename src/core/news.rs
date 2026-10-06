@@ -75,7 +75,7 @@ mod tests {
 
     // Items about one transaction come back in the order they were added, whichever tick added them.
     #[test]
-    fn keeps_order_within_a_transaction() {
+    fn test_keeps_order_within_a_transaction() {
         let news_log = pending();
         let first = news(1, "ctx", false);
         let second = news(1, "ctx", true);
@@ -88,7 +88,7 @@ mod tests {
 
     // Acknowledging removes that item and leaves the others, and doing it twice is not an error.
     #[test]
-    fn ack_removes_one_item() {
+    fn test_ack_removes_one_item() {
         let news_log = pending();
         let first = news(1, "ctx", false);
         let second = news(1, "ctx", true);
@@ -103,7 +103,7 @@ mod tests {
 
     // Cancelling takes that subscription's pending news, and only that subscription's.
     #[test]
-    fn drop_for_takes_only_its_own() {
+    fn test_drop_for_takes_only_its_own() {
         let news_log = pending();
         let mine = news(1, "mine", false);
         let other_context = news(1, "other", false);
