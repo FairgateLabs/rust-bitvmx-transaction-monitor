@@ -55,11 +55,17 @@ impl Subscriptions {
         search_in_mempool: bool,
     ) -> Result<(), MonitorError> {
         let maximum = self.settings.max_monitoring_confirmations;
+        let finality = self.settings.finality;
 
-        // A trigger at or above the maximum would never be reached, because the transaction stops being tracked there.
-        if confirmation_trigger.is_some_and(|trigger| trigger >= maximum) {
-            let trigger = confirmation_trigger.unwrap_or_default();
-            return Err(MonitorError::InvalidConfirmationTrigger(trigger, maximum));
+        // finality < trigger < max_monitoring_confirmations.
+        // At or below finality a reorg could undo what it reported, and a trigger is reported once and never restated.
+        // At or above the maximum the transaction stops being tracked before the trigger is ever reached.
+        if let Some(trigger) = confirmation_trigger {
+            if trigger <= finality || trigger >= maximum {
+                return Err(MonitorError::InvalidConfirmationTrigger(
+                    trigger, finality, maximum,
+                ));
+            }
         }
 
         let mut records = Vec::with_capacity(targets.len()); // All the new records generated from the targets.
@@ -216,9 +222,8 @@ impl Subscriptions {
         Ok(news)
     }
 
-    /// Restates what a reorg changed, against the chain left behind. `removed` is how many blocks the indexer
-    /// took off the tip, which is what tells each tracked transaction how many confirmations it just lost.
-    pub fn update_after_reorg(&self, removed: u32) -> Result<Vec<MonitorNews>, MonitorError> {
+    /// Restates what a reorg changed, against the chain left behind.
+    pub fn update_after_reorg(&self) -> Result<Vec<MonitorNews>, MonitorError> {
         let mut news = Vec::new();
         let tip = self.indexer.get_indexed_height()?;
 
@@ -235,18 +240,9 @@ impl Subscriptions {
                 for tracked in entry.tracked.drain(..) {
                     // Its block was above the tip that is left, so it went with the unwind.
                     let gone = tracked.confirmed_at.height > tip;
-                    // What it had before the unwind, counted from the tip there was then.
-                    let before = tracked
-                        .confirmed_at
-                        .confirmations_at(tip.saturating_add(removed))?;
-                    let now = match gone {
-                        true => 0,
-                        false => before - removed,
-                    };
 
-                    // Without a trigger every change is reported. With one, only is reported when the count was at or aboveit before
-                    // the unwind, and is below it now. A transaction that lost its block falls here too, with no confirmations at all.
-                    if trigger.is_none_or(|trigger| before >= trigger && now < trigger) {
+                    // Without a trigger every change is reported.
+                    if trigger.is_none() {
                         // Asks the indexer where the transaction is now, and reports it with its new status.
                         let status = self
                             .indexer
@@ -383,16 +379,15 @@ impl Subscriptions {
                 ));
             }
 
-            match confirmations < self.settings.max_monitoring_confirmations {
-                true => {
+            match self.nothing_more_to_report(entry.confirmation_trigger, confirmations) {
+                false => {
                     entry
                         .tracked
                         .push(TrackedTx::new(txid, confirmed_at.clone()));
                     surviving.push(entry);
                 }
-                // Already as deep as the monitor ever follows, so there is nothing left to track and this
-                // subscription is over. Tracking it would report it a second time on the next block and end there.
-                false => info!(
+                // It has been told everything it asked for, so there is nothing left to track and this subscription is over.
+                true => info!(
                     "{:?} was already at {confirmations} confirmations, finishing context {}",
                     record.target, entry.context
                 ),
@@ -550,14 +545,23 @@ impl Subscriptions {
         }
     }
 
-    /// Reports every tracked transaction of the record at this block, and drops the ones that have reached the maximum.
-    /// Returns the news and whether any transaction reached the maximum, which is what can end a subscription.
+    /// True when a tracked transaction will never be reported again, which is when it stops being tracked. A trigger
+    /// is reported once and never restated, so firing it is the end of it. Without one the monitor follows the
+    /// transaction block by block until the maximum confirmations, which is the end of it.
+    fn nothing_more_to_report(&self, trigger: Option<u32>, confirmations: u32) -> bool {
+        match trigger {
+            Some(trigger) => confirmations >= trigger,
+            None => confirmations >= self.settings.max_monitoring_confirmations,
+        }
+    }
+
+    /// Reports every tracked transaction of the record at this block, and drops the ones with nothing left to report.
+    /// Returns the news and whether any of them was dropped, which is what can end a subscription.
     fn advance_to_block(
         &self,
         record: &mut MonitorRecord,
         height: BlockHeight,
     ) -> Result<(Vec<MonitorNews>, bool), MonitorError> {
-        let maximum = self.settings.max_monitoring_confirmations;
         let target = record.target.clone();
         let mut news = Vec::new();
         let mut surviving = Vec::with_capacity(record.entries.len());
@@ -574,9 +578,9 @@ impl Subscriptions {
             let trigger = entry.confirmation_trigger;
             let context = &entry.context;
             let mut kept = Vec::with_capacity(entry.tracked.len());
-            // True once a transaction of this entry has reached the maximum in this block, which is what both takes
-            // it out of the tracked list and can end the subscription that was watching for it.
-            let mut reached_maximum = false;
+            // True once a transaction of this entry has been told everything it was going to be told, which is what
+            // both takes it out of the tracked list and can end the subscription that was watching for it.
+            let mut finished_one = false;
 
             for tracked in entry.tracked.drain(..) {
                 let confirmations = tracked.confirmed_at.confirmations_at(height)?;
@@ -603,18 +607,17 @@ impl Subscriptions {
                     ));
                 }
 
-                // At the maximum the monitor stops watching it, which is also the deepest reorg it can report.
-                match confirmations < maximum {
-                    true => kept.push(tracked),
-                    false => reached_maximum = true,
+                match self.nothing_more_to_report(trigger, confirmations) {
+                    false => kept.push(tracked),
+                    true => finished_one = true,
                 }
             }
 
             entry.tracked = kept;
-            stopped_tracking |= reached_maximum;
+            stopped_tracking |= finished_one;
 
             // What this subscription was watching for is over, so it goes with it.
-            if reached_maximum && ends_with_its_transaction && entry.tracked.is_empty() {
+            if finished_one && ends_with_its_transaction && entry.tracked.is_empty() {
                 debug!("{target:?} finished for context {}", entry.context);
                 continue;
             }

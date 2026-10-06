@@ -7,5 +7,6 @@ rpc:
 
 settings:
   max_monitoring_confirmations: 100
+  finality: 6
   indexer_settings:
     retention_depth: 100

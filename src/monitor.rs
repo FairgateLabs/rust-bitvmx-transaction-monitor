@@ -76,7 +76,7 @@ impl Monitor {
             TickResult::Reorged(removed) => {
                 // The chain got shorter by `removed` blocks.
                 info!("Chain reorganised, {removed} blocks removed");
-                self.subscriptions.update_after_reorg(removed)?
+                self.subscriptions.update_after_reorg()?
             }
             TickResult::Advanced => {
                 let block = self.indexer.get_last_indexed_block()?;
