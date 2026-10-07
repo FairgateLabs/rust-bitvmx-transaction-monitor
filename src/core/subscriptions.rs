@@ -353,7 +353,7 @@ impl Subscriptions {
 
         let mut news = Vec::new();
         // Surviving are the entries that will continue to be tracked. The only ones that are dropped are those
-        // that are older than the maximum confirmations the monitor follows.
+        // that are older than the maximum confirmations the monitor tracks.
         let mut surviving = Vec::with_capacity(record.entries.len());
         let mut changed = false; // Whether the record changed and needs to be written back
 
@@ -547,7 +547,7 @@ impl Subscriptions {
     }
 
     /// True when a tracked transaction will never be reported again, which is when it stops being tracked. A trigger
-    /// is reported once and never restated, so firing it is the end of it. Without one the monitor follows the
+    /// is reported once and never restated, so firing it is the end of it. Without one the monitor tracks the
     /// transaction block by block until the maximum confirmations, which is the end of it.
     fn nothing_more_to_report(&self, trigger: Option<u32>, confirmations: u32) -> bool {
         match trigger {
@@ -566,7 +566,7 @@ impl Subscriptions {
         let target = record.target.clone();
         let mut news = Vec::new();
         let mut surviving = Vec::with_capacity(record.entries.len());
-        let mut stopped_tracking = false; // True once some transaction of the record has been followed as far as it ever will be.
+        let mut stopped_tracking = false; // True once some transaction of the record has been tracked as far as it ever will be.
 
         // A transaction subscription ends with its transaction and a UTXO subscription with its spender, both of
         // which track one at a time. A pattern is a standing rule, so it keeps matching the blocks that come.

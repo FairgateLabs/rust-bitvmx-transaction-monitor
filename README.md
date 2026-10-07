@@ -59,7 +59,7 @@ A tick runs the block pass or the reorg pass, never both, because the indexer ne
 
 ## Public API
 
-> ⚠️ **A trigger must satisfy `finality <= trigger <= max_monitoring_confirmations`.** Both bounds are inclusive, and a trigger outside them is refused with `InvalidConfirmationTrigger`. A trigger is the consumer's finality claim: it is reported once and never restated, so it has to sit at a depth that is already settled. The upper bound is where the block of the transaction would leave the indexer's window while it is still being followed.
+> ⚠️ **A trigger must satisfy `finality <= trigger <= max_monitoring_confirmations`.** Both bounds are inclusive, and a trigger outside them is refused with `InvalidConfirmationTrigger`. A trigger is the consumer's finality claim: it is reported once and never restated, so it has to sit at a depth that is already settled. The upper bound is where the block of the transaction would leave the indexer's window while it is still being tracked.
 
 > ⚠️ **Acknowledge news only after acting on it.** Acknowledging is the only thing that deletes an item, and it deletes by value. Act first, or lose an event you never processed.
 
@@ -79,8 +79,8 @@ The `Monitor` struct exposes:
 | `is_ready` | True once the indexer has caught up with the node's tip. |
 | `tick` | One step of the chain: advance the indexer, report what that means for every subscription, and answer the ones registered since the last tick. |
 | `monitor` | Subscribe one context to a list of targets, with an optional confirmation trigger and the mempool flag. |
-| `cancel` | Drop one context from a list of targets, with what it was following and its unacknowledged news. |
-| `get_news` | Everything not acknowledged yet. |
+| `cancel` | Drop one context from a list of targets, with what it was tracking and its unacknowledged news. |
+| `get_news` | Everything not acknowledged yet, or what is pending about the first `max_keys` transactions and block heights. The limit counts transactions, not items, because everything pending about one is stored together. |
 | `ack_news` | Acknowledge one item, by the value `get_news` handed over. |
 | `get_indexed_height` | Height of the highest block the monitor has processed. |
 | `get_block` | The block at a height and hash, from the indexer's storage or from the node. |
@@ -129,7 +129,8 @@ One step of the chain, from the consumer's own loop, and then the news it produc
 ```rust
 monitor.tick()?;
 
-for item in monitor.get_news()? {
+// None is everything; Some(n) is what is pending about the first n transactions and heights.
+for item in monitor.get_news(None)? {
     match &item.kind {
         NewsKind::Transaction { txid, status, due_to_reorg } => {
             info!("{} is {status:?} for {} (reorg: {due_to_reorg})", txid, item.context)
@@ -155,7 +156,7 @@ monitor.cancel(&[MonitorTarget::NewBlock], "my-protocol")?;
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `max_monitoring_confirmations` | 100 | How deep a transaction is followed by a subscription with no trigger. It is also the deepest reorg the monitor can still report. |
+| `max_monitoring_confirmations` | 100 | How deep a transaction is tracked by a subscription with no trigger. It is also the deepest reorg the monitor can still report. |
 | `finality` | 6 | The depth at which a block is taken to be settled, at least 1. Its only job is to be the floor for a trigger. |
 | `indexer_settings.retention_depth` | 100 | Forwarded to the indexer: how many recent blocks stay on disk. |
 
@@ -163,9 +164,9 @@ Three relations are validated when the monitor is built, and a configuration tha
 
 | Relation | Why |
 |---|---|
-| `max_monitoring_confirmations >= 2` | A transaction has to stay followed for at least one block after its first news, or a reorg that removes it right afterwards is never reported. |
+| `max_monitoring_confirmations >= 2` | A transaction has to stay tracked for at least one block after its first news, or a reorg that removes it right afterwards is never reported. |
 | `max_monitoring_confirmations >= finality >= 1` | A trigger sits between the two, both included, so there has to be a depth left for one. |
-| `retention_depth >= max_monitoring_confirmations` | The indexer must still hold the block of anything the monitor is following. |
+| `retention_depth >= max_monitoring_confirmations` | The indexer must still hold the block of anything the monitor is tracking. |
 
 ## Development Setup
 

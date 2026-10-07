@@ -126,10 +126,15 @@ impl MonitorStore {
     //  NEWS
     // ================================
 
-    /// Every pending item, whatever key it is under.
-    pub fn get_all_news(&self) -> Result<Vec<MonitorNews>, MonitorError> {
+    /// Every pending item, or every item under the first `max_keys` keys. A key holds everything pending about one
+    /// transaction or one block height, and it is read and returned whole, so the limit bounds the reads and not the
+    /// number of items. Keys are scanned in lexicographic order.
+    pub fn get_all_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
         // Block news lives below this space, so one scan reads both it and the news about transactions.
-        let per_key: Vec<Vec<MonitorNews>> = self.store.partial_get(&self.news_space(), None)?;
+        let per_key: Vec<Vec<MonitorNews>> =
+            self.store
+                .partial_get_limited(&self.news_space(), max_keys, None)?;
+
         Ok(per_key.into_iter().flatten().collect())
     }
 
@@ -388,7 +393,16 @@ mod tests {
         let key = store.news_key(&first).unwrap();
         let pending: Vec<MonitorNews> = store.store.get(&key, None).unwrap().unwrap();
         assert_eq!(pending, vec![first.clone(), second.clone()]);
-        assert_eq!(store.get_all_news().unwrap().len(), 3);
+        assert_eq!(store.get_all_news(None).unwrap().len(), 3);
+
+        // A limit counts keys, and a key comes back whole: one key asked for, both of its items returned, and
+        // nothing of the other transaction. More keys than exist is everything, and none is a limit of zero.
+        assert_eq!(
+            store.get_all_news(Some(1)).unwrap(),
+            vec![first.clone(), second.clone()]
+        );
+        assert_eq!(store.get_all_news(Some(10)).unwrap().len(), 3);
+        assert!(store.get_all_news(Some(0)).unwrap().is_empty());
 
         // One key holds every item about one transaction, so that key alone answers for it.
         assert_eq!(
@@ -398,11 +412,11 @@ mod tests {
 
         // Taking one out leaves the rest of its key alone.
         store.remove_news(&[first.clone()]).unwrap();
-        assert_eq!(store.get_all_news().unwrap().len(), 2);
+        assert_eq!(store.get_all_news(None).unwrap().len(), 2);
 
         // Several going at once is one write per key, and taking the last one removes the key with it.
         store.remove_news(&[second.clone(), other.clone()]).unwrap();
-        assert_eq!(store.get_all_news().unwrap(), vec![]);
+        assert_eq!(store.get_all_news(None).unwrap(), vec![]);
 
         // Removing something that is no longer there is not an error.
         store.remove_news(&[second]).unwrap();

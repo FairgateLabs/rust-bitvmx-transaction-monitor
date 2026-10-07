@@ -1013,7 +1013,8 @@ fn test_many_targets_in_one_call() -> anyhow::Result<()> {
 // =============================================================================
 
 // News waits until it is acknowledged, keeps the order it was decided in for one transaction, and is dropped
-// for a context that cancels. Acknowledging takes one item and leaves the rest.
+// for a context that cancels. Acknowledging takes one item and leaves the rest, and reading, with or without a
+// limit, consumes nothing.
 #[test]
 fn test_news_is_kept_until_acknowledged() -> anyhow::Result<()> {
     init_trace();
@@ -1034,7 +1035,7 @@ fn test_news_is_kept_until_acknowledged() -> anyhow::Result<()> {
     mine_and_tick(&node, &monitor, 3)?;
 
     // Nothing was acknowledged, so three blocks are still waiting for each context, deepest last.
-    let news = monitor.get_news()?;
+    let news = monitor.get_news(None)?;
     assert_eq!(news.len(), 6);
 
     for context in ["keep", "drop"] {
@@ -1045,22 +1046,80 @@ fn test_news_is_kept_until_acknowledged() -> anyhow::Result<()> {
         assert_eq!(counts, vec![1, 2, 3], "in the order they were decided");
     }
 
+    // Reading is not consuming: both contexts watch one transaction, so everything pending is under its one key,
+    // and asking for one key hands back all six items, as many times as it is asked.
+    assert_eq!(monitor.get_news(Some(1))?, news);
+    assert_eq!(monitor.get_news(Some(1))?, news);
+    assert!(monitor.get_news(Some(0))?.is_empty());
+
     // Acknowledging takes the one item it was given and nothing else.
     let first = of_context(&news, "keep")[0].clone();
     monitor.ack_news(&first)?;
-    assert_eq!(monitor.get_news()?.len(), 5);
+    assert_eq!(monitor.get_news(None)?.len(), 5);
 
     // Acknowledging it again is not an error, and takes nothing with it.
     monitor.ack_news(&first)?;
-    assert_eq!(monitor.get_news()?.len(), 5);
+    assert_eq!(monitor.get_news(None)?.len(), 5);
 
     // Cancelling drops what that context had waiting, which is the only news ever deleted unacknowledged, and
     // leaves every other context's alone.
     monitor.cancel(&[target.clone()], "drop")?;
-    let news = monitor.get_news()?;
+    let news = monitor.get_news(None)?;
     assert_eq!(news.len(), 2);
     assert!(of_context(&news, "drop").is_empty());
     assert_eq!(of_context(&news, "keep").len(), 2);
+
+    Ok(())
+}
+
+// The limit of get_news counts transactions, not items. Everything pending about one transaction is stored
+// together and comes back together, so one key can answer with many items while another answers with few.
+#[test]
+fn test_news_limit_counts_transactions() -> anyhow::Result<()> {
+    init_trace();
+    let node = TestNode::start(101)?;
+    let first_outpoint = node.fund_utxo(1_000_000)?;
+    let second_outpoint = node.fund_utxo(1_000_000)?;
+    let watched = node.sign_spend(first_outpoint, 900_000)?;
+    let other = node.sign_spend(second_outpoint, 900_000)?;
+    let watched_txid = watched.compute_txid();
+    let other_txid = other.compute_txid();
+
+    let storage = TestStorage::new();
+    let monitor = node.monitor(storage.storage(), 6, 20)?;
+    node.sync(&monitor)?;
+
+    // Two contexts on one transaction and one on the other, so the two keys hold a different number of items.
+    let watched_target = MonitorTarget::Transaction(watched_txid);
+    let other_target = MonitorTarget::Transaction(other_txid);
+    monitor.monitor(&[watched_target.clone()], "a".to_string(), None, false)?;
+    monitor.monitor(&[watched_target.clone()], "b".to_string(), None, false)?;
+    monitor.monitor(&[other_target.clone()], "a".to_string(), None, false)?;
+
+    // Both in the same block, then one more block, so every subscription has two items waiting.
+    node.mine_including(&[watched, other])?;
+    monitor.tick()?;
+    mine_and_tick(&node, &monitor, 1)?;
+
+    // Four items about the first transaction, two about the second, none of it acknowledged.
+    assert_eq!(monitor.get_news(None)?.len(), 6);
+
+    // One key is one transaction, read whole: every item about whichever of the two txids sorts first, and
+    // nothing at all about the other.
+    let one_key = monitor.get_news(Some(1))?;
+    let served = txid_of(&one_key[0]);
+    assert!(one_key.iter().all(|item| txid_of(item) == served));
+    assert_eq!(
+        one_key.len(),
+        match served == watched_txid {
+            true => 4, // Two contexts, two blocks each.
+            false => 2,
+        }
+    );
+
+    // Both keys is everything, and a limit of none asks for no key at all.
+    assert_eq!(monitor.get_news(Some(2))?.len(), 6);
+    assert!(monitor.get_news(Some(0))?.is_empty());
 
     Ok(())
 }
@@ -1082,26 +1141,26 @@ fn test_the_same_block_reported_twice() -> anyhow::Result<()> {
     mine_and_tick(&node, &monitor, 1)?;
     let height = node.tip()?;
     let hash = node.hash_at(height)?;
-    assert_eq!(monitor.get_news()?.len(), 1);
+    assert_eq!(monitor.get_news(None)?.len(), 1);
 
     // The block leaves the chain. Block news is never withdrawn, so what was reported stays pending.
     node.invalidate(height)?;
     monitor.tick()?;
     assert_eq!(monitor.get_indexed_height()?, height - 1);
-    assert_eq!(monitor.get_news()?.len(), 1);
+    assert_eq!(monitor.get_news(None)?.len(), 1);
 
     // The node switches back to it, so the monitor reads the very same block again and reports it again.
     node.reconsider(&hash)?;
     monitor.tick()?;
     assert_eq!(monitor.get_indexed_height()?, height);
 
-    let news = monitor.get_news()?;
+    let news = monitor.get_news(None)?;
     assert_eq!(news.len(), 2);
     assert_eq!(news[0], news[1], "the same block, reported twice");
 
     // One acknowledgement clears every copy of it.
     monitor.ack_news(&news[0])?;
-    assert!(monitor.get_news()?.is_empty());
+    assert!(monitor.get_news(None)?.is_empty());
 
     Ok(())
 }
@@ -1132,7 +1191,7 @@ fn test_state_survives_a_restart() -> anyhow::Result<()> {
     mine_and_tick(&node, &monitor, 1)?;
 
     // Read without acknowledging, then stop the monitor with the item still pending.
-    let news = monitor.get_news()?;
+    let news = monitor.get_news(None)?;
     assert_eq!(news.len(), 1);
     assert_tx_news(&news[0], &target, "ctx", txid, 1, false);
     drop(monitor);
@@ -1140,12 +1199,12 @@ fn test_state_survives_a_restart() -> anyhow::Result<()> {
     // A new monitor over the same storage. The unacknowledged item is still there, and acknowledging it through
     // this one is what clears it.
     let resumed = node.monitor(storage.storage(), 4, 20)?;
-    let news = resumed.get_news()?;
+    let news = resumed.get_news(None)?;
     assert_eq!(news.len(), 1);
     assert_tx_news(&news[0], &target, "ctx", txid, 1, false);
 
     resumed.ack_news(&news[0])?;
-    assert!(resumed.get_news()?.is_empty());
+    assert!(resumed.get_news(None)?.is_empty());
 
     // The subscription came back with it, still following the transaction it had already found: the next block is
     // reported at two confirmations, not as a fresh discovery at one.

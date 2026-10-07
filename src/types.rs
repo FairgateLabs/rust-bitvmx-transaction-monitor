@@ -14,13 +14,13 @@ pub enum MonitorTarget {
     NewBlock,
 }
 
-/// One subscription: what the consumer asked for, and the transactions it follows because of it.
+/// One subscription: what the consumer asked for, and the transactions it tracks because of it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MonitorEntry {
     pub context: String,                   // The consumer's context string.
     pub confirmation_trigger: Option<u32>, // If `Some(n)`, the consumer only wants news when the transaction reaches `n` confirmations.
     pub search_in_mempool: bool, // Registers the txid in the indexer's mempool watch list, so InMempool state is possible (only for a transaction target).
-    pub tracked: Vec<TrackedTx>, // Transactions that are being followed because of this subscription. Empty when the subscription has not found anything yet.
+    pub tracked: Vec<TrackedTx>, // Transactions that are being tracked because of this subscription. Empty when the subscription has not found anything yet.
 }
 
 /// A target and every subscription to it.
@@ -30,7 +30,7 @@ pub struct MonitorRecord {
     pub entries: Vec<MonitorEntry>,
 }
 
-/// A transaction an entry follows. Only transactions that are in a block are tracked.
+/// A transaction an entry tracks. Only transactions that are in a block are ever tracked.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TrackedTx {
     pub txid: Txid,

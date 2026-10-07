@@ -57,7 +57,7 @@ impl Monitor {
         })
     }
 
-    /// Number of confirmations a transaction is watched for. Once it reaches that the monitor stops following
+    /// Number of confirmations a transaction is watched for. Once it reaches that the monitor stops tracking
     /// it, so it is also the deepest reorg the monitor can still report on.
     /// TODO: remove this method from the public API
     pub fn max_monitoring_confirmations(&self) -> u32 {
@@ -108,7 +108,7 @@ impl Monitor {
             .add(targets, context, confirmation_trigger, search_in_mempool)
     }
 
-    /// Cancels `context` on every target given, with the transactions it was following and the news it had
+    /// Cancels `context` on every target given, with the transactions it was tracking and the news it had
     /// waiting. Related news are deleted without being acknowledged.
     pub fn cancel(&self, targets: &[MonitorTarget], context: &str) -> Result<(), MonitorError> {
         self.subscriptions.remove(targets, context)?;
@@ -119,9 +119,17 @@ impl Monitor {
         Ok(())
     }
 
-    /// Everything the consumer has not acknowledged yet.
-    pub fn get_news(&self) -> Result<Vec<MonitorNews>, MonitorError> {
-        self.news.get_all()
+    /// Everything the consumer has not acknowledged yet, or what is pending about the first `max_keys` news.
+    ///
+    /// The limit counts transactions, not items, because everything pending about one transaction is stored and
+    /// returned together. So the most items it can hand back is
+    /// `max_keys` x (subscriptions reporting on that transaction) x (blocks each has pending), the last factor
+    /// being normally 1, if the consumer acknowledges them correctly.
+    ///
+    /// Items about one transaction come back in the order they were decided, transactions in the lexicographic
+    /// order of their txid. A limit therefore serves the same first transactions until they are acknowledged.
+    pub fn get_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
+        self.news.get_all(max_keys)
     }
 
     /// Acknowledges one item, by the value `get_news` handed over, and removes it.

@@ -20,9 +20,10 @@ impl PendingNews {
         self.store.add_news(items)
     }
 
-    /// Everything the consumer has not acknowledged. Order holds inside a key, not between keys.
-    pub fn get_all(&self) -> Result<Vec<MonitorNews>, MonitorError> {
-        self.store.get_all_news()
+    /// Everything the consumer has not acknowledged, or what is pending under the first `max_keys` keys. How many
+    /// items that can be is on `Monitor::get_news`, which is where a consumer reads it.
+    pub fn get_all(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
+        self.store.get_all_news(max_keys)
     }
 
     /// Removes the item the consumer acknowledged, by the value it was handed.
@@ -38,7 +39,7 @@ impl PendingNews {
             // The others cannot name theirs. A UTXO's news is under the spender it found, a pattern's under every
             // transaction it matched, and a new block subscription's under each height it has not been
             // acknowledged for. None of those is known from the target, so the whole log is read instead.
-            _ => self.store.get_all_news()?,
+            _ => self.store.get_all_news(None)?,
         };
 
         let dropped: Vec<MonitorNews> = pending
@@ -83,7 +84,7 @@ mod tests {
         news_log.add(vec![first.clone()]).unwrap();
         news_log.add(vec![second.clone()]).unwrap();
 
-        assert_eq!(news_log.get_all().unwrap(), vec![first, second]);
+        assert_eq!(news_log.get_all(None).unwrap(), vec![first, second]);
     }
 
     // Acknowledging removes that item and leaves the others, and doing it twice is not an error.
@@ -95,10 +96,10 @@ mod tests {
         news_log.add(vec![first.clone(), second.clone()]).unwrap();
 
         news_log.ack(&first).unwrap();
-        assert_eq!(news_log.get_all().unwrap(), vec![second.clone()]);
+        assert_eq!(news_log.get_all(None).unwrap(), vec![second.clone()]);
 
         news_log.ack(&first).unwrap();
-        assert_eq!(news_log.get_all().unwrap(), vec![second]);
+        assert_eq!(news_log.get_all(None).unwrap(), vec![second]);
     }
 
     // Cancelling takes that subscription's pending news, and only that subscription's.
@@ -120,7 +121,7 @@ mod tests {
             .drop_for(&MonitorTarget::Transaction(txid(1)), "mine")
             .unwrap();
 
-        let left = news_log.get_all().unwrap();
+        let left = news_log.get_all(None).unwrap();
         assert!(!left.contains(&mine));
         assert!(left.contains(&other_context));
         assert!(left.contains(&other_target));

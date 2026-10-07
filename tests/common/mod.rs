@@ -386,14 +386,14 @@ pub fn mine_and_tick(node: &TestNode, monitor: &Monitor, blocks: u64) -> anyhow:
 /// Everything the monitor has to say right now, acknowledged on the way out, so the next call answers only for
 /// what happened after this one. Acknowledging every item is also what the monitor's contract expects.
 pub fn drain_news(monitor: &Monitor) -> anyhow::Result<Vec<MonitorNews>> {
-    let news = monitor.get_news()?;
+    let news = monitor.get_news(None)?;
 
     for item in &news {
         monitor.ack_news(item)?;
     }
 
     assert!(
-        monitor.get_news()?.is_empty(),
+        monitor.get_news(None)?.is_empty(),
         "acknowledging everything left something pending"
     );
 
