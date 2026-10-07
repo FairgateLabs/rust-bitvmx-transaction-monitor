@@ -28,6 +28,10 @@ pub struct Monitor {
 
 impl Monitor {
     /// Builds a monitor and the indexer under it, both writing to the storage the consumer owns. Nothing is read from the node here.
+    ///
+    /// * `rpc_config` - Bitcoin RPC endpoint and network.
+    /// * `storage` - Shared persistent backend, the same database the indexer writes to.
+    /// * `settings` - Optional overrides, defaults when `None`. Validated here.
     pub fn new(
         rpc_config: &RpcConfig,
         storage: Rc<Storage>,
@@ -69,8 +73,13 @@ impl Monitor {
         Ok(self.indexer.is_ready()?)
     }
 
-    /// Moves the monitor one step. The indexer says what the chain did, and a tick never unwinds and indexes at
-    /// once, so restating a reorg and reading a new block can never land together.
+    /// Moves the monitor one step and reports what that step meant for every subscription. A tick can do:
+    ///
+    /// 1. `Reorged(n)`: the reorg pass restates what the removed blocks had been reported for.
+    /// 2. `Advanced`: the block pass walks the new block once and reports whatever is due at this depth.
+    /// 3. `Idle`: the chain said nothing.
+    /// 4. On every tick, whatever the chain did: the first check answers the targets registered since the last one.
+    /// 5. What the passes decided is appended to the pending news, for `get_news` to hand over.
     pub fn tick(&self) -> Result<(), MonitorError> {
         let mut news = match self.indexer.tick()? {
             TickResult::Reorged(removed) => {
@@ -95,8 +104,17 @@ impl Monitor {
         Ok(())
     }
 
-    /// Subscribes `context` to every target given, reporting once the trigger is reached or on every block when
-    /// there is none. Registering a target already subscribed under the same context keeps what it has found.
+    /// Subscribes `context` to every target given, and queues the first check for the ones that can look into the
+    /// past. Registering nothing but storage: no node call is made here. A target this context is already subscribed
+    /// to keeps what it has found and only takes the new parameters, so nothing is reported twice.
+    ///
+    /// * `targets` - What to watch: a transaction, the spend of an output, an output pattern, or every new block.
+    /// * `context` - The consumer's own label, carried back in every item of news about these targets.
+    /// * `confirmation_trigger` - Report once, at exactly this confirmation count, instead of on every block up to
+    ///   the maximum. It must satisfy `finality <= trigger <= max_monitoring_confirmations`, and a `NewBlock`
+    ///   target refuses it outright, because a block has no confirmations of its own.
+    /// * `search_in_mempool` - Allow an answer of `InMempool` and add the txid to the indexer's mempool watch
+    ///   list. Only a transaction target can use it; any other refuses it.
     pub fn monitor(
         &self,
         targets: &[MonitorTarget],
@@ -108,8 +126,12 @@ impl Monitor {
             .add(targets, context, confirmation_trigger, search_in_mempool)
     }
 
-    /// Cancels `context` on every target given, with the transactions it was tracking and the news it had
-    /// waiting. Related news are deleted without being acknowledged.
+    /// Cancels `context` on every target given, dropping what it was tracking and the news it had waiting.
+    /// This is the one path that deletes news the consumer never acknowledged. A target left with no context at
+    /// all loses its record, and cancelling what was never subscribed does nothing.
+    ///
+    /// * `targets` - The targets to stop watching under this context.
+    /// * `context` - The label those subscriptions were registered under.
     pub fn cancel(&self, targets: &[MonitorTarget], context: &str) -> Result<(), MonitorError> {
         self.subscriptions.remove(targets, context)?;
         for target in targets {
@@ -128,21 +150,30 @@ impl Monitor {
     ///
     /// Items about one transaction come back in the order they were decided, transactions in the lexicographic
     /// order of their txid. A limit therefore serves the same first transactions until they are acknowledged.
+    ///
+    /// * `max_keys` - How many transactions and block heights to read, `None` for every one of them.
     pub fn get_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
         self.news.get_all(max_keys)
     }
 
-    /// Acknowledges one item, by the value `get_news` handed over, and removes it.
+    /// Acknowledges one item and deletes it. Deleting is by value, and it is the only thing that removes an item
+    /// a consumer has seen, so act on the item first and acknowledge afterwards.
+    ///
+    /// * `news` - The item exactly as `get_news` handed it over.
     pub fn ack_news(&self, news: &MonitorNews) -> Result<(), MonitorError> {
         self.news.ack(news)
     }
 
-    /// Height of the highest block the indexer has read.
+    /// Height of the highest block the indexer has read. Every confirmation count the monitor reports is measured
+    /// from it, never from the node's tip.
     pub fn get_indexed_height(&self) -> Result<BlockHeight, MonitorError> {
         Ok(self.indexer.get_indexed_height()?)
     }
 
-    /// The block at this height and hash, from the indexer's storage or from the node.
+    /// The block at this height, from the indexer's storage while it still holds it and from the node otherwise.
+    ///
+    /// * `height` - Height of the block.
+    /// * `hash` - Which block at that height, so a reorged one is never handed back in its place.
     pub fn get_block(
         &self,
         height: BlockHeight,
@@ -152,7 +183,11 @@ impl Monitor {
     }
 
     /// What the indexer knows about a transaction right now, which is not what the news says: news is a snapshot
-    /// of when it was decided, this is the current answer.
+    /// of when it was decided, this is the current answer. Storage first, the node only when the indexer holds
+    /// nothing about it.
+    ///
+    /// * `tx_id` - Transaction to look up.
+    /// * `search_in_mempool` - Let the answer be `InMempool` for one that is in the mempool and in no block.
     pub fn get_tx_status(
         &self,
         tx_id: &Txid,
@@ -162,6 +197,10 @@ impl Monitor {
     }
 
     /// Live check against the node, bypassing everything the indexer holds: true when the UTXO is unspent.
+    ///
+    /// * `txid` - Transaction that created the output.
+    /// * `vout` - Index of that output in it.
+    /// * `include_mempool` - Count a spend that is still only in the mempool as having spent it.
     pub fn rpc_is_utxo_unspent(
         &self,
         txid: &Txid,
@@ -174,11 +213,13 @@ impl Monitor {
     }
 
     /// Live confirmation count from the node. None when it does not know the transaction, zero in its mempool.
+    ///
+    /// * `txid` - Transaction to look up.
     pub fn rpc_get_tx_confirmations(&self, txid: &Txid) -> Result<Option<u32>, MonitorError> {
         Ok(self.indexer.rpc_get_tx_confirmations(txid)?)
     }
 
-    /// Fee rate estimated from the most recently indexed block, in sat/vB.
+    /// Fee rate estimated from the most recently indexed block, in sat/vB. One node call each time it is asked.
     pub fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
         Ok(self.indexer.get_estimated_fee_rate()?)
     }
