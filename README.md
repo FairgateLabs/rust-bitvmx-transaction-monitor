@@ -1,6 +1,12 @@
 # BitVMX Transaction Monitor
 
-The BitVMX Transaction Monitor is a comprehensive tool for tracking and managing different types of transaction monitors. It connects with an Indexer to deliver real-time updates on transaction confirmations for various monitor types, such as UTXO transactions, RSK Peg-In transactions, and block monitoring.
+`bitvmx-transaction-monitor` watches the chain on a consumer's behalf. A consumer subscribes to a fact it cares about, a transaction being mined, an output being spent, a transaction shape appearing in a block, or simply a new block, and the monitor reports that fact as news to be pulled and acknowledged. It is built on [`rust-bitcoin-indexer`](https://github.com/FairgateLabs/rust-bitcoin-indexer), so every answer is counted against the blocks that indexer has actually processed rather than against whatever the node reports at that instant.
+
+## Documentation
+
+The `docs/` folder explains the behaviour a consumer has to reason about, without reading the source:
+
+- [`docs/design.md`](docs/design.md): what each kind of subscription finds, the reporting rules with worked traces, the invariants the monitor keeps, reorg handling, when the node is reached, the storage layout, and a glossary.
 
 ## ⚠️ Disclaimer
 
@@ -9,9 +15,13 @@ It is not production-ready, has not been audited, and future updates may introdu
 
 ## Key Features
 
-- 📡 **Real-Time Status Updates**: Receive immediate notifications when monitored transactions receive new confirmations.
-- 🔄 **Automatic Blockchain Synchronization**: Seamlessly syncs with the Bitcoin blockchain at regular intervals.
-- 💾 **State Persistence**: Maintains monitoring state across system restarts for uninterrupted tracking.
+- 🎯 **Four kinds of subscription**: a transaction, the spend of an output, a transaction shape matched by an output pattern, or every new block.
+- 🧵 **Independent contexts**: several consumers subscribe to the same target under their own context, and each is answered on its own without hearing the others.
+- 🔔 **Confirmation triggers**: a subscription either hears about every block, or hears once at the exact depth it asked for.
+- ↩️ **Reorg aware**: what the chain took back is restated against the chain that is left, and a subscription whose transaction lost its block goes back to waiting.
+- 📬 **Durable pending news**: what a consumer has not acknowledged is persisted in the order it was decided, so a restart loses nothing and nothing is reported twice.
+- 🔌 **Few node calls**: subscribing, cancelling, reading news and acknowledging it touch storage alone, and reading a new block answers every subscription without going back to the node.
+- 💾 **Persistent state**: everything lives in `rust-bitvmx-storage-backend`, alongside the indexer's own data, so a restart resumes where it stopped.
 
 ### ⚠️ SegWit Requirement For Reliable Tracking
 
@@ -19,201 +29,166 @@ The transaction monitor relies on transaction IDs (txids) to follow confirmation
 
 ## System Architecture
 
-The monitor is built on three primary components:
+| Component | Responsibility |
+|---|---|
+| `Monitor` | The API. Owns the indexer, the subscriptions and the pending news. |
+| `Subscriptions` | Decides what to report, in the three passes described below. |
+| `PendingNews` | Holds what the consumer has not acknowledged yet. |
+| `MonitorStore` | One database: a record per target, the queue of first checks, the pending news. |
+| `helper` | The pure rules: pattern matching, spend detection, confirmation arithmetic. |
+| `Indexer` (external) | The chain. Indexes one block per tick, reports reorgs, answers what it holds. |
 
-1. **Indexer**: An external library that connects to a Bitcoin node to index blockchain data.
-2. **Monitor Store**: A storage system that retains monitoring transactions and news updates.
-3. **Monitor**: The core component that processes blocks, detects transactions, and manages news updates.
+Each `tick()` advances the indexer by one step and then acts on what that step was. There are three ways a subscription can be answered, and the rest of the documentation calls them by these names:
 
-## Configuration
+| Pass | Runs when | What it does |
+|---|---|---|
+| **Block pass** | the tick indexed a new block | walks that block once, looking for what every subscription is waiting for, and reports whatever is due at this depth |
+| **Reorg pass** | the tick unwound a reorg | restates what the removed blocks had been reported for, against the chain that is left |
+| **First check** | the first tick after a subscription is registered | the single look into the past that subscription gets, which is the only place the node may be asked about a transaction |
 
-Configuration is managed through a YAML file. An example configuration file, `monitor_config.yaml`, is located in the `config/` directory. Example:
+A tick runs the block pass or the reorg pass, never both, because the indexer never unwinds and indexes in the same step. The first check runs on any tick, since it answers what was registered rather than what the chain did. Whatever the passes decide is added to the pending news, and nothing is ever reported outside a `tick()`.
 
-```yaml
-bitcoin:
-  network: regtest
-  url: http://127.0.0.1:18443
-  username: foo
-  password: rpcpassword
-  wallet: test_wallet
+## What You Can Monitor
 
-settings:
-  max_monitoring_confirmations: 100
-  indexer_settings:
-    checkpoint_height: 10
+| Target | Reports | Looks into the past |
+|---|---|---|
+| `Transaction(txid)` | that transaction, from its first confirmation | yes, and the node when the indexer holds nothing |
+| `SpendingUtxo(outpoint)` | the transaction that spends that output | yes, but only the blocks the indexer holds |
+| `OutputPattern(filter)` | every transaction whose output at `output_index` is an `OP_RETURN` carrying `tag`, within an optional bound on the number of outputs | no, it matches the blocks that come |
+| `NewBlock` | every indexed block, with its height and hash | no |
 
-storage:
-  path: data
-```
+## Public API
 
-## Methods
+> ⚠️ **A trigger must satisfy `finality < trigger < max_monitoring_confirmations`.** Both bounds are strict, and a trigger outside them is refused with `InvalidConfirmationTrigger`. A trigger is the consumer's finality claim: it is reported once and never restated, which is why it has to sit deeper than a reorg can reach.
 
-The `Monitor` struct provides the following public methods:
+> ⚠️ **Acknowledge news only after acting on it.** Acknowledging is the only thing that deletes an item, and it deletes by value. Act first, or lose an event you never processed.
 
-### Core Operations
+> ⚠️ **Unacknowledged news is never dropped.** A consumer that never acknowledges makes the pending news grow without bound.
 
-- **`is_ready()`**: Checks if the monitor is fully synchronized with the blockchain.
-  
+> ⚠️ **`cancel` takes that subscription's unacknowledged news with it.** It is the one path that deletes news the consumer has not seen.
 
-- **`tick()`**: Executes a monitoring cycle, processing new blocks, updating transaction statuses, and generating news. Should be called periodically to ensure blockchain synchronization.
+> 💡 **News is a snapshot, `get_tx_status` is the current answer.** An item says what was true when it was decided; the query says what the indexer knows now.
 
-### News Management
+> 💡 **`search_in_mempool` only affects a transaction subscription.** It decides whether that subscription's lookup may answer `InMempool`, and whether the txid joins the indexer's mempool watch list. A UTXO or a pattern only ever discovers transactions that are already in a block.
 
-- **`get_news()`**: Gathers all pending news items related to monitored transactions. Includes confirmation updates and status changes.
+The `Monitor` struct exposes:
 
-- **`ack_news(data: AckMonitorNews)`**: Marks specific news items as processed. Prevents the same news from being returned in future queries.
-
-### Monitors Management
-
-- **`monitor(data: TypesToMonitor)`**: Initiates the monitoring process for a new transaction or entity. Capable of handling multiple monitor types:
-  - **Transactions**: Monitor specific transactions by their transaction IDs. Supports optional confirmation triggers.
-  - **RskPegin**: Monitor all RSK pegin transactions automatically. A single monitor detects all RSK pegin transactions in new blocks.
-  - **SpendingUTXOTransaction**: Monitor when a specific UTXO (transaction output) is spent. Automatically detects the spending transaction.
-  - **NewBlock**: Monitor new blocks being added to the chain. Provides notifications for each new block.
- 
-- **`cancel(data: TypesToMonitor)`**: Completely stops monitoring a specific transaction or entity. Existing transaction news is retained, but no further updates will be generated.
-
-### Blockchain Information
-
-- **`get_monitor_height()`**: Provides the current block height processed by the monitor.
-  - Useful for evaluating synchronization status.
-
-- **`get_tx_status(tx_id: &Txid)`**: Retrieves the current status of a monitored transaction. Provides details such as confirmation count, block information, and transaction specifics.
+| Method | Purpose |
+|---|---|
+| `new` | Build from an RPC config, a storage handle the consumer owns and optional settings. Validates the settings and reads nothing from the node. |
+| `is_ready` | True once the indexer has caught up with the node's tip. |
+| `tick` | One step of the chain: advance the indexer, report what that means for every subscription, and answer the ones registered since the last tick. |
+| `monitor` | Subscribe one context to a list of targets, with an optional confirmation trigger and the mempool flag. |
+| `cancel` | Drop one context from a list of targets, with what it was following and its unacknowledged news. |
+| `get_news` | Everything not acknowledged yet. |
+| `ack_news` | Acknowledge one item, by the value `get_news` handed over. |
+| `get_indexed_height` | Height of the highest block the monitor has processed. |
+| `get_block` | The block at a height and hash, from the indexer's storage or from the node. |
+| `get_tx_status` | What the indexer knows about a txid right now: confirmed with its block and confirmations, in the mempool, or not found. |
+| `rpc_is_utxo_unspent` / `rpc_get_tx_confirmations` | Live node checks, passed straight through. |
+| `get_estimated_fee_rate` | Fee rate estimated from the last indexed block. |
+| `max_monitoring_confirmations` | The configured maximum. |
 
 ## Usage
 
-Here's how you can use the `Monitor` struct and its methods in your application:
+```rust
+use bitvmx_transaction_monitor::{
+    config::MonitorConfig,
+    monitor::Monitor,
+    types::{MonitorTarget, NewsKind, OutputPatternFilter},
+};
+use std::rc::Rc;
+use storage_backend::{storage::Storage, storage_config::StorageConfig};
+
+let config = MonitorConfig::load_config("config/monitor_config.yaml")?;
+
+// The storage belongs to the consumer, and the monitor shares it with the indexer it builds.
+let storage = Rc::new(Storage::new(&StorageConfig::new("data".to_string(), None))?);
+let monitor = Monitor::new(&config.rpc, storage, Some(config.settings))?;
+
+// Four subscriptions under one context, in one call.
+monitor.monitor(
+    &[
+        MonitorTarget::Transaction(txid),
+        MonitorTarget::SpendingUtxo(outpoint),
+        MonitorTarget::OutputPattern(OutputPatternFilter {
+            output_index: 1,
+            tag: b"bitvmx".to_vec(),
+            max_outputs: Some(3),
+        }),
+        MonitorTarget::NewBlock,
+    ],
+    "my-protocol".to_string(),
+    None,  // No trigger, so every block until the maximum.
+    false, // No mempool answers for the transaction subscription.
+)?;
+```
+
+One step of the chain, from the consumer's own loop, and then the news it produced:
 
 ```rust
-  use bitvmx_transaction_monitor::{
-      config::MonitorConfig,
-      monitor::Monitor,
-  };
-  use bitvmx_settings::settings;
-  use std::rc::Rc;
-  use storage_backend::storage::Storage;
-  use storage_backend::storage_config::StorageConfig;
+monitor.tick()?;
 
-  // Load configuration from YAML file
-  let config = settings::load_config_file::<MonitorConfig>(Some(
-      "config/monitor_config.yaml".to_string(),
-  ))?;
+for item in monitor.get_news()? {
+    match &item.kind {
+        NewsKind::Transaction { txid, status, due_to_reorg } => {
+            info!("{} is {status:?} for {} (reorg: {due_to_reorg})", txid, item.context)
+        }
+        NewsKind::Block(block) => info!("block {} at {}", block.hash, block.height),
+        NewsKind::Unreachable => info!("{:?} can never be answered", item.target),
+    }
 
-  // Create storage from configuration
-  let storage = Rc::new(Storage::new(&config.storage)?);
+    // Only after acting on it: this is what deletes it.
+    monitor.ack_news(&item)?;
+}
+```
 
-  // Initialize the monitor using new_with_paths
-  // This method creates the indexer and store internally
-  let monitor = Monitor::new_with_paths(
-      &config.bitcoin,
-      storage,
-      config.settings,
-  )?;
+A subscription ends when the consumer cancels it, or on its own once there is nothing left to report:
 
-  // Check if the monitor is fully synchronized with the blockchain
-  match monitor.is_ready() {
-      Ok(true) => println!("Monitor is fully synchronized."),
-      Ok(false) => println!("Monitor is still syncing."),
-      Err(e) => eprintln!("Error checking monitor readiness: {:?}", e),
-  }
+```rust
+monitor.cancel(&[MonitorTarget::NewBlock], "my-protocol")?;
+```
 
-  // Start monitoring different types of transactions
-  use bitvmx_transaction_monitor::types::TypesToMonitor;
-  
-  // Monitor a specific transaction
-  let tx_id = /* your transaction ID */;
-  monitor.monitor(TypesToMonitor::Transactions(
-      vec![tx_id],
-      "my_context".to_string(),
-      Some(6), // Optional: only send news when 6+ confirmations
-  ))?;
-  
-  // Monitor when a specific UTXO is spent
-  let funding_tx_id = /* funding transaction ID */;
-  let vout_index = 0; // output index
-  monitor.monitor(TypesToMonitor::SpendingUTXOTransaction(
-      funding_tx_id,
-      vout_index,
-      "utxo_context".to_string(),
-      None, // No confirmation trigger
-  ))?;
-  
-  // Monitor all RSK pegin transactions
-  monitor.monitor(TypesToMonitor::RskPegin(Some(1)))?;
-  
-  // Monitor new blocks
-  monitor.monitor(TypesToMonitor::NewBlock)?;
+## Configuration
 
-  // Regularly tick the monitor to process new blocks and update statuses
-  // This should be called in a loop or scheduled task
-  monitor.tick()?;
+`MonitorConfig` has two sections, `rpc` and `settings`. A sample is in `config/monitor_config.yaml`. The storage is not configured here: the consumer builds it and hands it over, because the indexer and the monitor share one database.
 
-  // Retrieve all pending news items related to monitored transactions
-  let news = monitor.get_news()?;
-  for news_item in news {
-      match news_item {
-          MonitorNews::Transaction(tx_id, status, context) => {
-              println!("Transaction {} has {} confirmations", tx_id, status.confirmations);
-          }
-          MonitorNews::SpendingUTXOTransaction(tx_id, vout, status, context) => {
-              println!("UTXO {}:{} was spent in transaction {}", tx_id, vout, status.tx_id);
-          }
-          MonitorNews::RskPeginTransaction(tx_id, status) => {
-              println!("RSK pegin transaction {} detected", tx_id);
-          }
-          MonitorNews::NewBlock(height, hash) => {
-              println!("New block at height {}: {}", height, hash);
-          }
-      }
-  }
+| Setting | Default | Meaning |
+|---|---|---|
+| `max_monitoring_confirmations` | 100 | How deep a transaction is followed by a subscription with no trigger. It is also the deepest reorg the monitor can still report. |
+| `finality` | 6 | The depth at which a block is taken to be settled. Its only job is to be the floor for a trigger. |
+| `indexer_settings.retention_depth` | 100 | Forwarded to the indexer: how many recent blocks stay on disk. |
 
-  // Acknowledge specific news items to prevent duplicate notifications
-  use bitvmx_transaction_monitor::types::AckMonitorNews;
-  monitor.ack_news(AckMonitorNews::Transaction(tx_id, "my_context".to_string()))?;
+Three relations are validated when the monitor is built, and a configuration that breaks one is refused:
 
-  // Stop monitoring a specific transaction or entity
-  monitor.cancel(TypesToMonitor::Transactions(
-      vec![tx_id],
-      "my_context".to_string(),
-      None,
-  ))?;
-
-  // Get the current block height processed by the monitor
-  match monitor.get_monitor_height() {
-      Ok(height) => println!("Current monitor height: {}", height),
-      Err(e) => eprintln!("Error retrieving monitor height: {:?}", e),
-  }
-
-  // Retrieve the current status of a monitored transaction
-  match monitor.get_tx_status(&tx_id) {
-      Ok(status) => println!("Transaction status: {:?}", status),
-      Err(e) => eprintln!("Error retrieving transaction status: {:?}", e),
-  }
-  ```
-
-## Confirmation Triggers
-
-The monitor supports optional confirmation triggers for transaction monitoring:
-
-- **With trigger**: When a confirmation trigger is set (e.g., `Some(6)`), news is sent **once** when the transaction reaches or exceeds that number of confirmations. This is useful for critical transactions that require a specific confirmation depth.
-
-- **Without trigger**: When no trigger is set (`None`), news is sent for **every block** until the transaction reaches `max_monitoring_confirmations`. This provides continuous updates on confirmation progress.
-
-**Important**: The confirmation trigger must be less than `max_monitoring_confirmations`, otherwise an error will be returned.
-
-> **Note:** If you configure a confirmation trigger below the blockchain's finality threshold, a blockchain
-> reorganization may cause the same confirmation notification to be emitted again. To avoid repeated 
-> notifications, it is recommended to use confirmation triggers at or above the expected finality depth.
-
-## Auto-Deactivation
-
-Monitors are automatically deactivated when transactions reach `max_monitoring_confirmations`. This prevents unnecessary processing and storage overhead. Once deactivated, no further news updates will be generated for that transaction.
+| Relation | Why |
+|---|---|
+| `max_monitoring_confirmations >= 2` | A transaction has to stay followed for at least one block after its first news, or a reorg that removes it right afterwards is never reported. |
+| `max_monitoring_confirmations >= finality + 2` | A trigger is strictly deeper than finality and strictly below the maximum, so there has to be room for one between them. |
+| `retention_depth >= max_monitoring_confirmations` | The indexer must still hold the block of anything the monitor is following. |
 
 ## Development Setup
 
-1. Clone the repository.
-2. Install dependencies using `cargo build`.
-3. Run tests with `cargo test -- --test-threads=1`.
+Prerequisites:
+
+- Rust
+- A Bitcoin node running with `-txindex=1`
+- Docker, used by the integration tests
+
+Common commands:
+
+```bash
+# Build everything (lib + tests).
+cargo build --release --tests
+
+# Run the unit test suite.
+cargo test --release --lib
+
+# Run the integration tests (require Docker running; one regtest node, taken one test at a time).
+cargo test --release --test regtest
+```
+
+The integration tests hold a lock around the node they share, so they need no `--test-threads=1`.
 
 ## Contributing 
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
@@ -230,4 +205,3 @@ This repository is a component of the **BitVMX Ecosystem**, an open platform for
 You can find the index of all BitVMX open-source components at [**FairgateLabs/BitVMX**](https://github.com/FairgateLabs/BitVMX).
 
 ---
-
