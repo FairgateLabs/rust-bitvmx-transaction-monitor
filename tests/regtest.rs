@@ -904,8 +904,9 @@ fn test_several_contexts_on_one_target() -> anyhow::Result<()> {
 }
 
 // The indexer's mempool watch is keyed by the transaction, not by the subscription, so one context leaving must
-// not blind another that still wants it. Only a watched transaction can be answered from the indexer's mempool
-// snapshot, and a reorg is where that shows: it reads the snapshot and never asks the node.
+// not blind another that still wants it, and the last one leaving must take it away. Only a watched transaction 
+// can be answered from the indexer's mempool snapshot, and a reorg is where that shows: it reads the snapshot and
+// never asks the node.
 #[test]
 fn test_mempool_watch_outlives_one_of_its_contexts() -> anyhow::Result<()> {
     init_trace();
@@ -947,6 +948,7 @@ fn test_mempool_watch_outlives_one_of_its_contexts() -> anyhow::Result<()> {
 
     // One of them goes. The watch it wanted is still wanted by the other.
     monitor.cancel(&[target.clone()], "leaves")?;
+    assert!(is_mempool_watched(&storage.storage(), &txid)?);
 
     // The block is reorged away and the transaction falls back into the mempool. The context that stayed is told
     // it is pending, which is only possible while the txid is still watched.
@@ -957,6 +959,10 @@ fn test_mempool_watch_outlives_one_of_its_contexts() -> anyhow::Result<()> {
     assert_eq!(news.len(), 1);
     assert_tx_news(&news[0], &target, "keeps", txid, 0, true);
     assert_eq!(status_of(&news[0]), &TransactionStatus::InMempool);
+
+    // The last context that wanted the watch leaves, and the watch goes with it.
+    monitor.cancel(&[target.clone()], "keeps")?;
+    assert!(!is_mempool_watched(&storage.storage(), &txid)?);
 
     Ok(())
 }

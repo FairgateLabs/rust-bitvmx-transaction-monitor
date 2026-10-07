@@ -29,7 +29,10 @@ use bitvmx_transaction_monitor::errors::MonitorError;
 use bitvmx_transaction_monitor::monitor::Monitor;
 use bitvmx_transaction_monitor::types::{BlockRef, MonitorNews, MonitorTarget, NewsKind};
 use bitvmx_transaction_monitor::TransactionStatus;
-use storage_backend::{storage::Storage, storage_config::StorageConfig};
+use storage_backend::{
+    storage::{KeyValueStore, Storage},
+    storage_config::StorageConfig,
+};
 use tracing::info;
 
 /// Upper bound for the ticks a test waits for the monitor to reach the node's tip.
@@ -398,6 +401,16 @@ pub fn drain_news(monitor: &Monitor) -> anyhow::Result<Vec<MonitorNews>> {
     );
 
     Ok(news)
+}
+
+/// Whether the indexer still has this txid in its mempool watch list. It reads the indexer's own key, because nothing
+/// in the public API exposes the list, and a watch nobody wants costs a node call on every tick.
+pub fn is_mempool_watched(storage: &Storage, txid: &Txid) -> anyhow::Result<bool> {
+    let list: Vec<(Txid, Option<BlockHeight>)> = storage
+        .get("indexer/mempool_watch_list", None)?
+        .unwrap_or_default();
+
+    Ok(list.iter().any(|(watched, _)| watched == txid))
 }
 
 /// The items of one context, in the order they came out. Order holds inside one transaction or one block height,

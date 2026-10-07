@@ -143,13 +143,15 @@ impl Subscriptions {
                 continue; // Other contexts watch this target, but not this one.
             };
 
+            // Read before the entry goes, so the watch is released when the last context that wanted it leaves.
+            let wanted_mempool = wants_mempool_watch(&record);
+
             // The entry is gone, and the record is written back with the rest. If it was the last one, the whole record is deleted.
             record.entries.remove(position);
             self.persist(&record)?;
 
             // Only a transaction target can ask for a mempool watch.
             if let MonitorTarget::Transaction(tx_id) = target {
-                let wanted_mempool = wants_mempool_watch(&record);
                 self.release_mempool_watch(tx_id, wanted_mempool, &record)?;
             }
         }
