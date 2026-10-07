@@ -73,6 +73,18 @@ impl Subscriptions {
         let mut first_check = Vec::new(); // Targets that need a first check (only apply to transactions and UTXOs).
 
         for target in targets {
+            // A parameter the target cannot use is refused, so a consumer never believes it asked for something that is not happening.
+            if confirmation_trigger.is_some() && matches!(target, MonitorTarget::NewBlock) {
+                return Err(MonitorError::InvalidSubscription(
+                    "a block has no confirmations of its own, so a new block subscription cannot have a confirmation trigger".to_string(),
+                ));
+            }
+            if search_in_mempool && !matches!(target, MonitorTarget::Transaction(_)) {
+                return Err(MonitorError::InvalidSubscription(format!(
+                    "search_in_mempool is only for a transaction target, and {target:?} discovers transactions that are already in a block"
+                )));
+            }
+
             let mut record = self
                 .store
                 .get_record(target)?

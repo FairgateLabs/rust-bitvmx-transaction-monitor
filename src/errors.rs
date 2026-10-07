@@ -23,6 +23,10 @@ pub enum MonitorError {
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
 
+    /// A parameter that the target it was registered with can never use.
+    #[error("Invalid subscription: {0}")]
+    InvalidSubscription(String),
+
     /// Something the monitor guarantees about its own state turned out not to hold. A bug to find and fix.
     #[error("Invariant violated: {0}")]
     InvariantViolation(String),

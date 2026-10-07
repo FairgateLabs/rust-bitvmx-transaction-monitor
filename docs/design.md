@@ -55,7 +55,8 @@ A news item names its target and its context, but it is stored under the txid al
 | Re-registering runs the first check again. | A consumer can therefore be told once more about something it already knows. |
 | Cancelling removes one entry, and the record when it was the last one. | A record with no entries would be read on every block and answer for nobody. |
 | The indexer's mempool watch is dropped only when no remaining entry wants it. | The watch is keyed by txid, so one context leaving must not blind another that is still watching the same transaction. |
-| `search_in_mempool` is meaningful only for a transaction target. | A UTXO or a pattern discovers transactions that are already in a block, so a mempool answer could never apply to them. |
+| `search_in_mempool` is refused for anything but a transaction target, and a confirmation trigger for a new block subscription. | A UTXO or a pattern discovers transactions that are already in a block, and a block has no confirmations of its own. |
+| One call registers every target or none of them. | The refusals above are decided per target, and the records are written after all of them have passed. |
 
 ## Invariants
 
@@ -184,7 +185,6 @@ A record is read and written whole, and found by a prefix scan over its kind, so
 |---|---|
 | A transaction in the mempool is never announced. | Only a block makes the monitor report, and nothing is reported when a transaction is dropped from the mempool either. |
 | A spender or a pattern match that falls back into the mempool reads `NotFound`. | Only a transaction subscription creates a mempool watch, and the indexer's snapshot holds only watched txids. |
-| A trigger on a new block subscription is accepted and ignored. | A block has no confirmations of its own, so every block subscription hears about every block. |
 | The window a spend can be looked for in is shorter while the indexer is catching up. | The monitor never downloads a block to make up for it. |
 | Unacknowledged news is unbounded. | See I6: acknowledging is the only thing that deletes an item. |
 

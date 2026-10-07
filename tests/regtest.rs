@@ -617,7 +617,13 @@ fn test_new_block_subscription() -> anyhow::Result<()> {
     let monitor = node.monitor(storage.storage(), 2, 5)?;
     node.sync(&monitor)?;
 
+    // A block has no confirmations of its own, so a trigger on this target is refused instead of ignored.
     let target = MonitorTarget::NewBlock;
+    assert!(matches!(
+        monitor.monitor(&[target.clone()], "bad".to_string(), Some(1), false),
+        Err(MonitorError::InvalidSubscription(_))
+    ));
+
     monitor.monitor(&[target.clone()], "a".to_string(), None, false)?;
     monitor.monitor(&[target.clone()], "b".to_string(), None, false)?;
 
@@ -912,8 +918,25 @@ fn test_mempool_watch_outlives_one_of_its_contexts() -> anyhow::Result<()> {
     let monitor = node.monitor(storage.storage(), 4, 20)?;
     node.sync(&monitor)?;
 
+    // Only a transaction can be watched in the mempool, so asking for it on any other target is refused rather
+    // than silently dropped, and one bad target in a call takes the whole call with it.
+    let utxo_target = MonitorTarget::SpendingUtxo(outpoint);
+    assert!(matches!(
+        monitor.monitor(&[utxo_target.clone()], "bad".to_string(), None, true),
+        Err(MonitorError::InvalidSubscription(_))
+    ));
+
     // Two contexts on one transaction, both asking for mempool answers and both hearing about every block.
     let target = MonitorTarget::Transaction(txid);
+    assert!(matches!(
+        monitor.monitor(
+            &[target.clone(), utxo_target],
+            "bad".to_string(),
+            None,
+            true
+        ),
+        Err(MonitorError::InvalidSubscription(_))
+    ));
     monitor.monitor(&[target.clone()], "keeps".to_string(), None, true)?;
     monitor.monitor(&[target.clone()], "leaves".to_string(), None, true)?;
 

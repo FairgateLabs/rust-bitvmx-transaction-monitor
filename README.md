@@ -69,7 +69,7 @@ A tick runs the block pass or the reorg pass, never both, because the indexer ne
 
 > 💡 **News is a snapshot, `get_tx_status` is the current answer.** An item says what was true when it was decided; the query says what the indexer knows now.
 
-> 💡 **`search_in_mempool` only affects a transaction subscription.** It decides whether that subscription's lookup may answer `InMempool`, and whether the txid joins the indexer's mempool watch list. A UTXO or a pattern only ever discovers transactions that are already in a block.
+> ⚠️ **A parameter a target cannot use is refused.** `search_in_mempool` is only for a transaction target, and a confirmation trigger is meaningless for `NewBlock`; either combination fails with `InvalidSubscription`, and one bad target fails the whole call. 
 
 The `Monitor` struct exposes:
 
