@@ -881,6 +881,47 @@ fn test_several_contexts_on_one_target() -> anyhow::Result<()> {
     Ok(())
 }
 
+// The indexer's mempool watch is keyed by the transaction, not by the subscription, so one context leaving must
+// not blind another that still wants it. Only a watched transaction can be answered from the indexer's mempool
+// snapshot, and a reorg is where that shows: it reads the snapshot and never asks the node.
+#[test]
+fn test_mempool_watch_outlives_one_of_its_contexts() -> anyhow::Result<()> {
+    init_trace();
+    let node = TestNode::start(101)?;
+    let outpoint = node.fund_utxo(1_000_000)?;
+    let spender = node.sign_spend(outpoint, 900_000)?;
+    let txid = spender.compute_txid();
+
+    let storage = TestStorage::new();
+    let monitor = node.monitor(storage.storage(), 4, 20)?;
+    node.sync(&monitor)?;
+
+    // Two contexts on one transaction, both asking for mempool answers and both hearing about every block.
+    let target = MonitorTarget::Transaction(txid);
+    monitor.monitor(&[target.clone()], "keeps".to_string(), None, true)?;
+    monitor.monitor(&[target.clone()], "leaves".to_string(), None, true)?;
+
+    node.broadcast(&spender)?;
+    mine_and_tick(&node, &monitor, 1)?;
+    let height = node.height_of(&txid)?;
+    assert_eq!(drain_news(&monitor)?.len(), 2);
+
+    // One of them goes. The watch it wanted is still wanted by the other.
+    monitor.cancel(&[target.clone()], "leaves")?;
+
+    // The block is reorged away and the transaction falls back into the mempool. The context that stayed is told
+    // it is pending, which is only possible while the txid is still watched.
+    node.invalidate(height)?;
+    monitor.tick()?;
+
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "keeps", txid, 0, true);
+    assert_eq!(status_of(&news[0]), &TransactionStatus::InMempool);
+
+    Ok(())
+}
+
 // Every kind of target in one call, under one context: one block answers all of them, and cancelling the same
 // list takes the lot.
 #[test]
@@ -1045,6 +1086,57 @@ fn test_the_same_block_reported_twice() -> anyhow::Result<()> {
     // One acknowledgement clears every copy of it.
     monitor.ack_news(&news[0])?;
     assert!(monitor.get_news()?.is_empty());
+
+    Ok(())
+}
+
+// =============================================================================
+// Restart
+// =============================================================================
+
+// Everything the monitor knows is in the storage the consumer owns, so a new monitor over the same database picks
+// the work up where the old one left it: the news nobody acknowledged is still waiting, and the subscription is
+// still following its transaction rather than starting over.
+#[test]
+fn test_state_survives_a_restart() -> anyhow::Result<()> {
+    init_trace();
+    let node = TestNode::start(101)?;
+    let outpoint = node.fund_utxo(1_000_000)?;
+    let spender = node.sign_spend(outpoint, 900_000)?;
+    let txid = spender.compute_txid();
+
+    let storage = TestStorage::new();
+    let target = MonitorTarget::Transaction(txid);
+
+    let monitor = node.monitor(storage.storage(), 4, 20)?;
+    node.sync(&monitor)?;
+    monitor.monitor(&[target.clone()], "ctx".to_string(), None, false)?;
+
+    node.broadcast(&spender)?;
+    mine_and_tick(&node, &monitor, 1)?;
+
+    // Read without acknowledging, then stop the monitor with the item still pending.
+    let news = monitor.get_news()?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "ctx", txid, 1, false);
+    drop(monitor);
+
+    // A new monitor over the same storage. The unacknowledged item is still there, and acknowledging it through
+    // this one is what clears it.
+    let resumed = node.monitor(storage.storage(), 4, 20)?;
+    let news = resumed.get_news()?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "ctx", txid, 1, false);
+
+    resumed.ack_news(&news[0])?;
+    assert!(resumed.get_news()?.is_empty());
+
+    // The subscription came back with it, still following the transaction it had already found: the next block is
+    // reported at two confirmations, not as a fresh discovery at one.
+    mine_and_tick(&node, &resumed, 1)?;
+    let news = drain_news(&resumed)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "ctx", txid, 2, false);
 
     Ok(())
 }
