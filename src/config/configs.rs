@@ -83,11 +83,16 @@ impl MonitorSettings {
             "max_monitoring_confirmations must be at least 2 blocks, so a reorg right after the first news is reported"
         );
 
-        // A valid trigger is deeper than finality and below the maximum confirmations. So:
-        // finality < trigger < max_monitoring_confirmations => finality + 2 <= max_monitoring_confirmations
         ensure!(
-            self.max_monitoring_confirmations >= self.finality.saturating_add(2),
-            "max_monitoring_confirmations must be at least finality plus two, or no confirmation trigger could ever be accepted"
+            self.finality >= MIN_FINALITY,
+            "finality must be at least one block, because a transaction in no block at all is never settled"
+        );
+
+        // A valid trigger is at least finality and at most the maximum confirmations. So:
+        // finality <= trigger <= max_monitoring_confirmations => finality <= max_monitoring_confirmations
+        ensure!(
+            self.max_monitoring_confirmations >= self.finality,
+            "max_monitoring_confirmations must be at least finality, or no confirmation trigger could ever be accepted"
         );
 
         let indexer_settings = self.indexer_settings.clone().unwrap_or_default();
@@ -118,7 +123,7 @@ mod tests {
         for confirmations in 0..MIN_MAX_MONITORING_CONFIRMATIONS {
             let settings = MonitorSettings {
                 max_monitoring_confirmations: confirmations,
-                finality: 0,
+                finality: MIN_FINALITY,
                 indexer_settings: None,
             };
             assert!(matches!(
@@ -126,6 +131,17 @@ mod tests {
                 MonitorError::InvalidConfiguration(_)
             ));
         }
+
+        // A finality of zero would settle a transaction that is in no block, so it is refused.
+        let settings = MonitorSettings {
+            max_monitoring_confirmations: 50,
+            finality: 0,
+            indexer_settings: Some(IndexerSettings::new(50)),
+        };
+        assert!(matches!(
+            settings.validate().unwrap_err(),
+            MonitorError::InvalidConfiguration(_)
+        ));
 
         // A window shorter than the confirmations being monitored is rejected.
         let settings = MonitorSettings {
@@ -146,10 +162,10 @@ mod tests {
         };
         assert!(settings.validate().is_ok());
 
-        // Finality so deep that no trigger could sit between it and the maximum is rejected, and one block of room is enough.
+        // Finality deeper than the maximum leaves no depth a trigger could take, and the same depth leaves exactly one.
         let settings = MonitorSettings {
             max_monitoring_confirmations: 50,
-            finality: 49,
+            finality: 51,
             indexer_settings: Some(IndexerSettings::new(50)),
         };
         assert!(matches!(
@@ -159,7 +175,7 @@ mod tests {
 
         let settings = MonitorSettings {
             max_monitoring_confirmations: 50,
-            finality: 48,
+            finality: 50,
             indexer_settings: Some(IndexerSettings::new(50)),
         };
         assert!(settings.validate().is_ok());

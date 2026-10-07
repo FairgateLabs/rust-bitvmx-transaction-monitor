@@ -59,7 +59,7 @@ A tick runs the block pass or the reorg pass, never both, because the indexer ne
 
 ## Public API
 
-> ⚠️ **A trigger must satisfy `finality < trigger < max_monitoring_confirmations`.** Both bounds are strict, and a trigger outside them is refused with `InvalidConfirmationTrigger`. A trigger is the consumer's finality claim: it is reported once and never restated, which is why it has to sit deeper than a reorg can reach.
+> ⚠️ **A trigger must satisfy `finality <= trigger <= max_monitoring_confirmations`.** Both bounds are inclusive, and a trigger outside them is refused with `InvalidConfirmationTrigger`. A trigger is the consumer's finality claim: it is reported once and never restated, so it has to sit at a depth that is already settled. The upper bound is where the block of the transaction would leave the indexer's window while it is still being followed.
 
 > ⚠️ **Acknowledge news only after acting on it.** Acknowledging is the only thing that deletes an item, and it deletes by value. Act first, or lose an event you never processed.
 
@@ -156,7 +156,7 @@ monitor.cancel(&[MonitorTarget::NewBlock], "my-protocol")?;
 | Setting | Default | Meaning |
 |---|---|---|
 | `max_monitoring_confirmations` | 100 | How deep a transaction is followed by a subscription with no trigger. It is also the deepest reorg the monitor can still report. |
-| `finality` | 6 | The depth at which a block is taken to be settled. Its only job is to be the floor for a trigger. |
+| `finality` | 6 | The depth at which a block is taken to be settled, at least 1. Its only job is to be the floor for a trigger. |
 | `indexer_settings.retention_depth` | 100 | Forwarded to the indexer: how many recent blocks stay on disk. |
 
 Three relations are validated when the monitor is built, and a configuration that breaks one is refused:
@@ -164,7 +164,7 @@ Three relations are validated when the monitor is built, and a configuration tha
 | Relation | Why |
 |---|---|
 | `max_monitoring_confirmations >= 2` | A transaction has to stay followed for at least one block after its first news, or a reorg that removes it right afterwards is never reported. |
-| `max_monitoring_confirmations >= finality + 2` | A trigger is strictly deeper than finality and strictly below the maximum, so there has to be room for one between them. |
+| `max_monitoring_confirmations >= finality >= 1` | A trigger sits between the two, both included, so there has to be a depth left for one. |
 | `retention_depth >= max_monitoring_confirmations` | The indexer must still hold the block of anything the monitor is following. |
 
 ## Development Setup

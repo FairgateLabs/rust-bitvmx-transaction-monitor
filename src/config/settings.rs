@@ -8,6 +8,10 @@ pub const DEFAULT_MAX_MONITORING_CONFIRMATIONS: u32 = 100;
 /// as soon as it is first confirmed and a reorg that removes it right afterwards is never reported.
 pub const MIN_MAX_MONITORING_CONFIRMATIONS: u32 = 2;
 
-/// Depth at which a block is taken to be settled. A confirmation trigger must be deeper than this, because a trigger
+/// Depth at which a block is taken to be settled. A confirmation trigger must be at least this deep, because a trigger
 /// is reported once and never restated: whatever it promised has to be beyond the reach of a reorg.
 pub const DEFAULT_FINALITY: u32 = 6;
+
+/// A single confirmation is the minimum depth that can settle anything, because a transaction in the mempool is in
+/// no block at all.
+pub const MIN_FINALITY: u32 = 1;

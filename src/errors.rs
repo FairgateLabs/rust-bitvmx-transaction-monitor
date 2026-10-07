@@ -17,7 +17,7 @@ pub enum MonitorError {
     #[error("Unexpected error: {0}")]
     UnexpectedError(String),
 
-    #[error("Invalid confirmation trigger {0}: it must be deeper than the finality of {1} and below the maximum of {2}")]
+    #[error("Invalid confirmation trigger {0}: it must be at least the finality of {1} and at most the maximum of {2}")]
     InvalidConfirmationTrigger(u32, u32, u32),
 
     #[error("Invalid configuration: {0}")]

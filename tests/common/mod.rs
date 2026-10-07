@@ -158,17 +158,17 @@ impl TestNode {
         Ok(node)
     }
 
-    /// A monitor on this node, with its own RPC client and the indexer it owns. Finality is zero: no depth is settled,
-    /// because a test chain reorgs at will, and these tests invalidate blocks a real finality would have protected.
-    /// That is also what lets a test use the shallow triggers a few mined blocks allow. The test that cares about the
-    /// bound sets its own finality.
+    /// A monitor on this node, with its own RPC client and the indexer it owns. Finality is one, the minimum a
+    /// configuration allows, because a test chain reorgs at will and these tests invalidate blocks a real finality
+    /// would have protected. That is also what lets a test use the small triggers a few mined blocks allow. The
+    /// test that cares about the bound sets its own finality.
     pub fn monitor(
         &self,
         storage: Rc<Storage>,
         max_monitoring_confirmations: u32,
         retention_depth: BlockHeight,
     ) -> Result<Monitor, MonitorError> {
-        self.monitor_with_finality(storage, 0, max_monitoring_confirmations, retention_depth)
+        self.monitor_with_finality(storage, 1, max_monitoring_confirmations, retention_depth)
     }
 
     pub fn monitor_with_finality(

@@ -57,11 +57,12 @@ impl Subscriptions {
         let maximum = self.settings.max_monitoring_confirmations;
         let finality = self.settings.finality;
 
-        // finality < trigger < max_monitoring_confirmations.
-        // At or below finality a reorg could undo what it reported, and a trigger is reported once and never restated.
-        // At or above the maximum the transaction stops being tracked before the trigger is ever reached.
+        // finality <= trigger <= max_monitoring_confirmations.
+        // Finality is the depth at which a block is settled, so a trigger may sit exactly on it: a trigger is reported
+        // once and never restated, and from finality on there is no reorg left to undo it. Above the maximum the block
+        // of the transaction leaves the indexer's window while it is still tracked, and the block pass would fail.
         if let Some(trigger) = confirmation_trigger {
-            if trigger <= finality || trigger >= maximum {
+            if trigger < finality || trigger > maximum {
                 return Err(MonitorError::InvalidConfirmationTrigger(
                     trigger, finality, maximum,
                 ));

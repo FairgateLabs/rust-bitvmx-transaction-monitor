@@ -152,7 +152,7 @@ fn test_transaction_lifecycle() -> anyhow::Result<()> {
 }
 
 // A trigger is reported at the block where the count equals it and at no other, while a subscription without
-// one hears about every block. A trigger that could never be reached, or that is not deeper than finality, is refused.
+// one hears about every block. A trigger that could never be reached, or that is below finality, is refused.
 #[test]
 fn test_confirmation_trigger() -> anyhow::Result<()> {
     init_trace();
@@ -167,32 +167,34 @@ fn test_confirmation_trigger() -> anyhow::Result<()> {
 
     let target = MonitorTarget::Transaction(txid);
 
-    // At or above the maximum the transaction stops being watched before the trigger, so it is refused.
-    for trigger in [6, 7] {
-        assert!(matches!(
-            monitor.monitor(&[target.clone()], "bad".to_string(), Some(trigger), false),
-            Err(MonitorError::InvalidConfirmationTrigger(_, _, 6))
-        ));
-    }
+    // Past the maximum the block of the transaction would leave the indexer's window while it is still tracked, so
+    // such a trigger is refused. The maximum itself is accepted, and is the deepest one that is.
+    assert!(matches!(
+        monitor.monitor(&[target.clone()], "bad".to_string(), Some(7), false),
+        Err(MonitorError::InvalidConfirmationTrigger(_, _, 6))
+    ));
 
-    // A trigger is reported once and never restated, so one at or below finality is refused the same way: a reorg
-    // could undo what it promised and the consumer would never hear about it.
-    let shallow_storage = TestStorage::new();
-    let shallow = node.monitor_with_finality(shallow_storage.storage(), 3, 6, 20)?;
-    for trigger in [1, 2, 3] {
+    // A trigger is reported once and never restated, so one below finality is refused: a reorg could undo what it
+    // promised and the consumer would never hear about it. Finality itself is settled, so it is accepted.
+    let finality_storage = TestStorage::new();
+    let with_finality = node.monitor_with_finality(finality_storage.storage(), 3, 6, 20)?;
+    for trigger in [1, 2] {
         assert!(matches!(
-            shallow.monitor(&[target.clone()], "bad".to_string(), Some(trigger), false),
+            with_finality.monitor(&[target.clone()], "bad".to_string(), Some(trigger), false),
             Err(MonitorError::InvalidConfirmationTrigger(_, 3, _))
         ));
     }
-    shallow.monitor(&[target.clone()], "deep enough".to_string(), Some(4), false)?;
+    with_finality.monitor(&[target.clone()], "at finality".to_string(), Some(3), false)?;
+    with_finality.monitor(&[target.clone()], "at the maximum".to_string(), Some(6), false)?;
 
     monitor.monitor(&[target.clone()], "every".to_string(), None, false)?;
     monitor.monitor(&[target.clone()], "three".to_string(), Some(3), false)?;
+    // The maximum is a legal trigger, and the block that reaches it is the last one the transaction is followed in.
+    monitor.monitor(&[target.clone()], "at the maximum".to_string(), Some(6), false)?;
 
     node.broadcast(&spender)?;
 
-    for confirmations in 1..=5 {
+    for confirmations in 1..=6 {
         mine_and_tick(&node, &monitor, 1)?;
         let news = drain_news(&monitor)?;
 
@@ -210,7 +212,21 @@ fn test_confirmation_trigger() -> anyhow::Result<()> {
             }
             _ => assert!(three.is_empty(), "nothing at {confirmations} confirmations"),
         }
+
+        // A trigger on the maximum itself is reported there, in the same block the transaction stops being followed in.
+        let at_max = of_context(&news, "at the maximum");
+        match confirmations {
+            6 => {
+                assert_eq!(at_max.len(), 1);
+                assert_tx_news(at_max[0], &target, "at the maximum", txid, 6, false);
+            }
+            _ => assert!(at_max.is_empty(), "nothing at {confirmations} confirmations"),
+        }
     }
+
+    // Everything has been told what it asked for, so nothing is left to report at the next block.
+    mine_and_tick(&node, &monitor, 1)?;
+    assert!(drain_news(&monitor)?.is_empty());
 
     Ok(())
 }

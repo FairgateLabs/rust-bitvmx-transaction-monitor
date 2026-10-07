@@ -11,7 +11,7 @@ These are the conditions the monitor is designed for. Outside them, behaviour is
 | A single monitor instance runs against the storage. | One writer per database, shared with the indexer underneath it. |
 | The indexer is the only source of chain truth. | Every count comes from the indexer's cursor, never from the node's tip, so an answer never contradicts a block the consumer was already given. |
 | `retention_depth >= max_monitoring_confirmations`. | Validated at construction. It is what keeps the block of a followed transaction inside the indexer's window. |
-| A confirmation trigger is deeper than `finality`. | Validated per call. A trigger is reported once and never restated, so what it promised has to be out of reach of a reorg. |
+| A confirmation trigger is at least `finality` deep. | Validated per call. A trigger is reported once and never restated, so what it promised has to be out of reach of a reorg. |
 | Txids are stable, because BitVMX transactions are SegWit. | Subscriptions are keyed by txid; a malleable txid would be lost on a re-mine. |
 | The consumer acknowledges the news it acts on. | Acknowledging is the only thing that deletes an item. |
 | Settings do not change across a restart on the same storage. | Persisted records were written under the maximum and the window that produced them. |
@@ -189,6 +189,6 @@ A record is read and written whole, and found by a prefix scan over its kind, so
 | Entry | One context's subscription to that target: its trigger, its mempool flag, and the transactions it follows. |
 | Followed transaction | A transaction an entry found and is still reporting on, kept as its txid and the block it is in. |
 | Trigger | The depth at which a subscription wants its one item. Reported once, never restated. |
-| Finality | The depth at which a block is taken to be settled. The floor a trigger has to clear. |
+| Finality | The depth at which a block is taken to be settled, one block at the minimum. The floor a trigger may sit on. |
 | News | One item for one subscription: the target, the context, and what happened. |
 | `Unreachable` | The answer to a UTXO subscription whose spend is older than anything the indexer holds. |
