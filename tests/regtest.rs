@@ -726,12 +726,81 @@ fn test_reorg_restates() -> anyhow::Result<()> {
     Ok(())
 }
 
+// A UTXO subscription watches an output, not a transaction, so a reorg can hand it a different spender than the one
+// it found. The first spender is reported, then taken back when its block goes, and the subscription returns to
+// waiting and follows whatever spends the output on the new chain, under the same target and context.
+#[test]
+fn test_reorg_changes_the_spender() -> anyhow::Result<()> {
+    init_trace();
+    let node = TestNode::start(101)?;
+    let outpoint = node.fund_utxo(1_000_000)?;
+
+    // Two transactions spending the same output, so only one of them can ever be in the chain. The second pays a
+    // much larger fee, which is what lets it replace the first in the mempool once the reorg puts it back there.
+    let first = node.sign_spend(outpoint, 900_000)?;
+    let second = node.sign_spend(outpoint, 700_000)?;
+    let first_txid = first.compute_txid();
+    let second_txid = second.compute_txid();
+    assert_ne!(first_txid, second_txid);
+
+    let storage = TestStorage::new();
+    let monitor = node.monitor(storage.storage(), 4, 20)?;
+    node.sync(&monitor)?;
+
+    let target = MonitorTarget::SpendingUtxo(outpoint);
+    monitor.monitor(&[target.clone()], "ctx".to_string(), None, false)?;
+
+    // Still unspent when the subscription is made, so the first check finds nothing.
+    monitor.tick()?;
+    assert!(drain_news(&monitor)?.is_empty());
+
+    node.mine_including(&[first])?;
+    let height = node.height_of(&first_txid)?;
+    monitor.tick()?;
+
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "ctx", first_txid, 1, false);
+
+    // The block holding that spender is reorged away. The subscription hears that the spend it was told about is
+    // gone, and goes back to waiting for the output to be spent.
+    node.invalidate(height)?;
+    monitor.tick()?;
+
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "ctx", first_txid, 0, true);
+    assert_eq!(status_of(&news[0]), &TransactionStatus::NotFound);
+
+    // The output is spent again on the new chain, by the other transaction. The subscription reports that one as an
+    // ordinary discovery: a new spender, not a restatement of the old one.
+    node.mine_including(&[second])?;
+    monitor.tick()?;
+
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &target, "ctx", second_txid, 1, false);
+    assert_eq!(txid_of(&news[0]), second_txid, "the spender changed identity");
+
+    // From here the new spender is followed like any other, to the maximum, and the subscription ends with it.
+    mine_and_tick(&node, &monitor, 3)?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 3);
+    assert_tx_news(&news[2], &target, "ctx", second_txid, 4, false);
+
+    mine_and_tick(&node, &monitor, 1)?;
+    assert!(drain_news(&monitor)?.is_empty());
+
+    Ok(())
+}
+
 // =============================================================================
 // Several subscriptions to one target
 // =============================================================================
 
 // Contexts on the same target are independent: a new one is answered without telling the others again, one
 // leaving takes only its own news, and registering again changes the parameters without losing what was found.
+// Cancelling what is not there, a context that never subscribed or a target nobody watches, does nothing at all.
 #[test]
 fn test_several_contexts_on_one_target() -> anyhow::Result<()> {
     init_trace();
@@ -783,6 +852,28 @@ fn test_several_contexts_on_one_target() -> anyhow::Result<()> {
 
     monitor.monitor(&[target.clone()], "third".to_string(), None, false)?;
     monitor.tick()?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_eq!(news[0].context, "third");
+
+    // Cancelling a context that does not watch this target takes nothing away from the one that does.
+    monitor.cancel(&[target.clone()], "never subscribed")?;
+
+    // A subscription cancelled before the next tick never has its first check run. The queue still names the target,
+    // because cancelling does not touch it, but the record it would answer for is gone. The transaction here is the
+    // funding one, already deep in the chain, so a check that did run would have reported it.
+    let funding = MonitorTarget::Transaction(outpoint.txid);
+    monitor.monitor(&[funding.clone()], "fleeting".to_string(), None, false)?;
+    monitor.cancel(&[funding.clone()], "fleeting")?;
+    monitor.tick()?;
+    assert!(drain_news(&monitor)?.is_empty());
+
+    // Its last context left, so the record went with it, and cancelling a target nobody is subscribed to is not an
+    // error either: there is simply nothing to take away.
+    monitor.cancel(&[funding], "fleeting")?;
+
+    // None of that disturbed the subscription that was there.
+    mine_and_tick(&node, &monitor, 1)?;
     let news = drain_news(&monitor)?;
     assert_eq!(news.len(), 1);
     assert_eq!(news[0].context, "third");

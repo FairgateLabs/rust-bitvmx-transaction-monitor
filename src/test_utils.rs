@@ -4,16 +4,12 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bitcoin::hashes::Hash;
-use bitcoin::{absolute, transaction, BlockHash, Network, OutPoint, Transaction, TxOut, Txid};
-use bitcoin_indexer::indexer::Indexer;
-use bitcoin_indexer::IndexerType;
-use bitvmx_bitcoin_rpc::bitcoin_client::BitcoinClient;
-use bitvmx_bitcoin_rpc::rpc_config::RpcConfig;
+use bitcoin::{absolute, transaction, BlockHash, OutPoint, Transaction, TxOut, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 
-use crate::types::{BlockRef, FullBlock};
+use crate::types::BlockRef;
 
 /// A txid that is unique per `seed`, for tests that only need to tell two of them apart.
 pub fn txid(seed: u8) -> Txid {
@@ -49,33 +45,6 @@ pub fn tx(seed: u32, inputs: Vec<OutPoint>, outputs: Vec<TxOut>) -> Transaction 
             .collect(),
         output: outputs,
     }
-}
-
-/// A block holding the given transactions, with a hash that follows its height unless one is given.
-pub fn block(height: BlockHeight, hash_seed: u8, txs: Vec<Transaction>) -> FullBlock {
-    FullBlock {
-        height,
-        hash: block_hash(hash_seed),
-        prev_hash: block_hash(hash_seed.wrapping_sub(1)),
-        txs,
-        estimated_fee_rate: 0,
-    }
-}
-
-/// An indexer wired to a port nothing listens on. Building one reads nothing from a node, so it is enough for
-/// the tests that only exercise the rules and never reach the chain. A test that does reach it fails on the
-/// connection rather than on a type, which is the price of the monitor sharing one handle with its indexer.
-pub fn offline_indexer(storage: Rc<Storage>) -> Rc<IndexerType> {
-    let config = RpcConfig::new(
-        Network::Regtest,
-        "http://127.0.0.1:1".to_string(),
-        "user".to_string(),
-        "password".to_string(),
-        String::new(),
-    );
-    let client = BitcoinClient::new_from_config(&config).expect("test bitcoin client");
-
-    Rc::new(Indexer::new(client, storage, None).expect("test indexer"))
 }
 
 /// A database backed by a fresh directory under the system temp folder, so tests never share state.
