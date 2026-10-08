@@ -279,27 +279,54 @@ fn test_first_check_sees_the_past() -> anyhow::Result<()> {
     Ok(())
 }
 
-// A transaction whose block has already fallen out of the indexer's window is still answered: the first check asks
-// the node, which is the one lookup in the monitor that reaches past what the indexer holds. The count it comes back
-// with is past the maximum, so it is reported once and nothing is tracked, which is also the only way the monitor
-// ever reports a transaction it cannot read from its own storage.
+// A transaction mined before the first block the indexer ever read happened before the monitor started, so it is
+// unreachable. That holds even while a fresh database is still filling its window, when such a transaction is only a
+// couple of blocks deep by the cursor's count and tracking it would leave the block pass without its block.
+//
+// A transaction whose block the indexer read and later pruned is still answered: the first check asks the node, which
+// is the one lookup in the monitor that reaches past what the indexer holds. The count it comes back with is past the
+// maximum, so it is reported once and nothing is tracked, which is also the only way the monitor ever reports a
+// transaction it cannot read from its own storage.
 #[test]
 fn test_first_check_asks_the_node_below_the_window() -> anyhow::Result<()> {
     init_trace();
     let node = TestNode::start(101)?;
+    let before_start = node.sign_spend(node.fund_utxo(1_000_000)?, 900_000)?;
+    let before_txid = before_start.compute_txid();
+
+    // Mined four blocks below the tip, so one block below where a fresh database with a window of three starts.
+    node.mine_including(&[before_start])?;
+    node.mine(4)?;
+
+    let storage = TestStorage::new();
+    let monitor = node.monitor(storage.storage(), 3, 3)?;
+    let before_target = MonitorTarget::Transaction(before_txid);
+    monitor.monitor(&[before_target.clone()], "ctx".to_string(), None, true)?;
+
+    // The first tick reads the first block, and the first check finds the transaction one block below it: two
+    // confirmations from the cursor, below the maximum of three, yet unreachable rather than tracked.
+    monitor.tick()?;
+    assert_eq!(monitor.get_indexed_height()?, node.height_of(&before_txid)? + 1);
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_eq!(news[0].target, before_target);
+    assert_eq!(news[0].context, "ctx");
+    assert!(matches!(news[0].kind, NewsKind::UnreachableTx));
+    assert!(!is_mempool_watched(&storage.storage(), &before_txid)?, "the dropped subscription releases its watch");
+
+    // The subscription was dropped with its record, so the blocks that fill the window neither fail nor report it.
+    node.sync(&monitor)?;
+    assert!(drain_news(&monitor)?.is_empty());
+
+    // Now a transaction mined after the start, then buried under five more blocks against a window of three.
     let outpoint = node.fund_utxo(1_000_000)?;
     let spender = node.sign_spend(outpoint, 900_000)?;
     let txid = spender.compute_txid();
-
-    // Mined, then buried under five more blocks, against a window of three.
-    node.broadcast(&spender)?;
-    node.mine(1)?;
+    node.mine_including(&[spender])?;
     let height = node.height_of(&txid)?;
     node.mine(5)?;
-
-    let storage = TestStorage::new();
-    let monitor = node.monitor(storage.storage(), 2, 3)?;
     node.sync(&monitor)?;
+    drain_news(&monitor)?;
 
     // Its block was pruned, which takes the height entry of every transaction in it, so the indexer cannot answer
     // for this one at all. Whatever the subscription is told next can only have come from the node.
@@ -332,7 +359,7 @@ fn test_first_check_asks_the_node_below_the_window() -> anyhow::Result<()> {
         other => panic!("expected a confirmed status, got {other:?}"),
     }
 
-    // Six is past the maximum of two, so there was never anything left to follow: no record was written and no block
+    // Six is past the maximum of three, so there was never anything left to follow: no record was written and no block
     // from here on says anything about it again.
     mine_and_tick(&node, &monitor, 2)?;
     assert!(drain_news(&monitor)?.is_empty());
@@ -564,7 +591,7 @@ fn test_spend_older_than_the_window() -> anyhow::Result<()> {
             .find(|item| &item.target == target)
             .expect("one item per target");
         assert_eq!(item.context, "ctx");
-        assert!(matches!(item.kind, NewsKind::ProbablyUnreachable));
+        assert!(matches!(item.kind, NewsKind::ProbablyUnreachableUTXO));
     }
 
     // Only probably: the late one was above the cursor, and the next block brings its spender.
@@ -584,7 +611,7 @@ fn test_spend_older_than_the_window() -> anyhow::Result<()> {
     monitor.tick()?;
     let news = drain_news(&monitor)?;
     assert_eq!(news.len(), 1);
-    assert!(matches!(news[0].kind, NewsKind::ProbablyUnreachable));
+    assert!(matches!(news[0].kind, NewsKind::ProbablyUnreachableUTXO));
 
     Ok(())
 }

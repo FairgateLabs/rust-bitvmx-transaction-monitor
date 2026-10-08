@@ -228,13 +228,16 @@ impl MonitorStore {
         let key = match (&news.kind, &news.target) {
             (NewsKind::Transaction { txid, .. }, _) => StoreKey::TransactionNews(*txid),
             (NewsKind::Block(block), _) => StoreKey::BlockNews(block.height),
-            (NewsKind::ProbablyUnreachable, MonitorTarget::SpendingUtxo(utxo)) => {
+            (NewsKind::ProbablyUnreachableUTXO, MonitorTarget::SpendingUtxo(utxo)) => {
                 StoreKey::TransactionNews(utxo.txid)
             }
-            // Only a UTXO first check can find a spend it will probably never reach, so anything else is a bug.
-            (NewsKind::ProbablyUnreachable, target) => {
+            (NewsKind::UnreachableTx, MonitorTarget::Transaction(txid)) => {
+                StoreKey::TransactionNews(*txid)
+            }
+            // Each unreachable kind belongs to the one first check that produces it, so anything else is a bug.
+            (kind @ (NewsKind::ProbablyUnreachableUTXO | NewsKind::UnreachableTx), target) => {
                 return Err(MonitorError::InvariantViolation(format!(
-                    "{target:?} produced probably unreachable news, which only a spending UTXO can"
+                    "{target:?} produced {kind:?} news, which only its own kind of target can"
                 )))
             }
         };
@@ -476,7 +479,7 @@ mod tests {
 
         // A probably unreachable spend has no spender, so it goes under the outpoint's own transaction.
         let unreachable = MonitorNews {
-            kind: NewsKind::ProbablyUnreachable,
+            kind: NewsKind::ProbablyUnreachableUTXO,
             ..spend.clone()
         };
         assert_eq!(
@@ -484,15 +487,28 @@ mod tests {
             format!("monitor/news/{}", txid(1))
         );
 
-        // Nothing but a spending UTXO can be unreachable, so anything else is a bug and says so.
-        let impossible = MonitorNews {
-            target: MonitorTarget::NewBlock,
-            ..unreachable
+        // An unreachable transaction goes under its own txid.
+        let unreachable_tx = MonitorNews {
+            target: MonitorTarget::Transaction(txid(2)),
+            kind: NewsKind::UnreachableTx,
+            ..spend.clone()
         };
-        assert!(matches!(
-            store.news_key(&impossible).unwrap_err(),
-            MonitorError::InvariantViolation(_)
-        ));
+        assert_eq!(
+            store.news_key(&unreachable_tx).unwrap(),
+            format!("monitor/news/{}", txid(2))
+        );
+
+        // Each unreachable kind belongs to its own kind of target, so anything else is a bug and says so.
+        for impossible in [
+            MonitorNews { target: MonitorTarget::NewBlock, ..unreachable.clone() },
+            MonitorNews { target: MonitorTarget::Transaction(txid(2)), ..unreachable },
+            MonitorNews { target: MonitorTarget::SpendingUtxo(outpoint(1, 0)), ..unreachable_tx },
+        ] {
+            assert!(matches!(
+                store.news_key(&impossible).unwrap_err(),
+                MonitorError::InvariantViolation(_)
+            ));
+        }
 
         let block = |height| MonitorNews {
             target: MonitorTarget::NewBlock,

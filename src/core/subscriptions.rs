@@ -311,6 +311,17 @@ impl Subscriptions {
             return Ok(Vec::new()); // Not in a block, so the blocks that come will find it.
         };
 
+        // Mined before the first block the indexer ever read, so before the monitor started. No block it reads will hold it
+        // and its block could never be tracked, so the subscription is told once and dropped.
+        if block_height < self.indexer.get_first_indexed_height()? {
+            warn!("{tx_id} was mined at {block_height}, before the first indexed block, dropping its subscriptions");
+            self.store.delete_record(&record.target)?;
+            if wants_mempool_watch(&record) {
+                self.indexer.remove_mempool_watch(&tx_id)?; // The record that wanted it is gone.
+            }
+            return Ok(unreachable_news(&record, NewsKind::UnreachableTx));
+        }
+
         let confirmed_at = BlockRef {
             height: block_height,
             hash: block_hash,
@@ -365,7 +376,7 @@ impl Subscriptions {
         // The output is older than the window, so the spender is either older too or above a cursor that is behind the node, and
         // nothing tells the two apart. The record stays, so a spender the blocks bring later is still reported, and only cancel ends it.
         warn!("Spend of {outpoint} is not in the indexed window, and its output is older than it");
-        Ok(probably_unreachable_news(&record))
+        Ok(unreachable_news(&record, NewsKind::ProbablyUnreachableUTXO))
     }
 
     /// Tracks what a first check found, in the contexts that were not already tracking it, and tells each of
@@ -711,15 +722,15 @@ fn transaction_news(
     }
 }
 
-/// One item per context, saying the spend it was watching for is probably older than anything the indexer holds.
-fn probably_unreachable_news(record: &MonitorRecord) -> Vec<MonitorNews> {
+/// One item per context, saying what it was watching for is, or probably is, older than anything the indexer read.
+fn unreachable_news(record: &MonitorRecord, kind: NewsKind) -> Vec<MonitorNews> {
     record
         .entries
         .iter()
         .map(|entry| MonitorNews {
             target: record.target.clone(),
             context: entry.context.clone(),
-            kind: NewsKind::ProbablyUnreachable,
+            kind: kind.clone(),
         })
         .collect()
 }

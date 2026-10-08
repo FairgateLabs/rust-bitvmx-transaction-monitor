@@ -52,7 +52,7 @@ A tick runs the block pass or the reorg pass, never both, because the indexer ne
 
 | Target | Reports | Looks into the past |
 |---|---|---|
-| `Transaction(txid)` | that transaction, from its first confirmation | yes, and the node when the indexer holds nothing |
+| `Transaction(txid)` | that transaction, from its first confirmation | yes, and the node when the indexer holds nothing, back to the first block the indexer ever read; anything older is `UnreachableTx` |
 | `SpendingUtxo(outpoint)` | the transaction that spends that output | yes, but only the blocks the indexer holds |
 | `OutputPattern(filter)` | every transaction whose output at `output_index` is an `OP_RETURN` carrying `tag`, within an optional bound on the number of outputs | no, it matches the blocks that come |
 | `NewBlock` | every indexed block, with its height and hash | no |
@@ -136,7 +136,8 @@ for item in monitor.get_news(None)? {
             info!("{} is {status:?} for {} (reorg: {due_to_reorg})", txid, item.context)
         }
         NewsKind::Block(block) => info!("block {} at {}", block.hash, block.height),
-        NewsKind::ProbablyUnreachable => info!("{:?} is probably never answered, cancel it", item.target),
+        NewsKind::ProbablyUnreachableUTXO => info!("{:?} is probably never answered, cancel it", item.target),
+        NewsKind::UnreachableTx => info!("{:?} was mined before the monitor started", item.target),
     }
 
     // Only after acting on it: this is what deletes it.

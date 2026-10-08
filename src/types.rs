@@ -76,5 +76,8 @@ pub enum NewsKind {
     // A UTXO was already spent when the subscription was registered, its spender is in no block the indexer
     // holds and its output is older than all of them. The subscription stays, so a spender found later is
     // still reported. Consumer is responsible for deciding if waiting for a spender or cancel the subscription.
-    ProbablyUnreachable,
+    ProbablyUnreachableUTXO,
+    // A transaction was mined before the first block the indexer ever read, so before the monitor started. The
+    // subscription is dropped with it, because no block the monitor reads will ever hold it.
+    UnreachableTx,
 }
