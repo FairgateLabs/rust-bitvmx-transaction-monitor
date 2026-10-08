@@ -228,13 +228,13 @@ impl MonitorStore {
         let key = match (&news.kind, &news.target) {
             (NewsKind::Transaction { txid, .. }, _) => StoreKey::TransactionNews(*txid),
             (NewsKind::Block(block), _) => StoreKey::BlockNews(block.height),
-            (NewsKind::Unreachable, MonitorTarget::SpendingUtxo(utxo)) => {
+            (NewsKind::ProbablyUnreachable, MonitorTarget::SpendingUtxo(utxo)) => {
                 StoreKey::TransactionNews(utxo.txid)
             }
-            // Only a UTXO first check can find a spend it will never reach, so anything else is a bug.
-            (NewsKind::Unreachable, target) => {
+            // Only a UTXO first check can find a spend it will probably never reach, so anything else is a bug.
+            (NewsKind::ProbablyUnreachable, target) => {
                 return Err(MonitorError::InvariantViolation(format!(
-                    "{target:?} produced unreachable news, which only a spending UTXO can"
+                    "{target:?} produced probably unreachable news, which only a spending UTXO can"
                 )))
             }
         };
@@ -474,9 +474,9 @@ mod tests {
             format!("monitor/news/{}", txid(9))
         );
 
-        // An unreachable spend has no spender, so it goes under the outpoint's own transaction.
+        // A probably unreachable spend has no spender, so it goes under the outpoint's own transaction.
         let unreachable = MonitorNews {
-            kind: NewsKind::Unreachable,
+            kind: NewsKind::ProbablyUnreachable,
             ..spend.clone()
         };
         assert_eq!(

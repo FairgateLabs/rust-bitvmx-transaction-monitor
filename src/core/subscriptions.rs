@@ -19,7 +19,7 @@ use bitcoin_indexer::IndexerType;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use std::collections::HashMap;
 use std::rc::Rc;
-use tracing::{debug, error, info};
+use tracing::{debug, info, warn};
 
 use crate::config::MonitorSettings;
 use crate::core::helper::{is_spending_output, matches_output_pattern};
@@ -330,22 +330,42 @@ impl Subscriptions {
         // once for all of them would cost one pass per tick instead of one per outpoint, at the price of resolving
         // them after the queue loop rather than inside it.
 
+        // The mempool is left out, so a spend that is only there still reads as unspent and the block that mines it brings the spender.
         if self
             .indexer
-            .rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, true)?
+            .rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, false)?
         {
             return Ok(Vec::new()); // Still unspent, so the blocks that come will bring the spender.
         }
 
-        let Some((tx, confirmed_at)) = self.find_utxo_spender(outpoint)? else {
-            // Spent before the indexer's window, so no block it will ever see holds the spender.
-            error!("Spend of {outpoint} is older than indexed window, dropping its subscriptions");
-            self.store.delete_record(&record.target)?;
-            return Ok(unreachable_news(&record));
+        // The output can only be spent in its own block or above it, so that block is as far down as the spender is looked for.
+        let TransactionStatus::Confirmed {
+            block_height: created_at,
+            ..
+        } = self.indexer.get_transaction(&outpoint.txid, false)?
+        else {
+            // The output's transaction is above the indexer or not mined, and so is its spender, which the blocks that come will bring.
+            return Ok(Vec::new());
         };
 
-        let confirmations = confirmed_at.confirmations_at(self.indexer.get_indexed_height()?)?;
-        self.track_and_report(record, &tx, &confirmed_at, confirmations)
+        let (spender, lowest_read) = self.find_utxo_spender(outpoint, created_at)?;
+
+        if let Some((tx, confirmed_at)) = spender {
+            let confirmations =
+                confirmed_at.confirmations_at(self.indexer.get_indexed_height()?)?;
+            return self.track_and_report(record, &tx, &confirmed_at, confirmations);
+        }
+
+        // The walk reached the output's own block, so every block the spender could be in up to the cursor was read.
+        // It is above the cursor, and the blocks that come will bring it.
+        if lowest_read <= created_at {
+            return Ok(Vec::new());
+        }
+
+        // The output is older than the window, so the spender is either older too or above a cursor that is behind the node, and
+        // nothing tells the two apart. The record stays, so a spender the blocks bring later is still reported, and only cancel ends it.
+        warn!("Spend of {outpoint} is not in the indexed window, and its output is older than it");
+        Ok(probably_unreachable_news(&record))
     }
 
     /// Tracks what a first check found, in the contexts that were not already tracking it, and tells each of
@@ -421,21 +441,22 @@ impl Subscriptions {
         Ok(news)
     }
 
-    /// Walks the blocks the indexer holds backwards looking for the transaction that spent this outpoint.
-    /// Only stored blocks are read, so a spend older than the window is never found here.
+    /// Walks the blocks the indexer holds backwards looking for the transaction that spent this outpoint, down to the
+    /// block that created the output at the lowest. Returns the spender if found, and the height of the lowest block read.
     fn find_utxo_spender(
         &self,
         outpoint: OutPoint,
-    ) -> Result<Option<(Transaction, BlockRef)>, MonitorError> {
+        created_at: BlockHeight,
+    ) -> Result<(Option<(Transaction, BlockRef)>, BlockHeight), MonitorError> {
         let mut block = self.indexer.get_last_indexed_block()?;
 
         for _ in 0..self.retention_depth() {
             if let Some(tx) = block.txs.iter().find(|tx| is_spending_output(tx, outpoint)) {
-                return Ok(Some((tx.clone(), BlockRef::from(&block))));
+                return Ok((Some((tx.clone(), BlockRef::from(&block))), block.height));
             }
 
-            if block.height == 0 {
-                break; // Below genesis there is nothing left to read.
+            if block.height <= created_at {
+                break; // The output was created in this block, so nothing below it can spend it. This also stops at genesis.
             }
 
             let Some(previous) = self
@@ -448,7 +469,7 @@ impl Subscriptions {
             block = previous;
         }
 
-        Ok(None)
+        Ok((None, block.height))
     }
 
     /// Tracks whatever this block holds for the records given, and flags the ones that started tracking something because of it.
@@ -690,15 +711,15 @@ fn transaction_news(
     }
 }
 
-/// One item per context, saying the spend it was watching for can never be found.
-fn unreachable_news(record: &MonitorRecord) -> Vec<MonitorNews> {
+/// One item per context, saying the spend it was watching for is probably older than anything the indexer holds.
+fn probably_unreachable_news(record: &MonitorRecord) -> Vec<MonitorNews> {
     record
         .entries
         .iter()
         .map(|entry| MonitorNews {
             target: record.target.clone(),
             context: entry.context.clone(),
-            kind: NewsKind::Unreachable,
+            kind: NewsKind::ProbablyUnreachable,
         })
         .collect()
 }

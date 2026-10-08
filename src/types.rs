@@ -65,11 +65,16 @@ pub struct MonitorNews {
 /// What happened. A transaction event carries a status, a block event carries the block.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum NewsKind {
+    // A transaction was found, or its status changed.
     Transaction {
         txid: Txid,
         status: TransactionStatus,
         due_to_reorg: bool, // True only when this item exists because the chain was reorganised
     },
-    Block(BlockRef), // A new block was added to the chain, which is what a new block subscription is for.
-    Unreachable, // A UTXO was already spent long before the subscription was registered and the indexer has no block with it spender.
+    // A new block was added to the chain, which is what a new block subscription is for.
+    Block(BlockRef),
+    // A UTXO was already spent when the subscription was registered, its spender is in no block the indexer
+    // holds and its output is older than all of them. The subscription stays, so a spender found later is
+    // still reported. Consumer is responsible for deciding if waiting for a spender or cancel the subscription.
+    ProbablyUnreachable,
 }

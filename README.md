@@ -136,7 +136,7 @@ for item in monitor.get_news(None)? {
             info!("{} is {status:?} for {} (reorg: {due_to_reorg})", txid, item.context)
         }
         NewsKind::Block(block) => info!("block {} at {}", block.hash, block.height),
-        NewsKind::Unreachable => info!("{:?} can never be answered", item.target),
+        NewsKind::ProbablyUnreachable => info!("{:?} is probably never answered, cancel it", item.target),
     }
 
     // Only after acting on it: this is what deletes it.

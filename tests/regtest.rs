@@ -431,46 +431,160 @@ fn test_spending_utxo() -> anyhow::Result<()> {
     Ok(())
 }
 
-// A spend in a block older than everything the indexer keeps can never be found, so the subscription is told
-// once that it is unreachable and is dropped.
+// An output that is spent but whose spender the window does not hold is waited for whenever the spender can only be
+// above the cursor: the output's block is in the window or above it, or the spend is only in the mempool. The indexer
+// is kept behind the node here, which is the one situation where the node already knows a spender the indexer has not
+// read. An output spent in its own block is found too, because the walk reads that block before it stops.
+#[test]
+fn test_spend_the_indexer_has_not_read_yet() -> anyhow::Result<()> {
+    init_trace();
+    let node = TestNode::start(101)?;
+    let in_window = node.fund_utxo(1_000_000)?; // Created in the window, spent above the cursor.
+    let mempool_only = node.fund_utxo(1_000_000)?; // Created in the window, spent only in the mempool.
+
+    // Created and spent in the same block, which is the lowest block the walk reads.
+    let parent = node.sign_spend(node.fund_utxo(1_000_000)?, 900_000)?;
+    let same_block = bitcoin::OutPoint {
+        txid: parent.compute_txid(),
+        vout: 0,
+    };
+    node.broadcast(&parent)?;
+    let child = node.sign_spend(same_block, 800_000)?;
+    let child_txid = child.compute_txid();
+    node.mine_including(&[child])?;
+
+    let storage = TestStorage::new();
+    let monitor = node.monitor(storage.storage(), 10, 20)?;
+    node.sync(&monitor)?;
+
+    // The node moves ahead of the indexer: a block it will read before the first check, then the spend of an output it
+    // holds, then an output created and spent above it, and last a spend left in the mempool.
+    node.mine(1)?;
+    let spender = node.sign_spend(in_window, 900_000)?;
+    let spender_txid = spender.compute_txid();
+    node.mine_including(&[spender])?;
+
+    let above = node.fund_utxo(1_000_000)?;
+    let above_spender = node.sign_spend(above, 900_000)?;
+    let above_txid = above_spender.compute_txid();
+    node.mine_including(&[above_spender])?;
+
+    let mempool_spender = node.sign_spend(mempool_only, 900_000)?;
+    let mempool_txid = mempool_spender.compute_txid();
+    node.broadcast(&mempool_spender)?;
+
+    let in_window_target = MonitorTarget::SpendingUtxo(in_window);
+    let above_target = MonitorTarget::SpendingUtxo(above);
+    let mempool_target = MonitorTarget::SpendingUtxo(mempool_only);
+    let same_block_target = MonitorTarget::SpendingUtxo(same_block);
+    let targets = [
+        in_window_target.clone(),
+        above_target.clone(),
+        mempool_target.clone(),
+        same_block_target.clone(),
+    ];
+
+    // A trigger of one, so each spender is reported once and its subscription ends with it.
+    monitor.monitor(&targets, "ctx".to_string(), Some(1), false)?;
+
+    // The tick reads the block before the spends and runs the first checks. Only the spend in the same block as its
+    // output is in the window, so it is the only one reported. Every other one is waited for, none is unreachable.
+    monitor.tick()?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    let depth = monitor.get_indexed_height()? - node.height_of(&child_txid)? + 1;
+    assert_tx_news(&news[0], &same_block_target, "ctx", child_txid, depth, false);
+
+    // The block pass brings the spender of the output in the window.
+    monitor.tick()?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &in_window_target, "ctx", spender_txid, 1, false);
+
+    // Then the block that creates the other output, and the one that spends it.
+    monitor.tick()?;
+    assert!(drain_news(&monitor)?.is_empty());
+    monitor.tick()?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &above_target, "ctx", above_txid, 1, false);
+    assert_eq!(monitor.get_indexed_height()?, node.tip()?);
+
+    // The spend that was only in the mempool is reported when a block mines it.
+    mine_and_tick(&node, &monitor, 1)?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &mempool_target, "ctx", mempool_txid, 1, false);
+
+    Ok(())
+}
+
+// An output older than everything the indexer keeps, spent with no spender in the window, may have been spent below
+// the window or above a cursor that is behind the node, and nothing tells the two apart. Each context is told once that
+// it is probably unreachable, and the subscription stays, so a spender the blocks bring later is still reported.
 #[test]
 fn test_spend_older_than_the_window() -> anyhow::Result<()> {
     init_trace();
     let node = TestNode::start(101)?;
-    let outpoint = node.fund_utxo(1_000_000)?;
+    let old = node.fund_utxo(1_000_000)?; // Created and spent below the window.
+    let late = node.fund_utxo(1_000_000)?; // Created below the window, spent above the cursor.
 
-    let spender = node.sign_spend(outpoint, 900_000)?;
-    node.broadcast(&spender)?;
-    node.mine(1)?;
+    let spender = node.sign_spend(old, 900_000)?;
+    node.mine_including(&[spender])?;
 
-    // Five more blocks, so the block holding the spender is well below a window of three.
+    // Five more blocks, so both outputs and the old spender are well below a window of three.
     node.mine(5)?;
 
     let storage = TestStorage::new();
     let monitor = node.monitor(storage.storage(), 2, 3)?;
     node.sync(&monitor)?;
 
-    let target = MonitorTarget::SpendingUtxo(outpoint);
-    monitor.monitor(&[target.clone()], "ctx".to_string(), None, false)?;
+    // The node moves ahead of the indexer: a block it will read before the first check, then the late spend.
+    node.mine(1)?;
+    let late_spender = node.sign_spend(late, 900_000)?;
+    let late_txid = late_spender.compute_txid();
+    node.mine_including(&[late_spender])?;
 
-    // The node says it is spent, and no block the indexer holds says by what, so there is nothing to wait for.
+    let old_target = MonitorTarget::SpendingUtxo(old);
+    let late_target = MonitorTarget::SpendingUtxo(late);
+    monitor.monitor(
+        &[old_target.clone(), late_target.clone()],
+        "ctx".to_string(),
+        None,
+        false,
+    )?;
+
+    // The node says both are spent, and no block the indexer holds says by what. Both are probably unreachable.
+    monitor.tick()?;
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 2);
+    for target in [&old_target, &late_target] {
+        let item = news
+            .iter()
+            .find(|item| &item.target == target)
+            .expect("one item per target");
+        assert_eq!(item.context, "ctx");
+        assert!(matches!(item.kind, NewsKind::ProbablyUnreachable));
+    }
+
+    // Only probably: the late one was above the cursor, and the next block brings its spender.
     monitor.tick()?;
     let news = drain_news(&monitor)?;
     assert_eq!(news.len(), 1);
-    assert_eq!(news[0].target, target);
-    assert_eq!(news[0].context, "ctx");
-    assert!(matches!(news[0].kind, NewsKind::Unreachable));
+    assert_tx_news(&news[0], &late_target, "ctx", late_txid, 1, false);
 
-    // The subscription was dropped with the record, so blocks bring nothing more.
+    // The old one never comes, so blocks bring nothing more for it while the late one runs to the maximum.
     mine_and_tick(&node, &monitor, 2)?;
-    assert!(drain_news(&monitor)?.is_empty());
+    let news = drain_news(&monitor)?;
+    assert_eq!(news.len(), 1);
+    assert_tx_news(&news[0], &late_target, "ctx", late_txid, 2, false);
 
-    // Registering it again is answered the same way, once, rather than silently watching for ever.
-    monitor.monitor(&[target.clone()], "ctx".to_string(), None, false)?;
+    // Registering it again is answered the same way, once.
+    monitor.monitor(&[old_target.clone()], "ctx".to_string(), None, false)?;
     monitor.tick()?;
     let news = drain_news(&monitor)?;
     assert_eq!(news.len(), 1);
-    assert!(matches!(news[0].kind, NewsKind::Unreachable));
+    assert!(matches!(news[0].kind, NewsKind::ProbablyUnreachable));
 
     Ok(())
 }

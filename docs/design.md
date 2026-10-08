@@ -21,7 +21,7 @@ These are the conditions the monitor is designed for. Outside them, behaviour is
 | Target | Identified by | Can a later block still produce an event for it | Ends on its own |
 |---|---|---|---|
 | `Transaction(txid)` | the txid | no, there is one such transaction and it is already done | yes, with its transaction |
-| `SpendingUtxo(outpoint)` | txid and vout | no, an output is spent once | yes, with its spender, or at once if the spend is unreachable |
+| `SpendingUtxo(outpoint)` | txid and vout | no, an output is spent once | yes, with its spender |
 | `OutputPattern(filter)` | every field of the filter | yes, any block may hold a new transaction of that shape | no |
 | `NewBlock` | nothing, there is one | yes, every block is one | no |
 
@@ -29,7 +29,17 @@ These are the conditions the monitor is designed for. Outside them, behaviour is
 
 Only `cancel` ends those two, and a consumer that stops caring has to call it: their record is read on every block for as long as it exists.
 
-**A UTXO subscription whose output was spent before the indexer's window can never be answered.** `Unreachable` belongs to that kind alone, and this is the only way it is ever reported. Its first check asks the node whether the output is still unspent, which is cheap and certain, but the spender itself is only ever looked for in stored blocks. If it is not there, no block the monitor will ever read holds it, so every context on that output is told `Unreachable` once and the record is deleted. Registering it again is answered the same way, once, rather than waiting for ever. Note that the window is shorter than `retention_depth` while the indexer is still catching up, so a fresh database can look back less far.
+**A UTXO subscription whose output is older than the indexer's window may never be answered.** `ProbablyUnreachable` belongs to that kind alone, and this is the only way it is ever reported. Its first check asks the node whether the output is spent, leaving the mempool out, and if it is, looks for the spender in the stored blocks, from the cursor down to the block that created the output and never below it:
+
+| Spent | Spender in the window | Output's block | Answer |
+|---|---|---|---|
+| no | - | - | wait, the blocks that come bring the spender |
+| yes | yes | - | tracked and reported, as any first check |
+| yes | no | above the cursor, or not mined | wait, the spender is above the cursor too |
+| yes | no | in the window | wait, the spender is above the cursor, every block below it was read |
+| yes | no | below the window | `ProbablyUnreachable`, once per context |
+
+In the last row the spender is either below the window too, or above a cursor that is behind the node, and nothing tells the two apart. So the record is kept: a spender the blocks bring later is reported as any other, and only `cancel` ends it, which is the consumer's job once it decides the spend is old. Registering it again is answered the same way, once. Note that the window is shorter than `retention_depth` while the indexer is still catching up, so a fresh database can look back less far.
 
 **A pattern's identity includes its bound.** `output_index`, `tag` and `max_outputs` are all part of what names the subscription, so the same tag under two different bounds is two subscriptions, each with its own record and its own news. A transaction matching both is reported once for each.
 
@@ -98,7 +108,7 @@ Items about one transaction are stored under that transaction, in the order they
 | The first check, trigger `t` | one item if the count is already at or past `t`, nothing otherwise |
 | The lookup finds it at or past the maximum | one item, and nothing is tracked afterwards |
 | A reorg | an item for every transaction a subscription without a trigger tracks, marked `due_to_reorg` |
-| A UTXO subscription whose spend is older than the window | one `Unreachable` item per context, and the record is deleted |
+| A UTXO subscription whose output is older than the window, spent with no spender in it | one `ProbablyUnreachable` item per context, and the record is kept |
 
 The first-check rules use "at or past" where a block uses "exactly". A block arrives one at a time, so a count lands on the trigger; a subscription made long after the fact never would.
 
@@ -202,4 +212,4 @@ A record is read and written whole, and found by a prefix scan over its kind, so
 | Trigger | The depth at which a subscription wants its one item. Reported once, never restated. |
 | Finality | The depth at which a block is taken to be settled, one block at the minimum. The floor a trigger may sit on. |
 | News | One item for one subscription: the target, the context, and what happened. |
-| `Unreachable` | The answer to a UTXO subscription whose spend is older than anything the indexer holds. |
+| `ProbablyUnreachable` | The answer to a UTXO subscription whose output is spent and older than anything the indexer holds, with no spender in it. Not final. |
