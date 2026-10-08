@@ -335,8 +335,10 @@ fn test_first_check_asks_the_node_below_the_window() -> anyhow::Result<()> {
         TransactionStatus::NotFound
     );
 
+    // Registered with the mempool flag, so it holds a watch until the subscription is over.
     let target = MonitorTarget::Transaction(txid);
-    monitor.monitor(&[target.clone()], "ctx".to_string(), None, false)?;
+    monitor.monitor(&[target.clone()], "ctx".to_string(), None, true)?;
+    assert!(is_mempool_watched(&storage.storage(), &txid)?);
 
     // One item, from the node, carrying the transaction and the block it is in. Six confirmations, counted from the
     // indexer's cursor like every other answer.
@@ -344,6 +346,10 @@ fn test_first_check_asks_the_node_below_the_window() -> anyhow::Result<()> {
     let news = drain_news(&monitor)?;
     assert_eq!(news.len(), 1);
     assert_tx_news(&news[0], &target, "ctx", txid, 6, false);
+
+    // The subscription ended in its first check, so the watch goes with it. Its block is pruned, so a watch left behind
+    // would ask the node about its mempool on every tick, for ever.
+    assert!(!is_mempool_watched(&storage.storage(), &txid)?);
 
     match status_of(&news[0]) {
         TransactionStatus::Confirmed {

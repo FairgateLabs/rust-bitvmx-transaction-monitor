@@ -397,6 +397,8 @@ impl Subscriptions {
         );
 
         let mut news = Vec::new();
+        // Read before any entry finishes, so the watch is released when the last context that wanted it is over.
+        let wanted_mempool = wants_mempool_watch(&record);
         // Surviving are the entries that will continue to be tracked. The only ones that are dropped are those
         // that are older than the maximum confirmations the monitor tracks.
         let mut surviving = Vec::with_capacity(record.entries.len());
@@ -447,6 +449,11 @@ impl Subscriptions {
         // Every entry was already tracking it, so the record is exactly as it was and there is nothing to write.
         if changed {
             self.persist(&record)?;
+
+            // Only a transaction target can ask for a mempool watch.
+            if let MonitorTarget::Transaction(tx_id) = &record.target {
+                self.release_mempool_watch(tx_id, wanted_mempool, &record)?;
+            }
         }
 
         Ok(news)
