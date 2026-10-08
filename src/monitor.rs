@@ -196,12 +196,12 @@ impl Monitor {
         Ok(self.indexer.get_transaction(tx_id, search_in_mempool)?)
     }
 
-    /// Live check against the node, bypassing everything the indexer holds: true when the UTXO is unspent.
+    /// Live check against the node, bypassing everything the indexer holds: true when the UTXO is spent.
     ///
     /// * `txid` - Transaction that created the output.
     /// * `vout` - Index of that output in it.
     /// * `include_mempool` - Count a spend that is still only in the mempool as having spent it.
-    pub fn rpc_is_utxo_unspent(
+    pub fn rpc_is_utxo_spent(
         &self,
         txid: &Txid,
         vout: u32,
@@ -209,7 +209,7 @@ impl Monitor {
     ) -> Result<bool, MonitorError> {
         Ok(self
             .indexer
-            .rpc_is_utxo_unspent(txid, vout, include_mempool)?)
+            .rpc_is_utxo_spent(txid, vout, include_mempool)?)
     }
 
     /// Live confirmation count from the node. None when it does not know the transaction, zero in its mempool.

@@ -331,9 +331,9 @@ impl Subscriptions {
         // them after the queue loop rather than inside it.
 
         // The mempool is left out, so a spend that is only there still reads as unspent and the block that mines it brings the spender.
-        if self
+        if !self
             .indexer
-            .rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, false)?
+            .rpc_is_utxo_spent(&outpoint.txid, outpoint.vout, false)?
         {
             return Ok(Vec::new()); // Still unspent, so the blocks that come will bring the spender.
         }

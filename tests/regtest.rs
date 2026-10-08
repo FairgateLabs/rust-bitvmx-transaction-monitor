@@ -372,8 +372,8 @@ fn test_spending_utxo() -> anyhow::Result<()> {
 
     // The first check asks the node whether each one is still unspent. The one that is not is answered from the
     // blocks the indexer holds, with the count it has now. The one that is brings nothing.
-    assert!(monitor.rpc_is_utxo_unspent(&watched.txid, watched.vout, true)?);
-    assert!(!monitor.rpc_is_utxo_unspent(&already_spent.txid, already_spent.vout, true)?);
+    assert!(!monitor.rpc_is_utxo_spent(&watched.txid, watched.vout, true)?);
+    assert!(monitor.rpc_is_utxo_spent(&already_spent.txid, already_spent.vout, true)?);
 
     monitor.tick()?;
     let news = drain_news(&monitor)?;
@@ -1392,15 +1392,15 @@ fn test_queries() -> anyhow::Result<()> {
     // An unknown transaction, then the same one in the mempool, then in a block.
     assert_eq!(monitor.get_tx_status(&txid, true)?, TransactionStatus::NotFound);
     assert_eq!(monitor.rpc_get_tx_confirmations(&txid)?, None);
-    assert!(monitor.rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, true)?);
+    assert!(!monitor.rpc_is_utxo_spent(&outpoint.txid, outpoint.vout, true)?);
 
     node.broadcast(&spender)?;
     monitor.tick()?;
 
     // Nothing watches it in the mempool, so the indexer has nothing stored, but the node answers.
     assert_eq!(monitor.rpc_get_tx_confirmations(&txid)?, Some(0));
-    assert!(!monitor.rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, true)?);
-    assert!(monitor.rpc_is_utxo_unspent(&outpoint.txid, outpoint.vout, false)?);
+    assert!(monitor.rpc_is_utxo_spent(&outpoint.txid, outpoint.vout, true)?);
+    assert!(!monitor.rpc_is_utxo_spent(&outpoint.txid, outpoint.vout, false)?);
 
     mine_and_tick(&node, &monitor, 1)?;
     let status = monitor.get_tx_status(&txid, false)?;

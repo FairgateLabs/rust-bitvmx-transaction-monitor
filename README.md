@@ -85,7 +85,7 @@ The `Monitor` struct exposes:
 | `get_indexed_height` | Height of the highest block the monitor has processed. |
 | `get_block` | The block at a height and hash, from the indexer's storage or from the node. |
 | `get_tx_status` | What the indexer knows about a txid right now: confirmed with its block and confirmations, in the mempool, or not found. |
-| `rpc_is_utxo_unspent` / `rpc_get_tx_confirmations` | Live node checks, passed straight through. |
+| `rpc_is_utxo_spent` / `rpc_get_tx_confirmations` | Live node checks, passed straight through. |
 | `get_estimated_fee_rate` | Fee rate estimated from the last indexed block. |
 | `max_monitoring_confirmations` | The configured maximum. |
 
