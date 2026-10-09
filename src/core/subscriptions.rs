@@ -6,8 +6,8 @@
 //! between them beyond the records themselves, which is what keeps the rules short:
 //!
 //! - without a trigger, every block a tracked transaction is in is reported
-//! - with a trigger, the block where the count equals it is reported, and no other. The monitor sees every
-//!   block once and in order, so the count rises by exactly one per block and cannot skip past the trigger
+//! - with a trigger, the first block where the count reaches it is reported, and no other. The monitor sees every
+//!   block once and in order, so the count lands on the trigger, unless a re-registration lowered it below the count
 //! - a reorg reports a tracked transaction that lost its block, and one whose count fell back below its trigger
 //! - at `max_monitoring_confirmations` a transaction stops being tracked, and a subscription that was watching
 //!   for that one transaction ends with it
@@ -639,8 +639,10 @@ impl Subscriptions {
             for tracked in entry.tracked.drain(..) {
                 let confirmations = tracked.confirmed_at.confirmations_at(height)?;
 
-                // Without a trigger every block is reported. With one, the block where the count equals it is.
-                if trigger.is_none_or(|trigger| confirmations == trigger) {
+                // Without a trigger every block is reported. With one, the block where the count reaches it is, and the same
+                // test drops it below, so it is reported once. The count only passes a trigger without landing on it when a
+                // re-registration lowered the trigger below it, and then it is reported on the next block rather than never.
+                if trigger.is_none_or(|trigger| confirmations >= trigger) {
                     // Only what is reported is read, and always from indexer storage.
                     let status = self.indexer.get_stored_transaction(&tracked.txid, false)?;
 

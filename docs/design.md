@@ -74,7 +74,7 @@ Named guarantees the monitor preserves. They are the reason several paths can be
 
 ### I1: a trigger is reported once and never restated
 
-A subscription with a trigger hears exactly one item about a transaction, at the block where its count equals the trigger, and the transaction stops being tracked at that moment. For a transaction or a UTXO target, which end with the transaction they were waiting for, the subscription ends there too.
+A subscription with a trigger hears exactly one item about a transaction, at the first block where its count reaches the trigger, and the transaction stops being tracked at that moment. For a transaction or a UTXO target, which end with the transaction they were waiting for, the subscription ends there too.
 
 The consequence is that the reorg pass is silent for every entry that has a trigger. Nothing it still tracks has reached the trigger yet, and anything that did is already gone from the record, so there is no case in which a fired trigger could be taken back. This is the invariant that makes `finality` worth validating: the claim is the consumer's, and the monitor holds it.
 
@@ -103,7 +103,7 @@ Items about one transaction are stored under that transaction, in the order they
 | Situation | What the subscription hears |
 |---|---|
 | No trigger | one item per indexed block, from the block that confirmed the transaction up to and including `max_monitoring_confirmations`, and then nothing |
-| Trigger `t` | one item, at the block where the count equals `t` |
+| Trigger `t` | one item, at the first block where the count reaches `t`. That is the block where it equals `t`, unless a re-registration lowered `t` below the count, and then it is the next block |
 | The first check, no trigger | one item, whatever the count |
 | The first check, trigger `t` | one item if the count is already at or past `t`, nothing otherwise |
 | The lookup finds it at or past the maximum | one item, and nothing is tracked afterwards |

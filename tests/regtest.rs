@@ -151,8 +151,9 @@ fn test_transaction_lifecycle() -> anyhow::Result<()> {
     Ok(())
 }
 
-// A trigger is reported at the block where the count equals it and at no other, while a subscription without
-// one hears about every block. A trigger that could never be reached, or that is below finality, is refused.
+// A trigger is reported at the block where the count reaches it and at no other, while a subscription without
+// one hears about every block. A trigger lowered below the count is reported once at the next block, never twice.
+// A trigger that could never be reached, or that is below finality, is refused.
 #[test]
 fn test_confirmation_trigger() -> anyhow::Result<()> {
     init_trace();
@@ -191,12 +192,42 @@ fn test_confirmation_trigger() -> anyhow::Result<()> {
     monitor.monitor(&[target.clone()], "three".to_string(), Some(3), false)?;
     // The maximum is a legal trigger, and the block that reaches it is the last one the transaction is followed in.
     monitor.monitor(&[target.clone()], "at the maximum".to_string(), Some(6), false)?;
+    // Both lower their trigger to two once the count is three, below where it could ever land.
+    monitor.monitor(&[target.clone()], "lowered".to_string(), Some(5), false)?;
+    monitor.monitor(&[target.clone()], "every, then lowered".to_string(), None, false)?;
 
     node.broadcast(&spender)?;
 
     for confirmations in 1..=6 {
         mine_and_tick(&node, &monitor, 1)?;
         let news = drain_news(&monitor)?;
+
+        // A trigger lowered below the count is reported once, at the next block, whether the old trigger had fired or
+        // there was none. Without one the context was already hearing every block, so that block is all it hears.
+        for context in ["lowered", "every, then lowered"] {
+            let lowered = of_context(&news, context);
+            match confirmations {
+                4 => {
+                    assert_eq!(lowered.len(), 1, "{context}");
+                    assert_tx_news(lowered[0], &target, context, txid, 4, false);
+                }
+                1..=3 if context == "every, then lowered" => {
+                    assert_eq!(lowered.len(), 1, "{context}");
+                    assert_tx_news(lowered[0], &target, context, txid, confirmations, false);
+                }
+                _ => assert!(lowered.is_empty(), "{context}: nothing at {confirmations} confirmations"),
+            }
+        }
+
+        if confirmations == 3 {
+            monitor.monitor(&[target.clone()], "lowered".to_string(), Some(2), false)?;
+            monitor.monitor(&[target.clone()], "every, then lowered".to_string(), Some(2), false)?;
+
+            // The re-registration runs a first check, which finds both already tracking the transaction and says
+            // nothing, so a tick without a block reports nothing.
+            monitor.tick()?;
+            assert!(drain_news(&monitor)?.is_empty());
+        }
 
         // Without a trigger, every block.
         let every = of_context(&news, "every");
