@@ -3,6 +3,7 @@
 use bitcoin::{OutPoint, Txid};
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::rc::Rc;
 use storage_backend::storage::{KeyValueStore, Storage};
 
@@ -203,7 +204,9 @@ impl MonitorStore {
                 self.output_pattern_space(),
                 filter.output_index,
                 hex::encode(&filter.tag),
-                filter.max_outputs.map_or_else(|| "any".to_string(), |max| max.to_string())
+                filter
+                    .max_outputs
+                    .map_or_else(|| "any".to_string(), |max| max.to_string())
             ),
             StoreKey::NewBlockMonitor => format!("{PREFIX}/newblock"),
             StoreKey::FirstCheckQueue => format!("{PREFIX}/first_check"),
@@ -245,23 +248,22 @@ impl MonitorStore {
         Ok(self.get_key(key))
     }
 
-    /// Which of these items belong to which key, in the order they were given. Both adding and removing group
-    /// first and touch storage afterwards, so a key that several items land in is read and written once instead
-    /// of once per item. Two contexts watching the same transaction is what makes that the normal case.
+    /// Which of these items belong to which key, each key keeping its items in the order they were given. Both adding
+    /// and removing group first and touch storage afterwards, so a key that several items land in is read and written
+    /// once instead of once per item. Two contexts watching the same transaction is what makes that the normal case.
     fn group_by_key<T: Borrow<MonitorNews>>(
         &self,
         news: impl IntoIterator<Item = T>,
-    ) -> Result<Vec<(String, Vec<T>)>, MonitorError> {
-        let mut by_key: Vec<(String, Vec<T>)> = Vec::new();
+    ) -> Result<HashMap<String, Vec<T>>, MonitorError> {
+        let mut by_key: HashMap<String, Vec<T>> = HashMap::new();
 
-        // Nothing is read or written here: this only works out the grouping.
+        // Nothing is read or written here: this only works out the grouping. A map rather than a scan, because a pattern
+        // can follow thousands of matches and a scan would compare every item against every key.
         for item in news {
-            let key = self.news_key(item.borrow())?;
-
-            match by_key.iter_mut().find(|(grouped, _)| grouped == &key) {
-                Some((_, grouped)) => grouped.push(item), // A key an earlier item already named.
-                None => by_key.push((key, vec![item])),   // The first item for this key.
-            }
+            by_key
+                .entry(self.news_key(item.borrow())?)
+                .or_default()
+                .push(item);
         }
 
         Ok(by_key)
@@ -500,9 +502,18 @@ mod tests {
 
         // Each unreachable kind belongs to its own kind of target, so anything else is a bug and says so.
         for impossible in [
-            MonitorNews { target: MonitorTarget::NewBlock, ..unreachable.clone() },
-            MonitorNews { target: MonitorTarget::Transaction(txid(2)), ..unreachable },
-            MonitorNews { target: MonitorTarget::SpendingUtxo(outpoint(1, 0)), ..unreachable_tx },
+            MonitorNews {
+                target: MonitorTarget::NewBlock,
+                ..unreachable.clone()
+            },
+            MonitorNews {
+                target: MonitorTarget::Transaction(txid(2)),
+                ..unreachable
+            },
+            MonitorNews {
+                target: MonitorTarget::SpendingUtxo(outpoint(1, 0)),
+                ..unreachable_tx
+            },
         ] {
             assert!(matches!(
                 store.news_key(&impossible).unwrap_err(),
