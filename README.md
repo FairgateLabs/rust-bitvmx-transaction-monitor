@@ -83,7 +83,7 @@ The `Monitor` struct exposes:
 | `get_news` | Everything not acknowledged yet, or what is pending about the first `max_keys` transactions and block heights. The limit counts transactions, not items, because everything pending about one is stored together. |
 | `ack_news` | Acknowledge one item, by the value `get_news` handed over. |
 | `get_indexed_height` | Height of the highest block the monitor has processed. |
-| `get_block` | The block at a height and hash, from the indexer's storage or from the node. |
+| `get_block` | The block at a height and hash, from the indexer's storage, or from the node for one below everything the indexer holds. `None` above the indexed height or for a block a reorg replaced. |
 | `get_tx_status` | What the indexer knows about a txid right now: confirmed with its block and confirmations, in the mempool, or not found. |
 | `rpc_is_utxo_spent` / `rpc_get_tx_confirmations` | Live node checks, passed straight through. |
 | `get_estimated_fee_rate` | Fee rate estimated from the last indexed block. |

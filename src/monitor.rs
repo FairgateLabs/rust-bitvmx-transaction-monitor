@@ -110,11 +110,11 @@ impl Monitor {
     ///
     /// * `targets` - What to watch: a transaction, the spend of an output, an output pattern, or every new block.
     /// * `context` - The consumer's own label, carried back in every item of news about these targets.
-    /// * `confirmation_trigger` - Report once, at exactly this confirmation count, instead of on every block up to
-    ///   the maximum. It must satisfy `finality <= trigger <= max_monitoring_confirmations`, and a `NewBlock`
-    ///   target refuses it outright, because a block has no confirmations of its own.
-    /// * `search_in_mempool` - Allow an answer of `InMempool` and add the txid to the indexer's mempool watch
-    ///   list. Only a transaction target can use it; any other refuses it.
+    /// * `confirmation_trigger` - Report once, at the first block where the count reaches this, instead of on every
+    ///   block up to the maximum. It must satisfy `finality <= trigger <= max_monitoring_confirmations`, and a
+    ///   `NewBlock` target refuses it outright, because a block has no confirmations of its own.
+    /// * `search_in_mempool` - Add the txid to the indexer's mempool watch list, so a reorg that takes the
+    ///   transaction out of its block restates it as `InMempool` rather than `NotFound` when it is back in the mempool.
     pub fn monitor(
         &self,
         targets: &[MonitorTarget],
@@ -162,12 +162,14 @@ impl Monitor {
     }
 
     /// Height of the highest block the indexer has read. Every confirmation count the monitor reports is measured
-    /// from it, never from the node's tip.
+    /// from it, never from the node's tip. Fails with `NotSynced` until the first tick.
     pub fn get_indexed_height(&self) -> Result<BlockHeight, MonitorError> {
         Ok(self.indexer.get_indexed_height()?)
     }
 
-    /// The block at this height, from the indexer's storage while it still holds it and from the node otherwise.
+    /// The block at this height and hash: from the indexer's storage while it holds it, from the node when it is below
+    /// everything the indexer holds and still the node's block at that height, and `None` otherwise, which includes
+    /// any block above the indexed height and one a reorg replaced.
     ///
     /// * `height` - Height of the block.
     /// * `hash` - Which block at that height, so a reorged one is never handed back in its place.
@@ -216,7 +218,9 @@ impl Monitor {
         Ok(self.indexer.rpc_get_tx_confirmations(txid)?)
     }
 
-    /// Fee rate estimated from the most recently indexed block, in sat/vB. One node call each time it is asked.
+    /// Fee rate estimated from the most recently indexed block, in sat/vB. One node call each time it is asked. Fails
+    /// with `NotSynced` unless the indexer is at the node's tip, and with `FeeRateNotEstimated` when that block holds
+    /// five transactions or fewer.
     pub fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
         Ok(self.indexer.get_estimated_fee_rate()?)
     }

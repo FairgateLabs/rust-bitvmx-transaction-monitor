@@ -62,7 +62,7 @@ A news item names its target and its context, but it is stored under the txid al
 |---|---|
 | Contexts on one target are independent and never hear each other's news. | Each entry carries its own trigger, its own mempool flag and its own list of tracked transactions. |
 | Re-registering the same target and context replaces the parameters and keeps what the subscription already found. | Nothing is reported twice, and a reorg is still recognised for what it is already tracking. |
-| Re-registering runs the first check again. | A consumer can therefore be told once more about something it already knows. |
+| Re-registering runs the first check again. | It answers the contexts that are not tracking the transaction yet. One that already tracks it is skipped, so it is never told twice. |
 | Cancelling removes one entry, and the record when it was the last one. | A record with no entries would be read on every block and answer for nobody. |
 | The indexer's mempool watch is dropped only when no remaining entry wants it. | The watch is keyed by txid, so one context leaving must not blind another that is still watching the same transaction. |
 | `search_in_mempool` is refused for anything but a transaction target, and a confirmation trigger for a new block subscription. | A UTXO or a pattern discovers transactions that are already in a block, and a block has no confirmations of its own. |
@@ -153,7 +153,7 @@ Nothing has to notice that the spender changed. One spender stopped being real a
 | Event | Handling |
 |---|---|
 | A tracked transaction keeps its block and only loses depth. | Restated to every subscription without a trigger, with its real status and `due_to_reorg`. |
-| A tracked transaction loses its block. | Reported as `InMempool` when that subscription asked for mempool answers, `NotFound` otherwise, then dropped. The subscription goes back to waiting, and the blocks that come may find it again. |
+| A tracked transaction loses its block. | Restated to a subscription without a trigger as `InMempool` when it set `search_in_mempool` and the transaction is back in the mempool, `NotFound` otherwise, then dropped. The subscription goes back to waiting, and the blocks that come may find it again. |
 | The output a UTXO subscription watches is spent by a different transaction. | Two independent reports, as in the trace above. |
 | A subscription whose trigger already fired. | Silent, by I1. |
 | A reorg deeper than `retention_depth`. | The indexer fails with `ReorgDeeperThanWindow` and the monitor stops with it. Out of scope by assumption. |

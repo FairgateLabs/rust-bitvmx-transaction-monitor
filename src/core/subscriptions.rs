@@ -8,7 +8,7 @@
 //! - without a trigger, every block a tracked transaction is in is reported
 //! - with a trigger, the first block where the count reaches it is reported, and no other. The monitor sees every
 //!   block once and in order, so the count lands on the trigger, unless a re-registration lowered it below the count
-//! - a reorg reports a tracked transaction that lost its block, and one whose count fell back below its trigger
+//! - a reorg restates every transaction a subscription without a trigger tracks, and a trigger hears nothing
 //! - at `max_monitoring_confirmations` a transaction stops being tracked, and a subscription that was watching
 //!   for that one transaction ends with it
 
