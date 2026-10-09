@@ -643,6 +643,18 @@ impl Subscriptions {
                 // test drops it below, so it is reported once. The count only passes a trigger without landing on it when a
                 // re-registration lowered the trigger below it, and then it is reported on the next block rather than never.
                 if trigger.is_none_or(|trigger| confirmations >= trigger) {
+                    // TODO: each report decodes a whole block. get_stored_transaction reads the TxHeight entry, then reads and
+                    // deserializes the entire FullBlock the transaction is in, then hashes its transactions until one matches.
+                    // Tracked transactions live in older blocks, so a pattern following 1,000 matches of one block decodes that
+                    // block 1,000 times per tick for every context, and the reorg pass restates the same way. Best two fixes:
+                    // 1. In the indexer, store each transaction under its own key, TxHeight(txid) -> (height, block hash, tx),
+                    //    written and deleted with its block as today. A report becomes one small read with no decode and no
+                    //    hashing, and the monitor does not change. Cost: transaction bytes stored twice inside the window,
+                    //    about 100-200 MB with the default retention of 100 blocks, and twice the bytes written per block.
+                    // 2. In the monitor, split the pass in two: decide which reports are due (no storage), group them by block,
+                    //    read and walk each block once per tick across every record, stopping when everything it owes is found,
+                    //    then build the news in the order it was decided. Cost: no extra storage, but advance_to_block and the
+                    //    reorg pass have to be restructured, and the common case of one transaction per block gains nothing.
                     // Only what is reported is read, and always from indexer storage.
                     let status = self.indexer.get_stored_transaction(&tracked.txid, false)?;
 
