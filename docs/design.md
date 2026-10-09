@@ -78,6 +78,8 @@ A subscription with a trigger hears exactly one item about a transaction, at the
 
 The consequence is that the reorg pass is silent for every entry that has a trigger. Nothing it still tracks has reached the trigger yet, and anything that did is already gone from the record, so there is no case in which a fired trigger could be taken back. This is the invariant that makes `finality` worth validating: the claim is the consumer's, and the monitor holds it.
 
+A trigger subscriber therefore hears nothing before its trigger, including a reorg that takes the transaction out of its block. If the transaction is never mined again, the subscription waits for ever, as it would for a transaction that was never mined. A consumer that needs to see losses before finality subscribes without a trigger too, or polls `get_tx_status`.
+
 ### I2: anything tracked has its block in the indexer
 
 `retention_depth >= max_monitoring_confirmations` means a transaction cannot be tracked past the point where its block would be pruned. The block pass therefore reads transactions from the indexer's storage alone, and an answer other than confirmed is an `InvariantViolation` rather than a reason to ask the node.
@@ -156,8 +158,27 @@ Nothing has to notice that the spender changed. One spender stopped being real a
 | A subscription whose trigger already fired. | Silent, by I1. |
 | A reorg deeper than `retention_depth`. | The indexer fails with `ReorgDeeperThanWindow` and the monitor stops with it. Out of scope by assumption. |
 | A reorg deeper than `max_monitoring_confirmations`. | Not reported for a transaction that already reached the maximum, because it is no longer tracked. |
+| A `NewBlock` subscription. | No item of its own. The reorg shows as the replacement blocks the block pass reports afterwards, as below. |
 
 The reorg pass needs no lookup to decide anything: a transaction is gone exactly when its block is above the tip that is left, and the depth of everything else fell by the same amount.
+
+### What a `NewBlock` subscription sees
+
+A reorg of two blocks at the tip `N`, and the order `get_news` hands the items back in:
+
+```
+Advanced N       -> Block{N,   H_old}
+Reorged          -> nothing, however many ticks the unwind takes
+Advanced N-1'    -> Block{N-1, H_new}
+Advanced N'      -> Block{N,   H_new}
+
+Acknowledged every tick:   Block{N, H_old}, Block{N-1, H_new}, Block{N, H_new}
+All still pending:         Block{N-1, H_new}, Block{N, H_old}, Block{N, H_new}
+```
+
+Items about blocks are stored under their height and handed back in height order, not in the order they were decided, so how they come back depends on when the consumer reads. Within one height they are always in the order they were decided. So the reliable sign of a reorg is a height already reported coming back with a different hash, which holds however many ticks pile up. A lower height after a higher one is a sign only for a consumer that acknowledges every tick.
+
+If the chain goes back to the first block, its height holds `[H_old, H_new, H_old]`. Acknowledging removes every copy of the value given, so a consumer that read the first `H_old`, let both reorgs pass, and only then acknowledged it would also remove the second one unseen. Acknowledging in the same loop iteration that read it, before the next tick, avoids that.
 
 ## When the node is reached
 
