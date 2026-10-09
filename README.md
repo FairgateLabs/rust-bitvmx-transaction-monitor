@@ -65,7 +65,7 @@ A tick runs the block pass or the reorg pass, never both, because the indexer ne
 
 > ⚠️ **Unacknowledged news is never dropped.** A consumer that never acknowledges makes the pending news grow without bound.
 
-> ⚠️ **`cancel` takes that subscription's unacknowledged news with it.** It is the one path that deletes news the consumer has not seen.
+> ⚠️ **`cancel` takes that subscription's unacknowledged news with it, even if the subscription had already ended on its own.** It is the one path that deletes news the consumer has not seen, so read and acknowledge what is pending before cancelling.
 
 > 💡 **News is a snapshot, `get_tx_status` is the current answer.** An item says what was true when it was decided; the query says what the indexer knows now.
 

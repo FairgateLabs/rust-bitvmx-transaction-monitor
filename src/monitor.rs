@@ -126,19 +126,16 @@ impl Monitor {
             .add(targets, context, confirmation_trigger, search_in_mempool)
     }
 
-    /// Cancels `context` on every target given, dropping what it was tracking and the news it had waiting.
-    /// This is the one path that deletes news the consumer never acknowledged. A target left with no context at
-    /// all loses its record, and cancelling what was never subscribed does nothing.
+    /// Cancels `context` on every target given, dropping what it was tracking and the news it had waiting, including
+    /// news left by a subscription that already ended on its own. This is the one path that deletes news the consumer
+    /// never acknowledged. A target left with no context at all loses its record, and cancelling what was never
+    /// subscribed does nothing.
     ///
     /// * `targets` - The targets to stop watching under this context.
     /// * `context` - The label those subscriptions were registered under.
     pub fn cancel(&self, targets: &[MonitorTarget], context: &str) -> Result<(), MonitorError> {
         self.subscriptions.remove(targets, context)?;
-        for target in targets {
-            self.news.drop_for(target, context)?;
-        }
-
-        Ok(())
+        self.news.drop_for(targets, context)
     }
 
     /// Everything the consumer has not acknowledged yet, or what is pending about the first `max_keys` news.

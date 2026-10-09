@@ -15,7 +15,7 @@ impl PendingNews {
     }
 
     /// Adds what a tick decided to report, keeping the items about one transaction in the order they were
-    /// decided, so a consumer never reads 20 confirmations before 19.
+    /// decided, so a consumer never reads N confirmations before N-1.
     pub fn add(&self, items: Vec<MonitorNews>) -> Result<(), MonitorError> {
         self.store.add_news(items)
     }
@@ -31,20 +31,32 @@ impl PendingNews {
         self.store.remove_news(slice::from_ref(news))
     }
 
-    /// Removes what a cancelled subscription had waiting. It is the one thing that deletes unacknowledged news.
-    pub fn drop_for(&self, target: &MonitorTarget, context: &str) -> Result<(), MonitorError> {
-        let pending = match target {
+    /// Removes what the cancelled subscriptions had waiting. It is the one thing that deletes unacknowledged news.
+    pub fn drop_for(&self, targets: &[MonitorTarget], context: &str) -> Result<(), MonitorError> {
+        let only_transactions = targets
+            .iter()
+            .all(|target| matches!(target, MonitorTarget::Transaction(_)));
+
+        let pending = match only_transactions {
             // A transaction subscription's news is always about its own transaction, so it is all under one key.
-            MonitorTarget::Transaction(tx_id) => self.store.get_news_of_transaction(tx_id)?,
+            true => {
+                let mut pending = Vec::new();
+                for target in targets {
+                    if let MonitorTarget::Transaction(tx_id) = target {
+                        pending.extend(self.store.get_news_of_transaction(tx_id)?);
+                    }
+                }
+                pending
+            }
             // The others cannot name theirs. A UTXO's news is under the spender it found, a pattern's under every
-            // transaction it matched, and a new block subscription's under each height it has not been
-            // acknowledged for. None of those is known from the target, so the whole log is read instead.
-            _ => self.store.get_all_news(None)?,
+            // transaction it matched, and a new block subscription's under each height it has not been acknowledged
+            // for. None of those is known from the target, so the whole log is read instead.
+            false => self.store.get_all_news(None)?,
         };
 
         let dropped: Vec<MonitorNews> = pending
             .into_iter()
-            .filter(|item| &item.target == target && item.context == context)
+            .filter(|item| item.context == context && targets.contains(&item.target))
             .collect();
 
         self.store.remove_news(&dropped)
@@ -54,7 +66,7 @@ impl PendingNews {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{temp_storage, txid};
+    use crate::test_utils::{block_ref, temp_storage, txid};
     use crate::types::NewsKind;
     use bitcoin_indexer::types::TransactionStatus;
 
@@ -102,7 +114,7 @@ mod tests {
         assert_eq!(news_log.get_all(None).unwrap(), vec![second]);
     }
 
-    // Cancelling takes that subscription's pending news, and only that subscription's.
+    // Cancelling takes those subscriptions' pending news, and only theirs, whether the targets name their keys or not.
     #[test]
     fn test_drop_for_takes_only_its_own() {
         let news_log = pending();
@@ -118,12 +130,39 @@ mod tests {
             .unwrap();
 
         news_log
-            .drop_for(&MonitorTarget::Transaction(txid(1)), "mine")
+            .drop_for(&[MonitorTarget::Transaction(txid(1))], "mine")
             .unwrap();
 
         let left = news_log.get_all(None).unwrap();
         assert!(!left.contains(&mine));
         assert!(left.contains(&other_context));
         assert!(left.contains(&other_target));
+
+        // Two targets in one call, one of which cannot name its keys, so the whole log is read once for both.
+        let block = MonitorNews {
+            target: MonitorTarget::NewBlock,
+            context: "mine".to_string(),
+            kind: NewsKind::Block(block_ref(5, 0)),
+        };
+        let block_other_context = MonitorNews {
+            context: "other".to_string(),
+            ..block.clone()
+        };
+        news_log
+            .add(vec![block.clone(), block_other_context.clone()])
+            .unwrap();
+
+        news_log
+            .drop_for(
+                &[MonitorTarget::Transaction(txid(2)), MonitorTarget::NewBlock],
+                "mine",
+            )
+            .unwrap();
+
+        let left = news_log.get_all(None).unwrap();
+        assert!(!left.contains(&other_target));
+        assert!(!left.contains(&block));
+        assert!(left.contains(&other_context));
+        assert!(left.contains(&block_other_context));
     }
 }
