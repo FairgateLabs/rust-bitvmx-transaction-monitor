@@ -61,11 +61,10 @@ impl Monitor {
         })
     }
 
-    /// Number of confirmations a transaction is watched for. Once it reaches that the monitor stops tracking
-    /// it, so it is also the deepest reorg the monitor can still report on.
-    /// TODO: remove this method from the public API
-    pub fn max_monitoring_confirmations(&self) -> u32 {
-        self.settings.max_monitoring_confirmations
+    /// Number of confirmations after which a transaction is considered settled. It is also the lowest
+    /// confirmation trigger a subscription accepts.
+    pub fn finality(&self) -> u32 {
+        self.settings.finality
     }
 
     /// True once the indexer has read every block up to the node's tip.
@@ -186,7 +185,7 @@ impl Monitor {
     /// nothing about it.
     ///
     /// * `tx_id` - Transaction to look up.
-    /// * `search_in_mempool` - Let the answer be `InMempool` for one that is in the mempool and in no block.
+    /// * `search_in_mempool` - Let the answer be `InMempool` for one that is in the mempool and in no block, only if it was previously registered.
     pub fn get_tx_status(
         &self,
         tx_id: &Txid,

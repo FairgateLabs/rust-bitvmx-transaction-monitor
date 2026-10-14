@@ -43,7 +43,7 @@ fn test_startup() -> anyhow::Result<()> {
         Err(MonitorError::IndexerError(IndexerError::NotSynced))
     ));
     assert!(!monitor.is_ready()?);
-    assert_eq!(monitor.max_monitoring_confirmations(), 4);
+    assert_eq!(monitor.finality(), 1);
 
     // Registering writes to storage and reads nothing, so it works before the chain has been looked at.
     let target = MonitorTarget::Transaction(txid);
