@@ -30,6 +30,7 @@ use bitvmx_transaction_monitor::monitor::Monitor;
 use bitvmx_transaction_monitor::types::{BlockRef, MonitorNews, MonitorTarget, NewsKind};
 use bitvmx_transaction_monitor::TransactionStatus;
 use storage_backend::{
+    key::StorageKey,
     storage::{KeyValueStore, Storage},
     storage_config::StorageConfig,
 };
@@ -407,7 +408,7 @@ pub fn drain_news(monitor: &Monitor) -> anyhow::Result<Vec<MonitorNews>> {
 /// in the public API exposes the list, and a watch nobody wants costs a node call on every tick.
 pub fn is_mempool_watched(storage: &Storage, txid: &Txid) -> anyhow::Result<bool> {
     let list: Vec<(Txid, Option<BlockHeight>)> = storage
-        .get("indexer/mempool_watch_list", None)?
+        .get(StorageKey::new(["indexer", "mempool_watch_list"])?, None)?
         .unwrap_or_default();
 
     Ok(list.iter().any(|(watched, _)| watched == txid))

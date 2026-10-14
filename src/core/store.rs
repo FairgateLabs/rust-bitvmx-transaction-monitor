@@ -5,12 +5,19 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::rc::Rc;
+use storage_backend::key::StorageKey;
 use storage_backend::storage::{KeyValueStore, Storage};
 
 use crate::errors::MonitorError;
 use crate::types::{MonitorNews, MonitorRecord, MonitorTarget, NewsKind, OutputPatternFilter};
 
 const PREFIX: &str = "monitor";
+
+// The segment naming each key space.
+const TRANSACTION_SPACE: &str = "tx";
+const SPENDING_UTXO_SPACE: &str = "utxo";
+const OUTPUT_PATTERN_SPACE: &str = "pattern";
+const NEWS_SPACE: &str = "news";
 
 /// Every key the monitor owns.
 enum StoreKey {
@@ -38,13 +45,13 @@ impl MonitorStore {
         &self,
         target: &MonitorTarget,
     ) -> Result<Option<MonitorRecord>, MonitorError> {
-        Ok(self.store.get(self.record_key(target), None)?)
+        Ok(self.store.get(self.record_key(target)?, None)?)
     }
 
     /// Writes one record under its own target's key, so it never rewrites another.
     pub fn save_record(&self, record: &MonitorRecord) -> Result<(), MonitorError> {
         self.store
-            .set(self.record_key(&record.target), record, None)?;
+            .set(self.record_key(&record.target)?, record, None)?;
         Ok(())
     }
 
@@ -59,20 +66,20 @@ impl MonitorStore {
 
     /// Removes a record, which is what the last entry of a target leaving does.
     pub fn delete_record(&self, target: &MonitorTarget) -> Result<(), MonitorError> {
-        self.store.remove(self.record_key(target), None)?;
+        self.store.remove(self.record_key(target)?, None)?;
         Ok(())
     }
 
     pub fn get_transaction_records(&self) -> Result<Vec<MonitorRecord>, MonitorError> {
-        self.records_in(&self.transaction_space())
+        self.records_in(&self.transaction_space()?)
     }
 
     pub fn get_spending_utxo_records(&self) -> Result<Vec<MonitorRecord>, MonitorError> {
-        self.records_in(&self.spending_utxo_space())
+        self.records_in(&self.spending_utxo_space()?)
     }
 
     pub fn get_output_pattern_records(&self) -> Result<Vec<MonitorRecord>, MonitorError> {
-        self.records_in(&self.output_pattern_space())
+        self.records_in(&self.output_pattern_space()?)
     }
 
     /// Every record that can track a transaction, one scan per key space. The new block record is left out: it tracks none.
@@ -90,7 +97,7 @@ impl MonitorStore {
 
     /// New targets registered for their first special lookup. An empty queue means there is nothing to look up.
     pub fn get_first_check_queue(&self) -> Result<Vec<MonitorTarget>, MonitorError> {
-        let key = self.get_key(StoreKey::FirstCheckQueue);
+        let key = self.get_key(StoreKey::FirstCheckQueue)?;
         Ok(self.store.get(key, None)?.unwrap_or_default())
     }
 
@@ -111,7 +118,7 @@ impl MonitorStore {
         }
 
         self.store
-            .set(self.get_key(StoreKey::FirstCheckQueue), &queue, None)?;
+            .set(self.get_key(StoreKey::FirstCheckQueue)?, &queue, None)?;
 
         Ok(())
     }
@@ -119,7 +126,7 @@ impl MonitorStore {
     /// Empties the queue, which is how draining it in one pass ends.
     pub fn clear_first_check_queue(&self) -> Result<(), MonitorError> {
         self.store
-            .remove(self.get_key(StoreKey::FirstCheckQueue), None)?;
+            .remove(self.get_key(StoreKey::FirstCheckQueue)?, None)?;
         Ok(())
     }
 
@@ -134,14 +141,14 @@ impl MonitorStore {
         // Block news lives below this space, so one scan reads both it and the news about transactions.
         let per_key: Vec<Vec<MonitorNews>> =
             self.store
-                .partial_get_limited(&self.news_space(), max_keys, None)?;
+                .partial_get_limited(&self.news_space()?, max_keys, None)?;
 
         Ok(per_key.into_iter().flatten().collect())
     }
 
     /// Every pending item about one transaction, which is one key and so one read.
     pub fn get_news_of_transaction(&self, tx_id: &Txid) -> Result<Vec<MonitorNews>, MonitorError> {
-        let key = self.get_key(StoreKey::TransactionNews(*tx_id));
+        let key = self.get_key(StoreKey::TransactionNews(*tx_id))?;
         Ok(self.store.get(key, None)?.unwrap_or_default())
     }
 
@@ -190,34 +197,50 @@ impl MonitorStore {
     // =========================================================================
 
     /// The key each variant is stored under.
-    fn get_key(&self, key: StoreKey) -> String {
-        match key {
-            StoreKey::TransactionMonitor(tx_id) => format!("{}{tx_id}", self.transaction_space()),
-            StoreKey::SpendingUtxoMonitor(utxo) => {
-                format!("{}{}:{}", self.spending_utxo_space(), utxo.txid, utxo.vout)
+    fn get_key(&self, key: StoreKey) -> Result<StorageKey, MonitorError> {
+        let key = match key {
+            StoreKey::TransactionMonitor(tx_id) => {
+                StorageKey::new([PREFIX, TRANSACTION_SPACE, tx_id.to_string().as_str()])
             }
+            StoreKey::SpendingUtxoMonitor(utxo) => StorageKey::new([
+                PREFIX,
+                SPENDING_UTXO_SPACE,
+                format!("{}:{}", utxo.txid, utxo.vout).as_str(),
+            ]),
             // Every field of the filter is in the key, because a different bound on the outputs is a different rule
             // and gets its own record. That makes the key and the target the same thing, so a record always holds
             // the filter it is stored under and no registration can change another one's bound.
-            StoreKey::OutputPatternMonitor(filter) => format!(
-                "{}{}:{}:{}",
-                self.output_pattern_space(),
-                filter.output_index,
-                hex::encode(&filter.tag),
-                filter
-                    .max_outputs
-                    .map_or_else(|| "any".to_string(), |max| max.to_string())
-            ),
-            StoreKey::NewBlockMonitor => format!("{PREFIX}/newblock"),
-            StoreKey::FirstCheckQueue => format!("{PREFIX}/first_check"),
-            StoreKey::TransactionNews(tx_id) => format!("{}{tx_id}", self.news_space()),
+            StoreKey::OutputPatternMonitor(filter) => StorageKey::new([
+                PREFIX,
+                OUTPUT_PATTERN_SPACE,
+                format!(
+                    "{}:{}:{}",
+                    filter.output_index,
+                    hex::encode(&filter.tag),
+                    filter
+                        .max_outputs
+                        .map_or_else(|| "any".to_string(), |max| max.to_string())
+                )
+                .as_str(),
+            ]),
+            StoreKey::NewBlockMonitor => StorageKey::new([PREFIX, "newblock"]),
+            StoreKey::FirstCheckQueue => StorageKey::new([PREFIX, "first_check"]),
+            StoreKey::TransactionNews(tx_id) => {
+                StorageKey::new([PREFIX, NEWS_SPACE, tx_id.to_string().as_str()])
+            }
             // Padded so the keys sort by height, which is what keeps block news in the order it happened.
-            StoreKey::BlockNews(height) => format!("{}block/{height:010}", self.news_space()),
-        }
+            StoreKey::BlockNews(height) => StorageKey::new([
+                PREFIX,
+                NEWS_SPACE,
+                "block",
+                format!("{height:010}").as_str(),
+            ]),
+        };
+        Ok(key?)
     }
 
     /// The key holding a target's record.
-    fn record_key(&self, target: &MonitorTarget) -> String {
+    fn record_key(&self, target: &MonitorTarget) -> Result<StorageKey, MonitorError> {
         self.get_key(match target {
             MonitorTarget::Transaction(tx_id) => StoreKey::TransactionMonitor(*tx_id),
             MonitorTarget::SpendingUtxo(utxo) => StoreKey::SpendingUtxoMonitor(*utxo),
@@ -227,7 +250,7 @@ impl MonitorStore {
     }
 
     /// The key holding an item of news: the transaction it is about, or the height of the block it reports.
-    fn news_key(&self, news: &MonitorNews) -> Result<String, MonitorError> {
+    fn news_key(&self, news: &MonitorNews) -> Result<StorageKey, MonitorError> {
         let key = match (&news.kind, &news.target) {
             (NewsKind::Transaction { txid, .. }, _) => StoreKey::TransactionNews(*txid),
             (NewsKind::Block(block), _) => StoreKey::BlockNews(block.height),
@@ -245,7 +268,7 @@ impl MonitorStore {
             }
         };
 
-        Ok(self.get_key(key))
+        self.get_key(key)
     }
 
     /// Which of these items belong to which key, each key keeping its items in the order they were given. Both adding
@@ -254,8 +277,8 @@ impl MonitorStore {
     fn group_by_key<T: Borrow<MonitorNews>>(
         &self,
         news: impl IntoIterator<Item = T>,
-    ) -> Result<HashMap<String, Vec<T>>, MonitorError> {
-        let mut by_key: HashMap<String, Vec<T>> = HashMap::new();
+    ) -> Result<HashMap<StorageKey, Vec<T>>, MonitorError> {
+        let mut by_key: HashMap<StorageKey, Vec<T>> = HashMap::new();
 
         // Nothing is read or written here: this only works out the grouping. A map rather than a scan, because a pattern
         // can follow thousands of matches and a scan would compare every item against every key.
@@ -274,20 +297,20 @@ impl MonitorStore {
         Ok(self.store.partial_get(space, None)?)
     }
 
-    fn transaction_space(&self) -> String {
-        format!("{PREFIX}/tx/")
+    fn transaction_space(&self) -> Result<String, MonitorError> {
+        Ok(StorageKey::new([PREFIX, TRANSACTION_SPACE])?.to_scan_prefix())
     }
 
-    fn spending_utxo_space(&self) -> String {
-        format!("{PREFIX}/utxo/")
+    fn spending_utxo_space(&self) -> Result<String, MonitorError> {
+        Ok(StorageKey::new([PREFIX, SPENDING_UTXO_SPACE])?.to_scan_prefix())
     }
 
-    fn output_pattern_space(&self) -> String {
-        format!("{PREFIX}/pattern/")
+    fn output_pattern_space(&self) -> Result<String, MonitorError> {
+        Ok(StorageKey::new([PREFIX, OUTPUT_PATTERN_SPACE])?.to_scan_prefix())
     }
 
-    fn news_space(&self) -> String {
-        format!("{PREFIX}/news/")
+    fn news_space(&self) -> Result<String, MonitorError> {
+        Ok(StorageKey::new([PREFIX, NEWS_SPACE])?.to_scan_prefix())
     }
 }
 
@@ -431,20 +454,21 @@ mod tests {
     #[test]
     fn test_keys_name_what_they_hold() {
         let store = store();
+        let key = |target| store.record_key(&target).unwrap();
 
         assert_eq!(
-            store.record_key(&MonitorTarget::Transaction(txid(1))),
-            format!("monitor/tx/{}", txid(1))
+            key(MonitorTarget::Transaction(txid(1))),
+            StorageKey::new([PREFIX, TRANSACTION_SPACE, txid(1).to_string().as_str()]).unwrap()
         );
         assert_eq!(
-            store.record_key(&MonitorTarget::NewBlock),
-            "monitor/newblock"
+            key(MonitorTarget::NewBlock),
+            StorageKey::new([PREFIX, "newblock"]).unwrap()
         );
 
         // The vout is part of the key, so two outputs of one transaction are two targets.
         assert_ne!(
-            store.record_key(&MonitorTarget::SpendingUtxo(outpoint(2, 0))),
-            store.record_key(&MonitorTarget::SpendingUtxo(outpoint(2, 1)))
+            key(MonitorTarget::SpendingUtxo(outpoint(2, 0))),
+            key(MonitorTarget::SpendingUtxo(outpoint(2, 1)))
         );
 
         // The whole filter is in the key, so two bounds are two targets. The tag is hex, so it can never contain
@@ -455,12 +479,12 @@ mod tests {
             max_outputs: max,
         };
         assert_eq!(
-            store.record_key(&MonitorTarget::OutputPattern(filter(None))),
-            "monitor/pattern/0:ab:any"
+            key(MonitorTarget::OutputPattern(filter(None))),
+            StorageKey::new([PREFIX, OUTPUT_PATTERN_SPACE, "0:ab:any"]).unwrap()
         );
         assert_eq!(
-            store.record_key(&MonitorTarget::OutputPattern(filter(Some(3)))),
-            "monitor/pattern/0:ab:3"
+            key(MonitorTarget::OutputPattern(filter(Some(3)))),
+            StorageKey::new([PREFIX, OUTPUT_PATTERN_SPACE, "0:ab:3"]).unwrap()
         );
     }
 
@@ -468,26 +492,24 @@ mod tests {
     #[test]
     fn test_news_keys_follow_what_they_report() {
         let store = store();
+        let key = |news: &MonitorNews| store.news_key(news).unwrap();
+        let news_of = |tx_id: Txid| {
+            StorageKey::new([PREFIX, NEWS_SPACE, tx_id.to_string().as_str()]).unwrap()
+        };
 
         // The spender names the key, not the outpoint, so every item about that spender stays together.
         let spend = MonitorNews {
             target: MonitorTarget::SpendingUtxo(outpoint(1, 0)),
             ..transaction_news(9, false)
         };
-        assert_eq!(
-            store.news_key(&spend).unwrap(),
-            format!("monitor/news/{}", txid(9))
-        );
+        assert_eq!(key(&spend), news_of(txid(9)));
 
         // A probably unreachable spend has no spender, so it goes under the outpoint's own transaction.
         let unreachable = MonitorNews {
             kind: NewsKind::ProbablyUnreachableUTXO,
             ..spend.clone()
         };
-        assert_eq!(
-            store.news_key(&unreachable).unwrap(),
-            format!("monitor/news/{}", txid(1))
-        );
+        assert_eq!(key(&unreachable), news_of(txid(1)));
 
         // An unreachable transaction goes under its own txid.
         let unreachable_tx = MonitorNews {
@@ -495,10 +517,7 @@ mod tests {
             kind: NewsKind::UnreachableTx,
             ..spend.clone()
         };
-        assert_eq!(
-            store.news_key(&unreachable_tx).unwrap(),
-            format!("monitor/news/{}", txid(2))
-        );
+        assert_eq!(key(&unreachable_tx), news_of(txid(2)));
 
         // Each unreachable kind belongs to its own kind of target, so anything else is a bug and says so.
         for impossible in [
@@ -526,6 +545,7 @@ mod tests {
             context: "ctx".to_string(),
             kind: NewsKind::Block(block_ref(height, 0)),
         };
-        assert!(store.news_key(&block(99)).unwrap() < store.news_key(&block(100)).unwrap());
+        // Storage sorts by the joined key, so that is what has to sort by height.
+        assert!(key(&block(99)).joined() < key(&block(100)).joined());
     }
 }
