@@ -217,9 +217,9 @@ impl Monitor {
         Ok(self.indexer.rpc_get_tx_confirmations(txid)?)
     }
 
-    /// Fee rate estimated from the most recently indexed block, in sat/vB. One node call each time it is asked. Fails
-    /// with `NotSynced` unless the indexer is at the node's tip, and with `FeeRateNotEstimated` when that block holds
-    /// five transactions or fewer.
+    /// Fee rate estimated from the most recently indexed block, in sat/vB, read from storage with no node call. It is as
+    /// fresh as the last tick, so a caller that needs the rate of the node's tip checks `is_ready` first. Fails with
+    /// `FeeRateNotEstimated` when that block holds five transactions or fewer.
     pub fn get_estimated_fee_rate(&self) -> Result<u64, MonitorError> {
         Ok(self.indexer.get_estimated_fee_rate()?)
     }

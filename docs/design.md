@@ -186,10 +186,10 @@ What the consumer calls:
 
 | Call | Node |
 |---|---|
-| `monitor`, `cancel`, `get_news`, `ack_news`, `get_indexed_height`, `max_monitoring_confirmations` | never |
+| `monitor`, `cancel`, `get_news`, `ack_news`, `get_indexed_height`, `get_estimated_fee_rate`, `max_monitoring_confirmations` | never |
 | `get_tx_status`, `get_block` | storage first, the node only when the indexer holds nothing |
 | `rpc_is_utxo_spent`, `rpc_get_tx_confirmations` | always, which is what the prefix says |
-| `is_ready`, `get_estimated_fee_rate` | always, one call each time |
+| `is_ready` | always, one call each time |
 
 `monitor` is storage alone even with `search_in_mempool` set, because registering a mempool watch is a write in the indexer's storage.
 
