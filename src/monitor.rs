@@ -210,7 +210,8 @@ impl Monitor {
             .rpc_is_utxo_spent(txid, vout, include_mempool)?)
     }
 
-    /// Live confirmation count from the node. None when it does not know the transaction, zero in its mempool.
+    /// Live confirmation count from the node. None when the transaction is neither in its mempool nor in its active
+    /// chain, zero in its mempool.
     ///
     /// * `txid` - Transaction to look up.
     pub fn rpc_get_tx_confirmations(&self, txid: &Txid) -> Result<Option<u32>, MonitorError> {
