@@ -89,7 +89,7 @@ impl MonitorSettings {
         );
 
         // A valid trigger is at least finality and at most the maximum confirmations. So:
-        // finality <= trigger <= max_monitoring_confirmations => finality <= max_monitoring_confirmations
+        // finality <= trigger <= max_monitoring_confirmations -> finality <= max_monitoring_confirmations
         ensure!(
             self.max_monitoring_confirmations >= self.finality,
             "max_monitoring_confirmations must be at least finality, or no confirmation trigger could ever be accepted"

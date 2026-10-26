@@ -96,7 +96,10 @@ impl Monitor {
             }
         };
 
-        // Registrations are answered on every tick, whether or not the chain moved.
+        // Registrations are answered on every tick, whether or not the chain moved. They run after the block or reorg pass
+        // because the first check reads the chain this tick left, new block included. Run first, it would track a transaction
+        // in the new block, and then the block pass would report it again at the same depth, or the reorg pass would restate
+        // what was only just reported. Run after, it finds the context already tracking it and skips it.
         news.extend(self.subscriptions.run_first_checks()?);
         self.news.add(news)?;
 
