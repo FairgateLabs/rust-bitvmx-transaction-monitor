@@ -26,3 +26,16 @@ bitcoincore-rpc = "0.19"
 tracing-subscriber = "0.3.23"
 anyhow = "1.0.104"
 serde_json = "1.0"
+criterion = "0.7"
+
+[[bench]]
+name = "block_pass"
+harness = false
+
+[[bench]]
+name = "reorg_pass"
+harness = false
+
+[[bench]]
+name = "api"
+harness = false
