@@ -31,3 +31,50 @@ pub enum MonitorError {
     #[error("Invariant violated: {0}")]
     InvariantViolation(String),
 }
+
+impl MonitorError {
+    /// True when the error came from the Bitcoin node client, here or inside the indexer.
+    pub fn is_bitcoin_client_error(&self) -> bool {
+        match self {
+            MonitorError::BitcoinClientError(_) => true,
+            MonitorError::IndexerError(e) => e.is_bitcoin_client_error(),
+            _ => false,
+        }
+    }
+
+    /// True when the error came from the storage backend, here or inside the indexer.
+    pub fn is_storage_error(&self) -> bool {
+        match self {
+            MonitorError::StorageError(_) => true,
+            MonitorError::IndexerError(e) => e.is_storage_error(),
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_classification() {
+        let client = MonitorError::from(BitcoinClientError::InvalidHeight);
+        assert!(client.is_bitcoin_client_error());
+        assert!(!client.is_storage_error());
+
+        let storage = MonitorError::from(StorageError::WriteError);
+        assert!(storage.is_storage_error());
+        assert!(!storage.is_bitcoin_client_error());
+
+        // Errors wrapped by the indexer keep their classification.
+        let indexer_client =
+            MonitorError::from(IndexerError::from(BitcoinClientError::InvalidHeight));
+        assert!(indexer_client.is_bitcoin_client_error());
+        let indexer_storage = MonitorError::from(IndexerError::from(StorageError::WriteError));
+        assert!(indexer_storage.is_storage_error());
+
+        let other = MonitorError::from(IndexerError::NotSynced);
+        assert!(!other.is_bitcoin_client_error());
+        assert!(!other.is_storage_error());
+    }
+}

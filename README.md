@@ -89,6 +89,8 @@ The `Monitor` struct exposes:
 | `get_estimated_fee_rate` | Fee rate estimated from the last indexed block. |
 | `max_monitoring_confirmations` | The configured maximum. |
 
+`MonitorError` exposes `is_bitcoin_client_error` and `is_storage_error`, true when the error came from the Bitcoin node client or from the storage backend, whether the monitor raised it or the indexer did. Every other error answers false to both.
+
 ## Usage
 
 ```rust
