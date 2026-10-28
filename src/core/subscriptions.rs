@@ -361,6 +361,9 @@ impl Subscriptions {
         // reads and decodes the very same blocks once per outpoint. Collecting the spent ones and walking the window
         // once for all of them would cost one pass per tick instead of one per outpoint, at the price of resolving
         // them after the queue loop rather than inside it.
+        // It is left unoptimized because the expected use is an outpoint registered before it is spent, so the node
+        // answers unspent and no block is read. The walk only runs in the rare case of a lag, where the spend was mined
+        // before the registration reached its first check.
 
         // The mempool is left out, so a spend that is only there still reads as unspent and the block that mines it brings the spender.
         if !self
