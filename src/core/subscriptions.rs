@@ -212,12 +212,20 @@ impl Subscriptions {
         // The block is walked once. A record that finds a transaction it was waiting for is flagged, so it is then written.
         self.track_block_matches(&mut records, block);
 
+        // Every transaction reported at this block is read in one call, so each block they are in is read once.
+        let mut due = Vec::new();
+        for (record, _) in &records {
+            due.extend(due_txids(record, block.height)?);
+        }
+        let statuses = self.indexer.get_stored_transactions(&due)?;
+
         // The records are written back with the transactions they found.
         for (record, started_tracking) in &mut records {
             let wanted_mempool = wants_mempool_watch(record);
 
             // It checks every tracked transaction in the record, and reports the ones that are at their trigger or have reached the maximum.
-            let (reported, stopped_tracking) = self.advance_to_block(record, block.height)?;
+            let (reported, stopped_tracking) =
+                self.advance_to_block(record, block.height, &statuses)?;
             news.extend(reported);
 
             // Starting and stopping are the only two things a block does to a record. If neither happened, there is nothing to write.
@@ -241,8 +249,18 @@ impl Subscriptions {
     pub fn update_after_reorg(&self) -> Result<Vec<MonitorNews>, MonitorError> {
         let mut news = Vec::new();
         let tip = self.indexer.get_indexed_height()?;
+        let records = self.store.get_all_records()?;
 
-        for mut record in self.store.get_all_records()? {
+        // Without a trigger every tracked transaction is restated, so all of them are read in one call.
+        let restated: Vec<Txid> = records
+            .iter()
+            .flat_map(|record| &record.entries)
+            .filter(|entry| entry.confirmation_trigger.is_none())
+            .flat_map(|entry| entry.tracked.iter().map(|tracked| tracked.txid))
+            .collect();
+        let confirmed = self.indexer.get_stored_transactions(&restated)?;
+
+        for mut record in records {
             let target = record.target.clone();
             let mut lost = false;
 
@@ -258,10 +276,13 @@ impl Subscriptions {
 
                     // Without a trigger every change is reported.
                     if trigger.is_none() {
-                        // Asks the indexer where the transaction is now, and reports it with its new status.
-                        let status = self
-                            .indexer
-                            .get_stored_transaction(&tracked.txid, search_in_mempool)?;
+                        // One that is not in a stored block went with the unwind, and the indexer is asked whether it is in the mempool.
+                        let status = match confirmed.get(&tracked.txid) {
+                            Some(status) => status.clone(),
+                            None => self
+                                .indexer
+                                .get_stored_transaction(&tracked.txid, search_in_mempool)?,
+                        };
 
                         news.push(transaction_news(
                             &target,
@@ -610,11 +631,13 @@ impl Subscriptions {
     }
 
     /// Reports every tracked transaction of the record at this block, and drops the ones with nothing left to report.
-    /// Returns the news and whether any of them was dropped, which is what can end a subscription.
+    /// The statuses are the ones read for `due_txids`. Returns the news and whether any of them was dropped, which is
+    /// what can end a subscription.
     fn advance_to_block(
         &self,
         record: &mut MonitorRecord,
         height: BlockHeight,
+        statuses: &HashMap<Txid, TransactionStatus>,
     ) -> Result<(Vec<MonitorNews>, bool), MonitorError> {
         let target = record.target.clone();
         let mut news = Vec::new();
@@ -639,32 +662,14 @@ impl Subscriptions {
             for tracked in entry.tracked.drain(..) {
                 let confirmations = tracked.confirmed_at.confirmations_at(height)?;
 
-                // Without a trigger every block is reported. With one, the block where the count reaches it is, and the same
-                // test drops it below, so it is reported once. The count only passes a trigger without landing on it when a
-                // re-registration lowered the trigger below it, and then it is reported on the next block rather than never.
-                if trigger.is_none_or(|trigger| confirmations >= trigger) {
-                    // TODO: each report decodes a whole block. get_stored_transaction reads the TxHeight entry, then reads and
-                    // deserializes the entire FullBlock the transaction is in, then hashes its transactions until one matches.
-                    // Tracked transactions live in older blocks, so a pattern following 1,000 matches of one block decodes that
-                    // block 1,000 times per tick for every context, and the reorg pass restates the same way. Best two fixes:
-                    // 1. In the indexer, store each transaction under its own key, TxHeight(txid) -> (height, block hash, tx),
-                    //    written and deleted with its block as today. A report becomes one small read with no decode and no
-                    //    hashing, and the monitor does not change. Cost: transaction bytes stored twice inside the window,
-                    //    about 100-200 MB with the default retention of 100 blocks, and twice the bytes written per block.
-                    // 2. In the monitor, split the pass in two: decide which reports are due (no storage), group them by block,
-                    //    read and walk each block once per tick across every record, stopping when everything it owes is found,
-                    //    then build the news in the order it was decided. Cost: no extra storage, but advance_to_block and the
-                    //    reorg pass have to be restructured, and the common case of one transaction per block gains nothing.
-                    // Only what is reported is read, and always from indexer storage.
-                    let status = self.indexer.get_stored_transaction(&tracked.txid, false)?;
-
-                    // The transaction should be confirmed in the indexer's storage, because it was in the current block.
-                    if !matches!(status, TransactionStatus::Confirmed { .. }) {
-                        return Err(MonitorError::InvariantViolation(format!(
+                if is_due(trigger, confirmations) {
+                    // The transaction should be in the statuses, because it is confirmed in a block the indexer holds.
+                    let status = statuses.get(&tracked.txid).cloned().ok_or_else(|| {
+                        MonitorError::InvariantViolation(format!(
                             "tracked transaction {} is not in a block the indexer holds",
                             tracked.txid
-                        )));
-                    }
+                        ))
+                    })?;
 
                     news.push(transaction_news(
                         &target,
@@ -697,6 +702,27 @@ impl Subscriptions {
 
         Ok((news, stopped_tracking))
     }
+}
+
+/// True when a transaction with this many confirmations is reported. Without a trigger every block is.
+fn is_due(trigger: Option<u32>, confirmations: u32) -> bool {
+    trigger.is_none_or(|trigger| confirmations >= trigger)
+}
+
+/// The tracked transactions of this record that are reported at this height.
+fn due_txids(record: &MonitorRecord, height: BlockHeight) -> Result<Vec<Txid>, MonitorError> {
+    let mut due = Vec::new();
+    for entry in &record.entries {
+        for tracked in &entry.tracked {
+            if is_due(
+                entry.confirmation_trigger,
+                tracked.confirmed_at.confirmations_at(height)?,
+            ) {
+                due.push(tracked.txid);
+            }
+        }
+    }
+    Ok(due)
 }
 
 /// True when some entry of this record still wants its transaction watched in the node's mempool.

@@ -10,9 +10,10 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 // Setup: N transactions are subscribed without a trigger. Half of them are mined in block 1 and half in block 2, both
 // blocks are indexed and passed, and then block 2 is unwound the way the indexer does it: its block is deleted from
 // storage and the cursor goes back to 1.
-// Measured: `update_after_reorg` and then adding its news to the log, which is what a tick does. The half in block 1
-// is restated as confirmed, and each of those reads block 1 from storage and decodes it whole. The half in block 2 is
-// restated as not found, and its records are written back without the transaction, waiting for it again.
+// Measured: `update_after_reorg` and then adding its news to the log, which is what a tick does. All N are asked for in
+// one `get_stored_transactions` call. The half in block 1 is found there, with block 1 decoded once for all of them, and
+// is restated as confirmed. The half in block 2 is not, so each of those is asked for again on its own, which reads no
+// block, and is restated as not found. Their records are written back without the transaction, waiting for it again.
 fn reorg_pass(c: &mut Criterion) {
     let mut group = c.benchmark_group("reorg_pass");
     group.sample_size(10);

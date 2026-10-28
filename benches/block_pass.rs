@@ -35,8 +35,8 @@ fn block_pass_idle(c: &mut Criterion) {
 
 // Setup: N transactions are subscribed without a trigger, block 1 holding all of them is indexed and passed, so every
 // subscription is tracking its transaction, and block 2 is indexed with none of them.
-// Measured: `process_block` on block 2. Each of the N transactions has 2 confirmations and is reported, and each report
-// reads block 1 from storage and decodes it whole to get the transaction (the TODO: in advance_to_block).
+// Measured: `process_block` on block 2. Each of the N transactions has 2 confirmations and is reported. All of them are
+// read in one `get_stored_transactions` call, which reads block 1 from storage and decodes it once for the N of them.
 fn block_pass_tracking(c: &mut Criterion) {
     let mut group = c.benchmark_group("block_pass_tracking");
     group.sample_size(10);
@@ -70,8 +70,9 @@ fn block_pass_tracking(c: &mut Criterion) {
 
 // Setup: one pattern is subscribed under contexts "a", "b" and "c", and block 1 is indexed with N transactions that match it.
 // Measured: `process_block` on block 1 and then adding its news to the log, which is what a tick does. The pass starts
-// tracking the N matches in the pattern's record and writes it, and reports each match once per context, so 3N reports,
-// each of which decodes block 1. Adding the 3N items groups them into N keys, one per transaction.
+// tracking the N matches in the pattern's record and writes it, and reports each match once per context, so 3N reports.
+// The N transactions are read in one `get_stored_transactions` call, which decodes block 1 once for all of them. Adding
+// the 3N items groups them into N keys, one per transaction.
 fn block_pass_pattern_matches(c: &mut Criterion) {
     let mut group = c.benchmark_group("block_pass_pattern_matches");
     group.sample_size(10);
