@@ -43,11 +43,13 @@ pub struct Fixture {
 impl Fixture {
     pub fn new() -> Self {
         let dir = TempDir::new();
+        // Writes do not wait for the disk, so the benches time the monitor and not fsync. A consumer writes inside a
+        // transaction, which syncs once per commit rather than once per write.
         let storage = Rc::new(
-            Storage::new(&StorageConfig::new(
-                dir.0.to_string_lossy().to_string(),
-                None,
-            ))
+            Storage::new(
+                &StorageConfig::new(dir.0.to_string_lossy().to_string(), None)
+                    .without_sync_writes(),
+            )
             .expect("bench storage"),
         );
 

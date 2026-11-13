@@ -147,8 +147,8 @@ impl Monitor {
     /// `max_keys` x (subscriptions reporting on that transaction) x (blocks each has pending), the last factor
     /// being normally 1, if the consumer acknowledges them correctly.
     ///
-    /// Items about one transaction come back in the order they were decided, transactions in the lexicographic
-    /// order of their txid. A limit therefore serves the same first transactions until they are acknowledged.
+    /// Items about one transaction come back in the order they were decided, and a transaction always after the ones
+    /// it spends. The limit is applied after ordering, so every call reads all pending news.
     ///
     /// * `max_keys` - How many transactions and block heights to read, `None` for every one of them.
     pub fn get_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {

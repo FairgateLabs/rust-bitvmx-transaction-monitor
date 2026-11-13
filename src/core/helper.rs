@@ -2,11 +2,13 @@
 
 use bitcoin::script::Instruction;
 use bitcoin::{OutPoint, Script, Transaction, Txid};
+use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 
 use crate::errors::MonitorError;
 use crate::types::{
-    BlockRef, FullBlock, MonitorEntry, MonitorRecord, MonitorTarget, OutputPatternFilter, TrackedTx,
+    BlockRef, FullBlock, MonitorEntry, MonitorNews, MonitorRecord, MonitorTarget, NewsKind,
+    OutputPatternFilter, TrackedTx,
 };
 
 impl MonitorRecord {
@@ -54,6 +56,19 @@ impl BlockRef {
         })?;
 
         Ok(depth + 1)
+    }
+}
+
+impl MonitorNews {
+    /// The transaction the item carries, which only a confirmed one does.
+    pub fn confirmed_tx(&self) -> Option<&Transaction> {
+        match &self.kind {
+            NewsKind::Transaction {
+                status: TransactionStatus::Confirmed { tx, .. },
+                ..
+            } => Some(tx),
+            _ => None,
+        }
     }
 }
 

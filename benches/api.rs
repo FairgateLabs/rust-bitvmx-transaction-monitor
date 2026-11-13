@@ -120,7 +120,11 @@ fn cancel(c: &mut Criterion) {
 // - add: stores the 2N items into an empty log in one call, which groups them by transaction and writes each key once.
 // - get_and_ack: with the 2N items already stored, reads them all with one `get_news` and then acknowledges them one
 //   at a time, which is what a consumer does on every tick.
+// - drain_paged: with the 2N items already stored, calls `get_news` with a limit of `PAGE` keys and acknowledges what it
+//   returns, again and again until it returns nothing, which is how a consumer drains a large backlog.
 fn news_cycle(c: &mut Criterion) {
+    const PAGE: usize = 10; // Keys per `get_news` call in drain_paged, so 2 x PAGE items.
+
     let mut group = c.benchmark_group("news_cycle");
     group.sample_size(10);
 
@@ -149,6 +153,26 @@ fn news_cycle(c: &mut Criterion) {
                 |fixture| {
                     for item in fixture.monitor.get_news(None).unwrap() {
                         fixture.monitor.ack_news(&item).unwrap();
+                    }
+                },
+                BatchSize::PerIteration,
+            )
+        });
+
+        group.bench_with_input(BenchmarkId::new("drain_paged", n), &items, |b, items| {
+            b.iter_batched_ref(
+                || {
+                    let fixture = Fixture::new();
+                    fixture.news.add(items.clone()).unwrap();
+                    fixture
+                },
+                |fixture| loop {
+                    let page = fixture.monitor.get_news(Some(PAGE)).unwrap();
+                    if page.is_empty() {
+                        break;
+                    }
+                    for item in &page {
+                        fixture.monitor.ack_news(item).unwrap();
                     }
                 },
                 BatchSize::PerIteration,

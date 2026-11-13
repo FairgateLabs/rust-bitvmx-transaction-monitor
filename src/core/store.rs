@@ -146,6 +146,13 @@ impl MonitorStore {
         Ok(per_key.into_iter().flatten().collect())
     }
 
+    /// Every pending item, one list per key, with the keys in lexicographic order.
+    pub fn get_news_by_key(&self) -> Result<Vec<Vec<MonitorNews>>, MonitorError> {
+        Ok(self
+            .store
+            .partial_get_limited(&self.news_space()?, None, None)?)
+    }
+
     /// Every pending item about one transaction, which is one key and so one read.
     pub fn get_news_of_transaction(&self, tx_id: &Txid) -> Result<Vec<MonitorNews>, MonitorError> {
         let key = self.get_key(StoreKey::TransactionNews(*tx_id))?;
