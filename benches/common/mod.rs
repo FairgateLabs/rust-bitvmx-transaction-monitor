@@ -80,7 +80,7 @@ impl Fixture {
                 settings,
             ),
             news: PendingNews::new(MonitorStore::new(storage.clone())),
-            indexer_store: IndexerStore::new(storage).expect("indexer store"),
+            indexer_store: IndexerStore::new(storage),
             _dir: dir,
         }
     }
