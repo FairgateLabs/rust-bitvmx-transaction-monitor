@@ -150,6 +150,11 @@ impl Monitor {
     /// Items about one transaction come back in the order they were decided, and a transaction always after the ones
     /// it spends. The limit is applied after ordering, so every call reads all pending news.
     ///
+    /// So the smaller the limit, the more calls it takes to read everything, and the more it costs in total. Reading
+    /// 10,000 pending transactions with repeated calls took about 20 s with `Some(10)`, 2.5 s with `Some(50)`,
+    /// 1.4 s with `Some(100)`, and 0.26 s with a single `None` call (`news_cycle/drain_max_keys_*` bench). `Some(50)`
+    /// is the suggested value: each call hands over little, and reading everything costs seconds.
+    ///
     /// * `max_keys` - How many transactions and block heights to read, `None` for every one of them.
     pub fn get_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
         self.news.get_all(max_keys)
