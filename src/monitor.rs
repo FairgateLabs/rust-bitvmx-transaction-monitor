@@ -176,7 +176,8 @@ impl Monitor {
 
     /// The block at this height and hash: from the indexer's storage while it holds it, from the node when it is below
     /// everything the indexer holds and still the node's block at that height, and `None` otherwise, which includes
-    /// any block above the indexed height and one a reorg replaced.
+    /// any block above the indexed height and one a reorg replaced. A block downloaded from the node carries no fee
+    /// estimate, `estimated_fee_rate` is 0.
     ///
     /// * `height` - Height of the block.
     /// * `hash` - Which block at that height, so a reorged one is never handed back in its place.

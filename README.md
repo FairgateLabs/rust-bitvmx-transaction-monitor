@@ -153,6 +153,12 @@ A subscription ends when the consumer cancels it, or on its own once there is no
 monitor.cancel(&[MonitorTarget::NewBlock], "my-protocol")?;
 ```
 
+## Contract
+
+- **Run each tick in a transaction.** The monitor's writes and the indexer's under it are not atomic on their own, so wrap every `tick()` in `begin_global_transaction` / `commit_global_transaction` and roll back when it returns `Err`.
+- **Tick to the tip before trusting a query.** Answers are as of the last tick, so check `is_ready()` first. `get_estimated_fee_rate` relies on this to be the tip's rate.
+- **The mempool snapshot starts empty.** After a restart, `get_tx_status` reads no transaction as `InMempool` until the first successful tick.
+
 ## Configuration
 
 `MonitorConfig` has two sections, `rpc` and `settings`. A sample is in `config/monitor_config.yaml`. The storage is not configured here: the consumer builds it and hands it over, because the indexer and the monitor share one database.
