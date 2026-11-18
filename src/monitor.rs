@@ -203,7 +203,8 @@ impl Monitor {
         Ok(self.indexer.get_transaction(tx_id, search_in_mempool)?)
     }
 
-    /// Live check against the node, bypassing everything the indexer holds: true when the UTXO is spent.
+    /// Live check against the node, bypassing everything the indexer holds: true when the
+    ///  output is not in the node's UTXO set.
     ///
     /// * `txid` - Transaction that created the output.
     /// * `vout` - Index of that output in it.
