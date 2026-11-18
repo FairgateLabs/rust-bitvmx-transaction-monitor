@@ -1,227 +1,83 @@
-use bitcoin::{BlockHash, Transaction, Txid};
+use bitcoin::{BlockHash, OutPoint, Txid};
 use bitcoin_indexer::types::TransactionStatus;
 use bitvmx_bitcoin_rpc::types::BlockHeight;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-/// Generic filter for detecting transactions that match a specific output pattern.
-///
-/// Matches transactions where a specific output is an OP_RETURN whose pushed data starts
-/// with the given `tag` bytes. Optionally enforces an upper bound on the total number of
-/// outputs in the transaction.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct OutputPatternFilter {
-    /// Index of the output to inspect (0-based).
-    pub output_index: usize,
-    /// Byte prefix that the OP_RETURN pushed data must start with.
-    pub tag: Vec<u8>,
-    /// If `Some(n)`, the transaction must have at most `n` outputs.
-    pub max_outputs: Option<usize>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TransactionStore {
-    pub tx_id: Txid,
-    pub tx: Option<Transaction>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct BlockInfo {
-    pub block_height: BlockHeight,
-    pub block_hash: BlockHash,
-    pub is_orphan: bool,
-    pub transactions: Vec<Txid>,
-}
-
-impl BlockInfo {
-    pub fn new(
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        is_orphan: bool,
-        transactions: Vec<Txid>,
-    ) -> Self {
-        Self {
-            block_height,
-            block_hash,
-            is_orphan,
-            transactions,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TypesToMonitor {
-    // Transactions to monitor
-    // - Vec<Txid>: The transaction IDs to monitor
-    // - String: The context of the transaction
-    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
-    Transactions(Vec<Txid>, String, Option<u32>),
-
-    // Spending UTXO transaction to monitor
-    // - Txid: The transaction ID to monitor
-    // - u32: The vout index of the UTXO to monitor
-    // - String: The context of the transaction
-    // - Option<u32>: The number of confirmations to wait for receive news about the transaction
-    SpendingUTXOTransaction(Txid, u32, String, Option<u32>),
-
-    // Generic output pattern transaction to monitor
-    // - OutputPatternFilter: The filter describing which output/tag to match
-    // - Option<u32>: The number of confirmations to wait for before emitting news
-    OutputPattern(OutputPatternFilter, Option<u32>),
-
-    // New block to monitor
-    // - BlockHeight: The block height to monitor
-    NewBlock,
-}
-
-/// Payload of a transaction confirmation notification.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct TransactionNews {
-    pub tx_id: Txid,
-    pub status: TransactionStatus,
-    /// The context of the transaction previously sent to the monitor.
-    pub context: String,
-    /// True when this is a repeat notification caused by a chain reorganization: the tx already reached its
-    /// confirmation trigger once, then a reorg re-mined it into a different block and it reached the trigger
-    /// again. False for the first notification and for confirmations that keep growing inside the same block.
-    pub resent_due_to_reorg: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum MonitorNews {
-    // Transaction confirmation news. Carries the reorg-resend flag in `resent_due_to_reorg`.
-    Transaction(TransactionNews),
-
-    // Spending UTXO transaction news
-    // - Txid: The transaction ID
-    // - u32: The vout index of the UTXO
-    // - TransactionStatus: The information of the transaction indexed
-    // - String: The context of the transaction previously sent to the monitor
-    SpendingUTXOTransaction(Txid, u32, TransactionStatus, String),
-
-    // Generic output pattern transaction news
-    // - Txid: The transaction ID
-    // - TransactionStatus: The information of the transaction indexed
-    // - Vec<u8>: The tag that was matched (identifies which pattern triggered)
-    OutputPatternTransaction(Txid, TransactionStatus, Vec<u8>),
-
-    // New block news
-    // - BlockHeight: The block height
-    // - BlockHash: The block hash
-    NewBlock(BlockHeight, BlockHash),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum AckMonitorNews {
-    // Transaction news
-    // - Txid: The transaction ID
-    // - String: The context of the transaction
-    Transaction(Txid, String),
-
-    // Generic output pattern transaction news
-    // - Txid: The transaction ID
-    // - Vec<u8>: The tag that was matched
-    OutputPatternTransaction(Txid, Vec<u8>),
-
-    // Spending UTXO transaction news
-    // - Txid: The transaction ID
-    // - u32: The vout index of the UTXO
-    // - String: The context of the transaction
-    SpendingUTXOTransaction(Txid, u32, String),
-
-    // New block news
-    NewBlock,
-}
-
-pub type Id = Uuid;
 
 pub type FullBlock = bitcoin_indexer::types::FullBlock;
 
-// Storage types for monitor store
-
-/// News acknowledgment info (block_hash, acknowledged)
+/// What the consumer asked to watch. It is the argument of monitor and cancel, and the key of a record.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct NewsAck {
-    pub block_hash: BlockHash,
-    pub acknowledged: bool,
+pub enum MonitorTarget {
+    Transaction(Txid),
+    SpendingUtxo(OutPoint),
+    OutputPattern(OutputPatternFilter),
+    NewBlock,
 }
 
-impl NewsAck {
-    pub fn new(block_hash: BlockHash, acknowledged: bool) -> Self {
-        Self {
-            block_hash,
-            acknowledged,
-        }
-    }
+/// One subscription: what the consumer asked for, and the transactions it tracks because of it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MonitorEntry {
+    pub context: String,                   // The consumer's context string.
+    pub confirmation_trigger: Option<u32>, // If `Some(n)`, the consumer only wants news when the transaction reaches `n` confirmations.
+    pub search_in_mempool: bool, // Registers the txid in the indexer's mempool watch list, so InMempool state is possible (only for a transaction target).
+    pub tracked: Vec<TrackedTx>, // Transactions that are being followed because of this subscription. Empty when the subscription has not found anything yet.
 }
 
-/// Transaction news entry stored in storage
+/// A target and every subscription to it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TransactionNewsEntry {
-    pub tx_id: Txid,
-    pub extra_data: String,
-    pub ack: NewsAck,
-    pub resent_due_to_reorg: bool, // True when this pending news is a reorg-caused resend.
+pub struct MonitorRecord {
+    pub target: MonitorTarget,
+    pub entries: Vec<MonitorEntry>,
 }
 
-/// SpendingUTXO transaction news entry stored in storage
+/// A transaction an entry tracks. Only transactions that are in a block are ever tracked.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SpendingUTXONewsEntry {
-    pub tx_id: Txid,
-    pub utxo_index: u32,
-    pub extra_data: String,
-    pub spender_tx_id: Txid,
-    pub ack: NewsAck,
+pub struct TrackedTx {
+    pub txid: Txid,
+    pub confirmed_at: BlockRef, // The block it is in. Set when it is discovered and never changed afterwards (except for a reorg).
 }
 
-/// Transaction monitor entry (extra_data, confirmation_trigger, trigger_sent)
+/// Where a block is in the chain.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TransactionMonitorEntry {
-    pub extra_data: String,
-    pub confirmation_trigger: Option<u32>,
-    pub trigger_sent: bool,
-    pub search_in_mempool: bool,
-    /// Block hash of the block that included the tx the last time its confirmation trigger fired.
-    pub notified_block_hash: Option<BlockHash>,
+pub struct BlockRef {
+    pub height: BlockHeight,
+    pub hash: BlockHash,
+}
+/// Generic filter for detecting transactions that match a specific output pattern: the output at `output_index`
+/// must be an OP_RETURN whose pushed data starts with `tag`, and the transaction must have at most `max_outputs`
+/// outputs when that is set.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct OutputPatternFilter {
+    pub output_index: usize,        // Index of the output to inspect.
+    pub tag: Vec<u8>,               // Byte prefix that the OP_RETURN pushed data must start with.
+    pub max_outputs: Option<usize>, // If `Some(n)`, the transaction must have at most `n` outputs.
 }
 
-/// Transaction monitor stored in active/inactive lists
+/// One thing to report, to the subscription that asked for it. This is what `get_news` returns and what
+/// `ack_news` takes back, so a consumer acknowledges the exact value it was given.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SetTransactionMonitorEntry {
-    pub tx_id: Txid,
-    pub entries: Vec<TransactionMonitorEntry>,
+pub struct MonitorNews {
+    pub target: MonitorTarget,
+    pub context: String,
+    pub kind: NewsKind,
 }
 
-/// SpendingUTXO monitor entry (extra_data, spender_tx_id, confirmation_trigger)
+/// What happened. A transaction event carries a status, a block event carries the block.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SpendingUTXOMonitorEntry {
-    pub extra_data: String,
-    pub spender_tx_id: Option<Txid>,
-    pub confirmation_trigger: Option<u32>,
-    pub search_in_mempool: bool,
-}
-
-/// SpendingUTXO monitor stored in active/inactive lists
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SpendingUTXOMonitor {
-    pub tx_id: Txid,
-    pub vout: u32,
-    pub entries: Vec<SpendingUTXOMonitorEntry>,
-}
-
-/// A single active output-pattern subscription
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct OutputPatternSubscription {
-    pub filter: OutputPatternFilter,
-    pub confirmation_trigger: Option<u32>,
-    pub search_in_mempool: bool,
-}
-
-/// Output-pattern transaction news entry stored in storage
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct OutputPatternNewsEntry {
-    pub tx_id: Txid,
-    /// The tag bytes of the filter that matched this transaction
-    pub tag: Vec<u8>,
-    pub ack: NewsAck,
+pub enum NewsKind {
+    // A transaction was found, or its status changed.
+    Transaction {
+        txid: Txid,
+        status: TransactionStatus,
+        due_to_reorg: bool, // True only when this item exists because the chain was reorganised
+    },
+    // A new block was added to the chain, which is what a new block subscription is for.
+    Block(BlockRef),
+    // A UTXO was already spent when the subscription was registered, its spender is in no block the indexer
+    // holds and its output is older than all of them. The subscription stays, so a spender found later is
+    // still reported. Consumer is responsible for deciding if waiting for a spender or cancel the subscription.
+    ProbablyUnreachableUTXO,
+    // A transaction was mined before the first block the indexer ever read, so before the monitor started. The
+    // subscription is dropped with it, because no block the monitor reads will ever hold it.
+    UnreachableTx,
 }
