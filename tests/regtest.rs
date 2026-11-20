@@ -1253,10 +1253,10 @@ fn test_news_is_kept_until_acknowledged() -> anyhow::Result<()> {
         assert_eq!(counts, vec![1, 2, 3], "in the order they were decided");
     }
 
-    // Reading is not consuming: both contexts watch one transaction, so everything pending is under its one key,
-    // and asking for one key hands back all six items, as many times as it is asked.
-    assert_eq!(monitor.get_news(Some(1))?, news);
-    assert_eq!(monitor.get_news(Some(1))?, news);
+    // Reading is not consuming: both contexts watch one transaction, so each block's items are under one key, and
+    // asking for one key hands back the first block's two items, as many times as it is asked.
+    assert_eq!(monitor.get_news(Some(1))?, news[..2]);
+    assert_eq!(monitor.get_news(Some(1))?, news[..2]);
     assert!(monitor.get_news(Some(0))?.is_empty());
 
     // Acknowledging takes the one item it was given and nothing else.
@@ -1279,10 +1279,10 @@ fn test_news_is_kept_until_acknowledged() -> anyhow::Result<()> {
     Ok(())
 }
 
-// The limit of get_news counts transactions, not items. Everything pending about one transaction is stored
-// together and comes back together, so one key can answer with many items while another answers with few.
+// The limit of get_news counts keys, not items. A key is one transaction in one tick with every context's items about
+// it, so one key can answer with many items while another answers with few.
 #[test]
-fn test_news_limit_counts_transactions() -> anyhow::Result<()> {
+fn test_news_limit_counts_keys() -> anyhow::Result<()> {
     init_trace();
     let node = TestNode::start(101)?;
     let first_outpoint = node.fund_utxo(1_000_000)?;
@@ -1311,28 +1311,29 @@ fn test_news_limit_counts_transactions() -> anyhow::Result<()> {
     // Four items about the first transaction, two about the second, none of it acknowledged.
     assert_eq!(monitor.get_news(None)?.len(), 6);
 
-    // One key is one transaction, read whole: every item about whichever of the two txids sorts first, and
-    // nothing at all about the other.
+    // One key is one transaction in the first block: every item about whichever of the two txids sorts first there,
+    // and nothing about the other.
     let one_key = monitor.get_news(Some(1))?;
     let served = txid_of(&one_key[0]);
-    assert!(one_key.iter().all(|item| txid_of(item) == served));
+    assert!(one_key.iter().all(|item| txid_of(item) == served && confirmations_of(item) == 1));
     assert_eq!(
         one_key.len(),
         match served == watched_txid {
-            true => 4, // Two contexts, two blocks each.
-            false => 2,
+            true => 2, // Two contexts.
+            false => 1,
         }
     );
 
-    // Both keys is everything, and a limit of none asks for no key at all.
-    assert_eq!(monitor.get_news(Some(2))?.len(), 6);
+    // Two keys is the whole first block, four is everything, and a limit of none asks for no key at all.
+    assert_eq!(monitor.get_news(Some(2))?.len(), 3);
+    assert_eq!(monitor.get_news(Some(4))?.len(), 6);
     assert!(monitor.get_news(Some(0))?.is_empty());
 
     Ok(())
 }
 
-// A reorg that leaves a block and later comes back to it decides the same thing twice, and the two items are
-// identical. One acknowledgement clears both, because a consumer cannot tell them apart.
+// A reorg that leaves a block and later comes back to it decides the same thing twice. The two items come from two
+// ticks, so they come out in that order and each is acknowledged on its own.
 #[test]
 fn test_the_same_block_reported_twice() -> anyhow::Result<()> {
     init_trace();
@@ -1363,10 +1364,16 @@ fn test_the_same_block_reported_twice() -> anyhow::Result<()> {
 
     let news = monitor.get_news(None)?;
     assert_eq!(news.len(), 2);
-    assert_eq!(news[0], news[1], "the same block, reported twice");
+    assert_eq!(
+        block_of(&news[0]),
+        block_of(&news[1]),
+        "the same block, reported twice"
+    );
 
-    // One acknowledgement clears every copy of it.
+    // One acknowledgement takes one of them, and the other is still waiting.
     monitor.ack_news(&news[0])?;
+    assert_eq!(monitor.get_news(None)?, vec![news[1].clone()]);
+    monitor.ack_news(&news[1])?;
     assert!(monitor.get_news(None)?.is_empty());
 
     Ok(())
