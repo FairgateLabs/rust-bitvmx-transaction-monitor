@@ -9,7 +9,7 @@ use bitvmx_bitcoin_rpc::types::BlockHeight;
 use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
 
-use crate::types::BlockRef;
+use crate::types::{BlockRef, MonitorNews, MonitorTarget, NewsKind};
 
 /// A txid that is unique per `seed`, for tests that only need to tell two of them apart.
 pub fn txid(seed: u8) -> Txid {
@@ -29,6 +29,11 @@ pub fn block_ref(height: BlockHeight, hash_seed: u8) -> BlockRef {
         height,
         hash: block_hash(hash_seed),
     }
+}
+
+/// An item of news as a pass builds it, for the benches that fill the news log without running a tick.
+pub fn news(target: MonitorTarget, context: &str, kind: NewsKind) -> MonitorNews {
+    MonitorNews::new(target, context.to_string(), kind)
 }
 
 /// A transaction that is unique per `seed`, spending the given outpoints and paying the given outputs.

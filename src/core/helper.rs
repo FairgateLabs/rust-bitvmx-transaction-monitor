@@ -60,6 +60,16 @@ impl BlockRef {
 }
 
 impl MonitorNews {
+    /// An item that is not stored yet. Its tick is set when it is added to the pending news.
+    pub(crate) fn new(target: MonitorTarget, context: String, kind: NewsKind) -> Self {
+        Self {
+            target,
+            context,
+            kind,
+            tick_seq: 0,
+        }
+    }
+
     /// The transaction the item carries, which only a confirmed one does.
     pub fn confirmed_tx(&self) -> Option<&Transaction> {
         match &self.kind {

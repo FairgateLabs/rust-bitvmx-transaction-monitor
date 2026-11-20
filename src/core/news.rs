@@ -16,19 +16,42 @@ impl PendingNews {
         Self { store }
     }
 
-    /// Adds what a tick decided to report, keeping the items about one transaction in the order they were
-    /// decided, so a consumer never reads N confirmations before N-1.
-    pub fn add(&self, items: Vec<MonitorNews>) -> Result<(), MonitorError> {
+    /// Moves to the next tick, so what is added from now on comes after everything added before.
+    pub fn next_tick(&self) -> Result<(), MonitorError> {
+        self.store.next_tick_seq()
+    }
+
+    /// Adds what a tick decided to report, stamped with the current tick, keeping the items about one transaction in
+    /// the order they were decided, so a consumer never reads N confirmations before N-1.
+    pub fn add(&self, mut items: Vec<MonitorNews>) -> Result<(), MonitorError> {
+        if items.is_empty() {
+            return Ok(()); // Nothing to stamp, so the tick is not read.
+        }
+
+        let tick_seq = self.store.get_tick_seq()?;
+        for item in &mut items {
+            item.tick_seq = tick_seq;
+        }
+
         self.store.add_news(items)
     }
 
-    /// Everything the consumer has not acknowledged, or what is pending under the first `max_keys` keys. How many
-    /// items that can be is on `Monitor::get_news`, which is where a consumer reads it.
+    /// Everything the consumer has not acknowledged, or what is pending under the first `max_keys` keys, in tick
+    /// order. How many items that can be is on `Monitor::get_news`, which is where a consumer reads it.
     pub fn get_all(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
-        // Everything is read and ordered before the limit is applied.
-        let ordered = in_dependency_order(self.store.get_news_by_key()?);
-        let keys = max_keys.unwrap_or(ordered.len());
-        Ok(ordered.into_iter().take(keys).flatten().collect())
+        // One entry per key, in tick order, with every tick whole, because the order of a tick needs all of it.
+        let keys = self.store.get_news_by_key(max_keys)?;
+        let limit = max_keys.unwrap_or(keys.len());
+
+        // The keys of one tick are next to each other, so a tick ends where the next key has another tick_seq. Each tick
+        // is ordered on its own, because a later tick always comes after.
+        let mut ordered = Vec::new();
+        for tick in keys.chunk_by(|key, next| key[0].tick_seq == next[0].tick_seq) {
+            ordered.extend(in_dependency_order(tick));
+        }
+
+        // The limit counts keys, and it is applied after ordering.
+        Ok(ordered.into_iter().take(limit).flatten().cloned().collect())
     }
 
     /// Removes the item the consumer acknowledged, by the value it was handed.
@@ -38,29 +61,13 @@ impl PendingNews {
 
     /// Removes what the cancelled subscriptions had waiting. It is the one thing that deletes unacknowledged news.
     pub fn drop_for(&self, targets: &[MonitorTarget], context: &str) -> Result<(), MonitorError> {
-        let only_transactions = targets
-            .iter()
-            .all(|target| matches!(target, MonitorTarget::Transaction(_)));
-
-        let pending = match only_transactions {
-            // A transaction subscription's news is always about its own transaction, so it is all under one key.
-            true => {
-                let mut pending = Vec::new();
-                for target in targets {
-                    if let MonitorTarget::Transaction(tx_id) = target {
-                        pending.extend(self.store.get_news_of_transaction(tx_id)?);
-                    }
-                }
-                pending
-            }
-            // The others cannot name theirs. A UTXO's news is under the spender it found, a pattern's under every
-            // transaction it matched, and a new block subscription's under each height it has not been acknowledged
-            // for. None of those is known from the target, so the whole log is read instead.
-            false => self.store.get_all_news(None)?,
-        };
-
-        let dropped: Vec<MonitorNews> = pending
+        // Every key starts with the tick that wrote it, and no target knows which ticks reported on it, so the whole
+        // log is read once for all the targets.
+        let dropped: Vec<MonitorNews> = self
+            .store
+            .get_news_by_key(None)?
             .into_iter()
+            .flatten()
             .filter(|item| item.context == context && targets.contains(&item.target))
             .collect();
 
@@ -68,9 +75,10 @@ impl PendingNews {
     }
 }
 
-/// Puts the news about a transaction after the news about the transactions it spends. A block holds a parent before
-/// its child, so this is the order the chain has them in. What spends nothing pending keeps the stored order.
-fn in_dependency_order(groups: Vec<Vec<MonitorNews>>) -> Vec<Vec<MonitorNews>> {
+/// Puts the news about a transaction after the news about the transactions it spends, inside one tick. A block holds
+/// a parent before its child, so this is the order the chain has them in. What spends nothing pending keeps the
+/// stored order, which puts the block of the tick first.
+fn in_dependency_order(groups: &[Vec<MonitorNews>]) -> Vec<&Vec<MonitorNews>> {
     // Where the news about each transaction sits. Block news is about no transaction, so nothing can spend it.
     let position: HashMap<Txid, usize> = groups
         .iter()
@@ -115,11 +123,7 @@ fn in_dependency_order(groups: Vec<Vec<MonitorNews>>) -> Vec<Vec<MonitorNews>> {
         }
     }
 
-    let mut groups: Vec<Option<Vec<MonitorNews>>> = groups.into_iter().map(Some).collect();
-    order
-        .into_iter()
-        .filter_map(|index| groups[index].take())
-        .collect()
+    order.into_iter().map(|index| &groups[index]).collect()
 }
 
 #[cfg(test)]
@@ -130,15 +134,28 @@ mod tests {
     use bitcoin_indexer::types::TransactionStatus;
 
     fn news(target_byte: u8, context: &str, due_to_reorg: bool) -> MonitorNews {
-        MonitorNews {
-            target: MonitorTarget::Transaction(txid(target_byte)),
-            context: context.to_string(),
-            kind: NewsKind::Transaction {
+        MonitorNews::new(
+            MonitorTarget::Transaction(txid(target_byte)),
+            context.to_string(),
+            NewsKind::Transaction {
                 txid: txid(target_byte),
                 status: TransactionStatus::NotFound,
                 due_to_reorg,
             },
-        }
+        )
+    }
+
+    fn block_news(height: u32, context: &str) -> MonitorNews {
+        MonitorNews::new(
+            MonitorTarget::NewBlock,
+            context.to_string(),
+            NewsKind::Block(block_ref(height, 0)),
+        )
+    }
+
+    /// What `get_all` hands back for an item added at this tick.
+    fn at(tick_seq: u64, item: MonitorNews) -> MonitorNews {
+        MonitorNews { tick_seq, ..item }
     }
 
     fn pending() -> PendingNews {
@@ -158,17 +175,61 @@ mod tests {
         assert_eq!(news_log.get_all(None).unwrap(), vec![first, second]);
     }
 
-    // A transaction comes after the one it spends, even when its txid sorts first and the limit only takes one key.
+    // Ticks come out in the order they happened, whatever the txids and heights, and the block of a tick before its
+    // transactions. A tx mined at 100, reorged out, then mined at 99 reads in that order.
+    #[test]
+    fn test_ticks_come_out_in_order() {
+        let news_log = pending();
+        let mined = news(2, "ctx", false);
+        let reorged = news(2, "ctx", true);
+        let replacement = news(1, "ctx", false); // Its txid sorts before the reorged one.
+
+        news_log.next_tick().unwrap();
+        news_log
+            .add(vec![mined.clone(), block_news(100, "ctx")])
+            .unwrap();
+        news_log.next_tick().unwrap();
+        news_log.add(vec![reorged.clone()]).unwrap();
+        news_log.next_tick().unwrap();
+        news_log
+            .add(vec![block_news(99, "ctx"), replacement.clone()])
+            .unwrap();
+
+        let tick_one = vec![at(1, block_news(100, "ctx")), at(1, mined)];
+        assert_eq!(
+            news_log.get_all(None).unwrap(),
+            [
+                tick_one.clone(),
+                vec![at(2, reorged)],
+                vec![at(3, block_news(99, "ctx")), at(3, replacement)],
+            ]
+            .concat()
+        );
+
+        // The limit counts keys, and the block is the first key of its tick.
+        assert_eq!(news_log.get_all(Some(1)).unwrap(), tick_one[..1]);
+        assert_eq!(news_log.get_all(Some(2)).unwrap(), tick_one);
+
+        // Acknowledging what was handed over finds it by its tick.
+        for item in &tick_one {
+            news_log.ack(item).unwrap();
+        }
+        assert_eq!(news_log.get_all(None).unwrap().len(), 3);
+    }
+
+    // A transaction comes after the one it spends in the same tick, even when its txid sorts first.
     #[test]
     fn test_parent_comes_before_child() {
-        let confirmed = |tx: &Transaction| MonitorNews {
-            target: MonitorTarget::Transaction(tx.compute_txid()),
-            context: "ctx".to_string(),
-            kind: NewsKind::Transaction {
-                txid: tx.compute_txid(),
-                status: TransactionStatus::new(tx.clone(), 1, block_hash(1), 1),
-                due_to_reorg: false,
-            },
+        let confirmed = |tx: &Transaction| {
+            MonitorNews::new(
+                MonitorTarget::Transaction(tx.compute_txid()),
+                "ctx".to_string(),
+                NewsKind::Transaction {
+                    txid: tx.compute_txid(),
+                    status: TransactionStatus::new(tx.clone(), 1, block_hash(1), 1),
+                    due_to_reorg: false,
+                },
+            )
         };
 
         // A child whose txid sorts before its parent's, so the stored order is the wrong one.
@@ -188,6 +249,8 @@ mod tests {
             news_log.get_all(None).unwrap(),
             vec![confirmed(&parent), confirmed(&child)]
         );
+
+        // The child's key is stored first, but the tick is read whole and ordered before the limit cuts it.
         assert_eq!(news_log.get_all(Some(1)).unwrap(), vec![confirmed(&parent)]);
     }
 
@@ -230,12 +293,8 @@ mod tests {
         assert!(left.contains(&other_context));
         assert!(left.contains(&other_target));
 
-        // Two targets in one call, one of which cannot name its keys, so the whole log is read once for both.
-        let block = MonitorNews {
-            target: MonitorTarget::NewBlock,
-            context: "mine".to_string(),
-            kind: NewsKind::Block(block_ref(5, 0)),
-        };
+        // Two targets of different kinds in one call.
+        let block = block_news(5, "mine");
         let block_other_context = MonitorNews {
             context: "other".to_string(),
             ..block.clone()

@@ -60,6 +60,7 @@ pub struct MonitorNews {
     pub target: MonitorTarget,
     pub context: String,
     pub kind: NewsKind,
+    pub(crate) tick_seq: u64, // The tick that decided it, counting advances and reorgs. It orders the news.
 }
 
 /// What happened. A transaction event carries a status, a block event carries the block.

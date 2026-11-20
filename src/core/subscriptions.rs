@@ -582,10 +582,12 @@ impl Subscriptions {
         Ok(record
             .entries
             .iter()
-            .map(|entry| MonitorNews {
-                target: MonitorTarget::NewBlock,
-                context: entry.context.clone(),
-                kind: NewsKind::Block(BlockRef::from(block)),
+            .map(|entry| {
+                MonitorNews::new(
+                    MonitorTarget::NewBlock,
+                    entry.context.clone(),
+                    NewsKind::Block(BlockRef::from(block)),
+                )
             })
             .collect())
     }
@@ -761,15 +763,15 @@ fn transaction_news(
     status: TransactionStatus,
     due_to_reorg: bool,
 ) -> MonitorNews {
-    MonitorNews {
-        target: target.clone(),
-        context: context.to_string(),
-        kind: NewsKind::Transaction {
+    MonitorNews::new(
+        target.clone(),
+        context.to_string(),
+        NewsKind::Transaction {
             txid,
             status,
             due_to_reorg,
         },
-    }
+    )
 }
 
 /// One item per context, saying what it was watching for is, or probably is, older than anything the indexer read.
@@ -777,10 +779,6 @@ fn unreachable_news(record: &MonitorRecord, kind: NewsKind) -> Vec<MonitorNews> 
     record
         .entries
         .iter()
-        .map(|entry| MonitorNews {
-            target: record.target.clone(),
-            context: entry.context.clone(),
-            kind: kind.clone(),
-        })
+        .map(|entry| MonitorNews::new(record.target.clone(), entry.context.clone(), kind.clone()))
         .collect()
 }
