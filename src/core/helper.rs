@@ -61,7 +61,10 @@ impl BlockRef {
 
 impl MonitorNews {
     /// An item that is not stored yet. Its tick is set when it is added to the pending news.
-    pub(crate) fn new(target: MonitorTarget, context: String, kind: NewsKind) -> Self {
+    ///
+    /// Public only so consumers can build items in their own tests. A consumer never needs it in real use: every item
+    /// it handles or acknowledges comes from `get_news`, which carries the tick it was stored under.
+    pub fn new(target: MonitorTarget, context: String, kind: NewsKind) -> Self {
         Self {
             target,
             context,

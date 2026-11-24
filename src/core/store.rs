@@ -25,7 +25,7 @@ enum StoreKey {
     OutputPatternMonitor(OutputPatternFilter), // One pattern and every subscription to it.
     NewBlockMonitor, // The subscriptions to every new block. There is only ever one such record.
     FirstCheckQueue, // The targets waiting for their first lookup, so in the next tick they can be checked in previous blocks.
-    TickSeq, // The tick the news added now is stamped with. Every advance and every reorg moves it by one.
+    TickSeq, // The tick the news added now is stamped with. Every advance and every reorg moves it by one, an idle tick does not.
     TransactionNews(u64, Txid), // The tick_seq where the news was decided, and the transaction it is about.
     BlockNews(u64), // The tick_seq where the news was decided. Only an advance reports a block, so a tick has at most one.
 }
@@ -159,7 +159,7 @@ impl MonitorStore {
             self.store
                 .partial_get_limited(&self.news_space()?, max_keys, None)?;
 
-        // The limit can stop in the middle of the last tick_sec, and ordering it needs all of it, so that tick is read again whole.
+        // The limit can stop in the middle of the last tick_seq, and ordering it needs all of it, so that tick is read again whole.
         if let Some(last) = groups.last().map(|group| group[0].tick_seq) {
             groups.retain(|group| group[0].tick_seq != last);
             groups.extend(self.get_news_of_tick(last)?);

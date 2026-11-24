@@ -82,8 +82,9 @@ impl Monitor {
     pub fn tick(&self) -> Result<(), MonitorError> {
         let result = self.indexer.tick()?;
 
-        // Every advance and every reorg opens a new tick for the news. An idle tick keeps the last one, so what its first
-        // checks find joins it, which still comes after everything that tick already reported.
+        // Every advance and every reorg opens a new tick for the news, and only they do, so tick_seq counts chain steps. An
+        // idle tick keeps the last one, so what its first checks find joins that tick: it comes after every earlier tick, but
+        // inside its tick it is ordered like the rest, by key, so it can come before items of that tick still pending.
         if !matches!(result, TickResult::Idle) {
             self.news.next_tick()?;
         }
@@ -150,9 +151,10 @@ impl Monitor {
 
     /// Everything the consumer has not acknowledged yet, or what is pending under the first `max_keys` keys, in the
     /// order the ticks decided it. Every advance and every reorg is a tick, and a tick always comes after the ones
-    /// before it. Inside one tick the block comes first, a transaction after the ones it spends, and the items about
-    /// one transaction in the order they were decided. The last tick the limit reaches is read whole and ordered before
-    /// it is cut.
+    /// before it. An idle tick is not a new one: what its first checks find joins the last tick. Inside one tick the
+    /// block comes first, a transaction after the ones it spends, and the items about one transaction in the order they
+    /// were decided, so first check items added later can sort before items of their tick that are still pending. The
+    /// last tick the limit reaches is read whole and ordered before it is cut.
     ///
     /// The smaller the limit, the more calls it takes to read everything. Reading 10,000 pending transactions with
     /// repeated calls took 0.38 s with `Some(50)` when they built up over many ticks, against 0.26 s with a single
