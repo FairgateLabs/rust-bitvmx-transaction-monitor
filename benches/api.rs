@@ -2,6 +2,7 @@
 //! called through `Monitor`, the same way a consumer calls it.
 
 mod common;
+use bitvmx_transaction_monitor::test_utils::news;
 use bitvmx_transaction_monitor::types::{MonitorNews, MonitorTarget, NewsKind};
 use bitvmx_transaction_monitor::TransactionStatus;
 use common::{fake_txid, unanswered_targets, Fixture, SIZES};
@@ -117,11 +118,15 @@ fn cancel(c: &mut Criterion) {
 }
 
 // The news log with N transactions and one item about each for contexts "a" and "b", so 2N items under N keys:
-// - add: stores the 2N items into an empty log in one call, which groups them by transaction and writes each key once.
-// - get_and_ack: with the 2N items already stored, reads them all with one `get_news` and then acknowledges them one
-//   at a time, which is what a consumer does on every tick.
-// - drain_max_keys_K: with the 2N items already stored, calls `get_news(Some(K))` and acknowledges what it returns,
-//   again and again until it returns nothing, which is how a consumer reads a large backlog with a limit.
+// - add: stores the 2N items into an empty log in one call, all in one tick, which groups them by transaction and
+//   writes each key once.
+// - get_and_ack: with the 2N items already stored one transaction per tick, reads them all with one `get_news` and then
+//   acknowledges them one at a time.
+// - drain_max_keys_K: with the 2N items already stored one transaction per tick, calls `get_news(Some(K))` and
+//   acknowledges what it returns, again and again until it returns nothing, which is how a consumer reads a large
+//   backlog with a limit.
+// - drain_one_tick_max_keys_K: the same drain, with the 2N items stored in one single tick, as an attack that fills
+//   one block would leave them. Every call reads that whole tick again to order it.
 fn news_cycle(c: &mut Criterion) {
     const LIMITS: [usize; 3] = [10, 50, 100]; // The `max_keys` values drain_max_keys is run with.
 
@@ -146,11 +151,7 @@ fn news_cycle(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("get_and_ack", n), &items, |b, items| {
             b.iter_batched_ref(
-                || {
-                    let fixture = Fixture::new();
-                    fixture.news.add(items.clone()).unwrap();
-                    fixture
-                },
+                || backlog(items),
                 |fixture| {
                     for item in fixture.monitor.get_news(None).unwrap() {
                         fixture.monitor.ack_news(&item).unwrap();
@@ -164,20 +165,22 @@ fn news_cycle(c: &mut Criterion) {
             let id = BenchmarkId::new(format!("drain_max_keys_{limit}"), n);
             group.bench_with_input(id, &items, |b, items| {
                 b.iter_batched_ref(
+                    || backlog(items),
+                    |fixture| drain(fixture, limit),
+                    BatchSize::PerIteration,
+                )
+            });
+
+            let id = BenchmarkId::new(format!("drain_one_tick_max_keys_{limit}"), n);
+            group.bench_with_input(id, &items, |b, items| {
+                b.iter_batched_ref(
                     || {
                         let fixture = Fixture::new();
+                        fixture.news.next_tick().unwrap();
                         fixture.news.add(items.clone()).unwrap();
                         fixture
                     },
-                    |fixture| loop {
-                        let news = fixture.monitor.get_news(Some(limit)).unwrap();
-                        if news.is_empty() {
-                            break;
-                        }
-                        for item in &news {
-                            fixture.monitor.ack_news(item).unwrap();
-                        }
-                    },
+                    |fixture| drain(fixture, limit),
                     BatchSize::PerIteration,
                 )
             });
@@ -189,14 +192,38 @@ fn news_cycle(c: &mut Criterion) {
 
 /// One item of news saying this transaction is not found, as the reorg pass reports one whose block was unwound.
 fn not_found(txid: bitcoin::Txid, context: &str) -> MonitorNews {
-    MonitorNews {
-        target: MonitorTarget::Transaction(txid),
-        context: context.to_string(),
-        kind: NewsKind::Transaction {
+    news(
+        MonitorTarget::Transaction(txid),
+        context,
+        NewsKind::Transaction {
             txid,
             status: TransactionStatus::NotFound,
             due_to_reorg: true,
         },
+    )
+}
+
+/// A monitor whose news log holds these items one transaction per tick, which is how a backlog builds up over many
+/// blocks. The items of one transaction are next to each other, two per transaction.
+fn backlog(items: &[MonitorNews]) -> Fixture {
+    let fixture = Fixture::new();
+    for tick in items.chunks(2) {
+        fixture.news.next_tick().unwrap();
+        fixture.news.add(tick.to_vec()).unwrap();
+    }
+    fixture
+}
+
+/// Calls `get_news(Some(limit))` and acknowledges what it returns until it returns nothing.
+fn drain(fixture: &Fixture, limit: usize) {
+    loop {
+        let news = fixture.monitor.get_news(Some(limit)).unwrap();
+        if news.is_empty() {
+            break;
+        }
+        for item in &news {
+            fixture.monitor.ack_news(item).unwrap();
+        }
     }
 }
 

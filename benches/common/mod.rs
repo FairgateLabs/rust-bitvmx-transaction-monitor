@@ -97,6 +97,7 @@ impl Fixture {
     /// Indexes a block and runs the block pass on it, keeping the news it produced, which is what a tick does.
     pub fn tick_with(&self, block: &FullBlock) {
         self.index_block(block);
+        self.news.next_tick().unwrap();
         let news = self.subscriptions.process_block(block).unwrap();
         self.news.add(news).unwrap();
     }

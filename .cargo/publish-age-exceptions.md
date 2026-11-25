@@ -33,4 +33,14 @@ version = "0.21.1"
 [[allow.exact]]
 crate = "rustls"
 version = "0.23.46"
+
+# Fixes RUSTSEC-2026-0592. 
+[[allow.exact]]
+crate = "url"
+version = "2.5.9"
+
+# Required by url 2.5.9, released with it from the same commit.
+[[allow.exact]]
+crate = "form_urlencoded"
+version = "1.2.3"
 ```
