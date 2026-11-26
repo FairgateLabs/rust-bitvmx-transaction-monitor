@@ -31,7 +31,7 @@ use bitvmx_transaction_monitor::types::{BlockRef, MonitorNews, MonitorTarget, Ne
 use bitvmx_transaction_monitor::TransactionStatus;
 use storage_backend::{
     key::StorageKey,
-    storage::{KeyValueStore, Storage},
+    storage::Storage,
     storage_config::StorageConfig,
 };
 use tracing::info;

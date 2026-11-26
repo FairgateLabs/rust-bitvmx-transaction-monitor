@@ -5,7 +5,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::rc::Rc;
 use storage_backend::key::StorageKey;
-use storage_backend::storage::{KeyValueStore, Storage};
+use storage_backend::storage::Storage;
 
 use crate::errors::MonitorError;
 use crate::types::{MonitorNews, MonitorRecord, MonitorTarget, NewsKind, OutputPatternFilter};
