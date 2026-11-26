@@ -1,7 +1,6 @@
 //! Persistence. It reads and writes records, the first check queue and the pending news.
 
 use bitcoin::{OutPoint, Txid};
-use bitvmx_bitcoin_rpc::types::BlockHeight;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -26,8 +25,9 @@ enum StoreKey {
     OutputPatternMonitor(OutputPatternFilter), // One pattern and every subscription to it.
     NewBlockMonitor, // The subscriptions to every new block. There is only ever one such record.
     FirstCheckQueue, // The targets waiting for their first lookup, so in the next tick they can be checked in previous blocks.
-    TransactionNews(Txid), // Pending news about one transaction, in the order it was decided.
-    BlockNews(BlockHeight), // Pending news about the blocks at one height.
+    TickSeq, // The tick the news added now is stamped with. Every advance and every reorg moves it by one, an idle tick does not.
+    TransactionNews(u64, Txid), // The tick_seq where the news was decided, and the transaction it is about.
+    BlockNews(u64), // The tick_seq where the news was decided. Only an advance reports a block, so a tick has at most one.
 }
 
 /// A view of the one database the consumer created.
@@ -134,29 +134,45 @@ impl MonitorStore {
     //  NEWS
     // ================================
 
-    /// Every pending item, or every item under the first `max_keys` keys. A key holds everything pending about one
-    /// transaction or one block height, and it is read and returned whole, so the limit bounds the reads and not the
-    /// number of items. Keys are scanned in lexicographic order.
-    pub fn get_all_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
-        // Block news lives below this space, so one scan reads both it and the news about transactions.
-        let per_key: Vec<Vec<MonitorNews>> =
+    /// The tick the news added now is stamped with. Zero before the first advance.
+    pub fn get_tick_seq(&self) -> Result<u64, MonitorError> {
+        let key = self.get_key(StoreKey::TickSeq)?;
+        Ok(self.store.get(key, None)?.unwrap_or(0))
+    }
+
+    /// Moves to the next tick, which is what every advance and every reorg does.
+    pub fn next_tick_seq(&self) -> Result<(), MonitorError> {
+        let next = self.get_tick_seq()? + 1;
+        self.store
+            .set(self.get_key(StoreKey::TickSeq)?, next, None)?;
+        Ok(())
+    }
+
+    /// The pending news under the first `max_keys` keys, or under every key, one list per key, extended to the end of
+    /// the last tick it reaches, so no tick comes back cut. Keys start with the tick, so the lists come in tick order,
+    /// and inside a tick the block comes before the transactions.
+    pub fn get_news_by_key(
+        &self,
+        max_keys: Option<usize>,
+    ) -> Result<Vec<Vec<MonitorNews>>, MonitorError> {
+        let mut groups: Vec<Vec<MonitorNews>> =
             self.store
                 .partial_get_limited(&self.news_space()?, max_keys, None)?;
 
-        Ok(per_key.into_iter().flatten().collect())
+        // The limit can stop in the middle of the last tick_seq, and ordering it needs all of it, so that tick is read again whole.
+        if let Some(last) = groups.last().map(|group| group[0].tick_seq) {
+            groups.retain(|group| group[0].tick_seq != last);
+            groups.extend(self.get_news_of_tick(last)?);
+        }
+
+        Ok(groups)
     }
 
-    /// Every pending item, one list per key, with the keys in lexicographic order.
-    pub fn get_news_by_key(&self) -> Result<Vec<Vec<MonitorNews>>, MonitorError> {
+    /// Every key one tick wrote, one list per key.
+    fn get_news_of_tick(&self, tick_seq: u64) -> Result<Vec<Vec<MonitorNews>>, MonitorError> {
         Ok(self
             .store
-            .partial_get_limited(&self.news_space()?, None, None)?)
-    }
-
-    /// Every pending item about one transaction, which is one key and so one read.
-    pub fn get_news_of_transaction(&self, tx_id: &Txid) -> Result<Vec<MonitorNews>, MonitorError> {
-        let key = self.get_key(StoreKey::TransactionNews(*tx_id))?;
-        Ok(self.store.get(key, None)?.unwrap_or_default())
+            .partial_get_limited(&self.tick_news_space(tick_seq)?, None, None)?)
     }
 
     /// Appends what a tick decided to report. Items stay in the order they were decided.
@@ -182,7 +198,7 @@ impl MonitorStore {
             let stored = pending.len();
 
             for item in removing {
-                // Every copy of it goes (possible in a reorg restoring the very same block).
+                // Every copy of it goes, should one key ever hold two.
                 pending.retain(|other| other != item);
             }
 
@@ -232,16 +248,17 @@ impl MonitorStore {
             ]),
             StoreKey::NewBlockMonitor => StorageKey::new([PREFIX, "newblock"]),
             StoreKey::FirstCheckQueue => StorageKey::new([PREFIX, "first_check"]),
-            StoreKey::TransactionNews(tx_id) => {
-                StorageKey::new([PREFIX, NEWS_SPACE, tx_id.to_string().as_str()])
-            }
-            // Padded so the keys sort by height, which is what keeps block news in the order it happened.
-            StoreKey::BlockNews(height) => StorageKey::new([
+            StoreKey::TickSeq => StorageKey::new([PREFIX, "tick_seq"]),
+            StoreKey::TransactionNews(tick_seq, tx_id) => StorageKey::new([
                 PREFIX,
                 NEWS_SPACE,
-                "block",
-                format!("{height:010}").as_str(),
+                tick_segment(tick_seq).as_str(),
+                "tx",
+                tx_id.to_string().as_str(),
             ]),
+            StoreKey::BlockNews(tick_seq) => {
+                StorageKey::new([PREFIX, NEWS_SPACE, tick_segment(tick_seq).as_str(), "block"])
+            }
         };
         Ok(key?)
     }
@@ -256,16 +273,17 @@ impl MonitorStore {
         })
     }
 
-    /// The key holding an item of news: the transaction it is about, or the height of the block it reports.
+    /// The key holding an item of news: the tick that decided it, and the transaction it is about or its block.
     fn news_key(&self, news: &MonitorNews) -> Result<StorageKey, MonitorError> {
+        let tick_seq = news.tick_seq;
         let key = match (&news.kind, &news.target) {
-            (NewsKind::Transaction { txid, .. }, _) => StoreKey::TransactionNews(*txid),
-            (NewsKind::Block(block), _) => StoreKey::BlockNews(block.height),
+            (NewsKind::Transaction { txid, .. }, _) => StoreKey::TransactionNews(tick_seq, *txid),
+            (NewsKind::Block(_), _) => StoreKey::BlockNews(tick_seq),
             (NewsKind::ProbablyUnreachableUTXO, MonitorTarget::SpendingUtxo(utxo)) => {
-                StoreKey::TransactionNews(utxo.txid)
+                StoreKey::TransactionNews(tick_seq, utxo.txid)
             }
             (NewsKind::UnreachableTx, MonitorTarget::Transaction(txid)) => {
-                StoreKey::TransactionNews(*txid)
+                StoreKey::TransactionNews(tick_seq, *txid)
             }
             // Each unreachable kind belongs to the one first check that produces it, so anything else is a bug.
             (kind @ (NewsKind::ProbablyUnreachableUTXO | NewsKind::UnreachableTx), target) => {
@@ -319,6 +337,18 @@ impl MonitorStore {
     fn news_space(&self) -> Result<String, MonitorError> {
         Ok(StorageKey::new([PREFIX, NEWS_SPACE])?.to_scan_prefix())
     }
+
+    fn tick_news_space(&self, tick_seq: u64) -> Result<String, MonitorError> {
+        Ok(
+            StorageKey::new([PREFIX, NEWS_SPACE, tick_segment(tick_seq).as_str()])?
+                .to_scan_prefix(),
+        )
+    }
+}
+
+/// The tick as a key segment, padded so the keys sort by tick.
+fn tick_segment(tick_seq: u64) -> String {
+    format!("{tick_seq:020}")
 }
 
 #[cfg(test)]
@@ -401,57 +431,68 @@ mod tests {
     }
 
     fn transaction_news(txid_byte: u8, due_to_reorg: bool) -> MonitorNews {
-        MonitorNews {
-            target: MonitorTarget::Transaction(txid(txid_byte)),
-            context: "ctx".to_string(),
-            kind: NewsKind::Transaction {
+        MonitorNews::new(
+            MonitorTarget::Transaction(txid(txid_byte)),
+            "ctx".to_string(),
+            NewsKind::Transaction {
                 txid: txid(txid_byte),
                 status: TransactionStatus::NotFound,
                 due_to_reorg,
             },
-        }
+        )
     }
 
-    // News is grouped by the transaction it is about and comes back in the order it was added.
+    // News is grouped by tick and transaction, comes back in tick order, and inside one key in the order it was added.
     #[test]
     fn test_news_is_grouped_and_ordered() {
         let store = store();
+
+        // The tick starts at zero and every call moves it by one.
+        assert_eq!(store.get_tick_seq().unwrap(), 0);
+        store.next_tick_seq().unwrap();
+        assert_eq!(store.get_tick_seq().unwrap(), 1);
+
         let first = transaction_news(1, false);
         let second = transaction_news(1, true);
-        let other = transaction_news(2, false);
+        // A later tick about a transaction whose txid sorts first still comes after.
+        let later = MonitorNews {
+            tick_seq: 1,
+            ..transaction_news(0, false)
+        };
 
         store
-            .add_news(vec![first.clone(), second.clone(), other.clone()])
+            .add_news(vec![first.clone(), second.clone(), later.clone()])
             .unwrap();
 
-        // Inside one key the order is the order they were added, whichever call added them.
-        let key = store.news_key(&first).unwrap();
-        let pending: Vec<MonitorNews> = store.store.get(&key, None).unwrap().unwrap();
-        assert_eq!(pending, vec![first.clone(), second.clone()]);
-        assert_eq!(store.get_all_news(None).unwrap().len(), 3);
-
-        // A limit counts keys, and a key comes back whole: one key asked for, both of its items returned, and
-        // nothing of the other transaction. More keys than exist is everything, and none is a limit of zero.
         assert_eq!(
-            store.get_all_news(Some(1)).unwrap(),
-            vec![first.clone(), second.clone()]
+            store.get_news_by_key(None).unwrap(),
+            vec![vec![first.clone(), second.clone()], vec![later.clone()]]
         );
-        assert_eq!(store.get_all_news(Some(10)).unwrap().len(), 3);
-        assert!(store.get_all_news(Some(0)).unwrap().is_empty());
 
-        // One key holds every item about one transaction, so that key alone answers for it.
+        // A limit counts keys, and a key comes back whole. More keys than exist is everything.
         assert_eq!(
-            store.get_news_of_transaction(&txid(1)).unwrap(),
-            vec![first.clone(), second.clone()]
+            store.get_news_by_key(Some(1)).unwrap(),
+            vec![vec![first.clone(), second.clone()]]
+        );
+        assert_eq!(store.get_news_by_key(Some(10)).unwrap().len(), 2);
+        assert!(store.get_news_by_key(Some(0)).unwrap().is_empty());
+
+        // One tick is read without the others.
+        assert_eq!(
+            store.get_news_of_tick(1).unwrap(),
+            vec![vec![later.clone()]]
         );
 
         // Taking one out leaves the rest of its key alone.
         store.remove_news(&[first.clone()]).unwrap();
-        assert_eq!(store.get_all_news(None).unwrap().len(), 2);
+        assert_eq!(
+            store.get_news_by_key(None).unwrap(),
+            vec![vec![second.clone()], vec![later.clone()]]
+        );
 
         // Several going at once is one write per key, and taking the last one removes the key with it.
-        store.remove_news(&[second.clone(), other.clone()]).unwrap();
-        assert_eq!(store.get_all_news(None).unwrap(), vec![]);
+        store.remove_news(&[second.clone(), later]).unwrap();
+        assert!(store.get_news_by_key(None).unwrap().is_empty());
 
         // Removing something that is no longer there is not an error.
         store.remove_news(&[second]).unwrap();
@@ -495,13 +536,20 @@ mod tests {
         );
     }
 
-    // An item of news is filed under what it is about, and block heights are padded so the keys sort by height.
+    // An item of news is filed under its tick and what it is about, and the keys sort by tick first.
     #[test]
     fn test_news_keys_follow_what_they_report() {
         let store = store();
         let key = |news: &MonitorNews| store.news_key(news).unwrap();
         let news_of = |tx_id: Txid| {
-            StorageKey::new([PREFIX, NEWS_SPACE, tx_id.to_string().as_str()]).unwrap()
+            StorageKey::new([
+                PREFIX,
+                NEWS_SPACE,
+                tick_segment(0).as_str(),
+                "tx",
+                tx_id.to_string().as_str(),
+            ])
+            .unwrap()
         };
 
         // The spender names the key, not the outpoint, so every item about that spender stays together.
@@ -547,12 +595,17 @@ mod tests {
             ));
         }
 
-        let block = |height| MonitorNews {
-            target: MonitorTarget::NewBlock,
-            context: "ctx".to_string(),
-            kind: NewsKind::Block(block_ref(height, 0)),
+        let block = |height, tick_seq| MonitorNews {
+            tick_seq,
+            ..MonitorNews::new(
+                MonitorTarget::NewBlock,
+                "ctx".to_string(),
+                NewsKind::Block(block_ref(height, 0)),
+            )
         };
-        // Storage sorts by the joined key, so that is what has to sort by height.
-        assert!(key(&block(99)).joined() < key(&block(100)).joined());
+        // Storage sorts by the joined key. A later tick sorts after, even with a lower height, and inside one tick
+        // the block sorts before every transaction.
+        assert!(key(&block(100, 0)).joined() < key(&block(99, 1)).joined());
+        assert!(key(&block(100, 0)).joined() < key(&spend).joined());
     }
 }

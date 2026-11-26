@@ -80,7 +80,7 @@ The `Monitor` struct exposes:
 | `tick` | One step of the chain: advance the indexer, report what that means for every subscription, and answer the ones registered since the last tick. |
 | `monitor` | Subscribe one context to a list of targets, with an optional confirmation trigger and the mempool flag. |
 | `cancel` | Drop one context from a list of targets, with what it was tracking and its unacknowledged news. |
-| `get_news` | Everything not acknowledged yet, or what is pending about the first `max_keys` transactions and block heights. The limit counts transactions, not items, because everything pending about one is stored together. |
+| `get_news` | Everything not acknowledged yet, or the first `max_keys` keys, in the order the ticks decided it: a tick after the ones before it, and inside a tick the block first and a transaction after the ones it spends. A key is one transaction or block in one tick, with every context's items about it. Order holds across calls, so a limited read needs no drain before the next tick. |
 | `ack_news` | Acknowledge one item, by the value `get_news` handed over. |
 | `get_indexed_height` | Height of the highest block the monitor has processed. |
 | `get_block` | The block at a height and hash, from the indexer's storage, or from the node for one below everything the indexer holds. `None` above the indexed height or for a block a reorg replaced. |

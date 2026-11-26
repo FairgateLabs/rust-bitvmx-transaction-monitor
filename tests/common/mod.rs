@@ -414,8 +414,7 @@ pub fn is_mempool_watched(storage: &Storage, txid: &Txid) -> anyhow::Result<bool
     Ok(list.iter().any(|(watched, _)| watched == txid))
 }
 
-/// The items of one context, in the order they came out. Order holds inside one transaction or one block height,
-/// which is what a test about one subscription relies on.
+/// The items of one context, in the order they came out, which is the order the ticks decided them.
 pub fn of_context<'a>(news: &'a [MonitorNews], context: &str) -> Vec<&'a MonitorNews> {
     news.iter().filter(|item| item.context == context).collect()
 }

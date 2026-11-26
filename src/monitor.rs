@@ -80,7 +80,16 @@ impl Monitor {
     /// 4. On every tick, whatever the chain did: the first check answers the targets registered since the last one.
     /// 5. What the passes decided is appended to the pending news, for `get_news` to hand over.
     pub fn tick(&self) -> Result<(), MonitorError> {
-        let mut news = match self.indexer.tick()? {
+        let result = self.indexer.tick()?;
+
+        // Every advance and every reorg opens a new tick for the news, and only they do, so tick_seq counts chain steps. An
+        // idle tick keeps the last one, so what its first checks find joins that tick: it comes after every earlier tick, but
+        // inside its tick it is ordered like the rest, by key, so it can come before items of that tick still pending.
+        if !matches!(result, TickResult::Idle) {
+            self.news.next_tick()?;
+        }
+
+        let mut news = match result {
             TickResult::Reorged(removed) => {
                 // The chain got shorter by `removed` blocks.
                 info!("Chain reorganised, {removed} blocks removed");
@@ -140,22 +149,20 @@ impl Monitor {
         self.news.drop_for(targets, context)
     }
 
-    /// Everything the consumer has not acknowledged yet, or what is pending about the first `max_keys` news.
+    /// Everything the consumer has not acknowledged yet, or what is pending under the first `max_keys` keys, in the
+    /// order the ticks decided it. Every advance and every reorg is a tick, and a tick always comes after the ones
+    /// before it. An idle tick is not a new one: what its first checks find joins the last tick. Inside one tick the
+    /// block comes first, a transaction after the ones it spends, and the items about one transaction in the order they
+    /// were decided, so first check items added later can sort before items of their tick that are still pending. The
+    /// last tick the limit reaches is read whole and ordered before it is cut.
     ///
-    /// The limit counts transactions, not items, because everything pending about one transaction is stored and
-    /// returned together. So the most items it can hand back is
-    /// `max_keys` x (subscriptions reporting on that transaction) x (blocks each has pending), the last factor
-    /// being normally 1, if the consumer acknowledges them correctly.
+    /// The smaller the limit, the more calls it takes to read everything. Reading 10,000 pending transactions with
+    /// repeated calls took 0.38 s with `Some(50)` when they built up over many ticks, against 0.26 s with a single
+    /// `None` call. When all of them came from one single tick, as an attack that fills one block would leave them,
+    /// every call reads that whole tick again: 9.9 s with `Some(10)`, 2.2 s with `Some(50)`, 1.25 s with `Some(100)`
+    /// (`news_cycle/drain_*` benches). `Some(50)` is the suggested value.
     ///
-    /// Items about one transaction come back in the order they were decided, and a transaction always after the ones
-    /// it spends. The limit is applied after ordering, so every call reads all pending news.
-    ///
-    /// So the smaller the limit, the more calls it takes to read everything, and the more it costs in total. Reading
-    /// 10,000 pending transactions with repeated calls took about 20 s with `Some(10)`, 2.5 s with `Some(50)`,
-    /// 1.4 s with `Some(100)`, and 0.26 s with a single `None` call (`news_cycle/drain_max_keys_*` bench). `Some(50)`
-    /// is the suggested value: each call hands over little, and reading everything costs seconds.
-    ///
-    /// * `max_keys` - How many transactions and block heights to read, `None` for every one of them.
+    /// * `max_keys` - How many keys to read, `None` for every one of them.
     pub fn get_news(&self, max_keys: Option<usize>) -> Result<Vec<MonitorNews>, MonitorError> {
         self.news.get_all(max_keys)
     }
